@@ -1,6 +1,7 @@
 package com.example.opsaiagent.service;
 
 import com.example.opsaiagent.tools.HealthCheckTools;
+import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ public class OpsAgentService {
     private final VectorStore vectorStore;
     private final HealthCheckTools healthCheckTools;
     private final MetricQueryTools metricQueryTools;
+    private final MetricDiscoveryTools metricDiscoveryTools;
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
@@ -97,7 +99,7 @@ public class OpsAgentService {
                 .system(systemPrompt)
                 .user(question)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
-                .tools(healthCheckTools, metricQueryTools)
+                .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools)
                 .call()
                 .content();
         log.info("RAG 问答完成，召回 {} 个片段", documents.size());

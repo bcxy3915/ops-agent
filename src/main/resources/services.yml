@@ -1,7 +1,0 @@
-services:
-  - name: todo-service
-    base-url: http://localhost:8081
-    health-path: /actuator/health
-    metrics-path: /actuator/metrics
-    owner: me
-    env: dev
