@@ -2,6 +2,7 @@ package com.example.opsaiagent.tools;
 
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
@@ -30,8 +31,8 @@ public class MetricDiscoveryTools {
                     serviceRegistry.listAll().stream().map(ServiceInfo::getName).toList();
         }
 
+        String url = service.getBaseUrl() + service.getMetricsPath();
         try {
-            String url = service.getBaseUrl() + service.getMetricsPath();
             Map<String, Object> result = restClient.get().uri(url).retrieve().body(Map.class);
 
             if (result == null || !result.containsKey("names")) {
@@ -59,7 +60,7 @@ public class MetricDiscoveryTools {
 
         } catch (Exception e) {
             log.error("指标列表查询失败", e);
-            return "查询 " + serviceName + " 指标列表失败：" + e.getMessage();
+            return ToolErrorFormatter.formatHttpError(serviceName, url, e);
         }
     }
 }

@@ -69,6 +69,12 @@
             <artifactId>spring-ai-markdown-document-reader</artifactId>
         </dependency>
 
+        <!-- WebFlux（流式输出支持） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
         <!-- Spring Boot Web Starter -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
