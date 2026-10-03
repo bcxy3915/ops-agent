@@ -2,7 +2,9 @@ package com.example.opsaiagent.controller;
 
 import com.example.opsaiagent.service.OpsAgentService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 
 import java.util.Map;
 
@@ -10,7 +12,7 @@ import java.util.Map;
  * 聊天接口类
  */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/ops")
 @RequiredArgsConstructor
 public class ChatController {
 
@@ -40,5 +42,19 @@ public class ChatController {
                 "question", question,
                 "answer", answer
         );
+    }
+
+    /**
+     * 根据问题返回答案（流式）
+     * @param question 问题
+     * @param sessionId 会话ID
+     * @return 答案流
+     */
+    @GetMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")
+    public Flux<String> askStream(
+            @RequestParam String question,
+            @RequestParam(required = false, defaultValue = "default") String sessionId) {
+        return opsAgentService.askStream(sessionId, question)
+                .concatWith(Flux.just("[DONE]")); //  // 拼一个结束标记
     }
 }

@@ -2,6 +2,7 @@ package com.example.opsaiagent.tools;
 
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;
@@ -30,8 +31,8 @@ public class MetricQueryTools {
             return "服务 " + serviceName + " 未注册";
         }
 
+        String url = service.getBaseUrl() + service.getMetricsPath() + "/" + metricName;
         try {
-            String url = service.getBaseUrl() + service.getMetricsPath() + "/" + metricName;
             Map<String, Object> result = restClient.get().uri(url).retrieve().body(Map.class);
             log.info("指标查询 {} -> {}", url, result);
             return formatMetric(serviceName, metricName, result);
@@ -43,10 +44,17 @@ public class MetricQueryTools {
                     "建议先访问 /actuator/metrics 查看该服务支持的所有指标。";
         } catch (Exception e) {
             log.error("指标查询失败", e);
-            return "查询 " + serviceName + " 指标 " + metricName + " 失败：" + e.getMessage();
+            return ToolErrorFormatter.formatHttpError(serviceName, url, e);
         }
     }
 
+    /**
+     * 格式化指标结果
+     * @param serviceName 服务名
+     * @param metricName 指标名
+     * @param result 指标结果
+     * @return 格式化后的指标结果
+     */
     private String formatMetric(String serviceName, String metricName, Map<String, Object> result) {
         if (result == null || !result.containsKey("measurements")) {
             return "指标 " + metricName + " 无数据";

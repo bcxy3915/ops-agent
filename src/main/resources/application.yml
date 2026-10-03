@@ -6,6 +6,9 @@ spring:
     active: local
   application:
     name: ops-agent-core
+  mvc:
+    async:
+      request-timeout: 5m # SSE 长连接超时（默认 30s 太短，5 分钟足够）
 
   datasource:
     url: jdbc:postgresql://localhost:5433/opsdb
