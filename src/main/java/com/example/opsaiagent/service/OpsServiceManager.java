@@ -96,4 +96,20 @@ public class OpsServiceManager {
         entity.setLastCheckedAt(java.time.LocalDateTime.now());
         mapper.updateById(entity);
     }
+
+    /**
+     * 保存服务
+     * @param entity 服务实体
+     */
+    public void save(OpsServiceEntity entity) {
+        mapper.insert(entity);
+    }
+
+    /**
+     * 更新服务
+     * @param entity 服务实体
+     */
+    public void update(OpsServiceEntity entity) {
+        mapper.updateById(entity);
+    }
 }

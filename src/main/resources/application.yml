@@ -6,11 +6,13 @@ spring:
     active: local
   application:
     name: ops-agent-core
+
   datasource:
     url: jdbc:postgresql://localhost:5433/opsdb
     username: postgres
-    password: hmj5201314.
+    password: ${DB_PASSWORD:}     # ← 建议也改成环境变量
     driver-class-name: org.postgresql.Driver
+
   ai:
     openai:
       api-key: ${AI_API_KEY:}
@@ -33,10 +35,12 @@ spring:
 
 mybatis-plus:
   configuration:
-    map-underscore-to-camel-case: true       # 下划线转驼峰
-    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl   # 用 SLF4J 输出 SQL
-    global-config:
-      db-config:
-        table-underline: true                  # 表名默认下划线
-    mapper-locations: classpath*:mapper/*.xml   # XML 位置（暂时没用到，但配好）
-    type-aliases-package: com.example.opsagentcore.entity
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      table-underline: true
+  mapper-locations: classpath*:mapper/*.xml
+  type-aliases-package: com.example.opsagentcore.registry.entity
