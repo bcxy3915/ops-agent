@@ -12,16 +12,19 @@ import com.example.opsaiagent.service.OpsServiceManager;
 import com.example.opsaiagent.service.ServiceHealthChecker;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
-import javax.validation.Valid;
+import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+@Tag(name = "服务管理", description = "运维服务的注册、查询、更新、下线")
 @Slf4j
 @RestController
 @RequestMapping("/api/services")
@@ -37,6 +40,7 @@ public class ServiceController {
      * @param request 服务注册请求
      * @return 注册结果
      */
+    @Operation(summary = "注册服务", description = "注册一个新的被监控服务")
     @PostMapping
     public ApiResponse<ServiceResponse> register(@Valid @RequestBody ServiceRegisterRequest request) {
         if (serviceManager.findByName(request.getName()).isPresent()) {
@@ -54,6 +58,7 @@ public class ServiceController {
      * @param status 状态
      * @return 服务列表
      */
+    @Operation(summary = "查询服务列表", description = "支持按环境或状态筛选")
     @GetMapping
     public ApiResponse<List<ServiceResponse>> list(
             @RequestParam(required = false) String env,
@@ -74,6 +79,7 @@ public class ServiceController {
      * @param name 服务名
      * @return 服务详情
      */
+    @Operation(summary = "查询单个服务")
     @GetMapping("/{name}")
     public ApiResponse<ServiceResponse> get(@PathVariable String name) {
         OpsServiceEntity entity = serviceManager.findByName(name)
@@ -88,6 +94,7 @@ public class ServiceController {
      * @param request 更新请求
      * @return 更新结果
      */
+    @Operation(summary = "更新服务")
     @PutMapping("/{name}")
     public ApiResponse<ServiceResponse> update(
             @PathVariable String name,
@@ -107,6 +114,7 @@ public class ServiceController {
      * @param name 服务名
      * @return 删除结果
      */
+    @Operation(summary = "下线服务")
     @DeleteMapping("/{name}")
     public ApiResponse<Map<String, String>> delete(@PathVariable String name) {
         if (!serviceManager.deleteByName(name)) {
@@ -120,6 +128,7 @@ public class ServiceController {
      * @param name 服务名
      * @return 健康状态
      */
+    @Operation(summary = "触发健康检查", description = "立即检查一次指定服务的健康状态")
     @PostMapping("/{name}/check")
     public ApiResponse<Map<String, Object>> check(@PathVariable String name) {
         ServiceInfo info = new ServiceInfo() /* TODO 从 manager 查出并转换 */;
