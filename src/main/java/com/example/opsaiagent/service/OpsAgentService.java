@@ -3,6 +3,7 @@ package com.example.opsaiagent.service;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
+import com.example.opsaiagent.tools.ServiceDiscoveryTools;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -33,6 +34,7 @@ public class OpsAgentService {
     private final HealthCheckTools healthCheckTools;
     private final MetricQueryTools metricQueryTools;
     private final MetricDiscoveryTools metricDiscoveryTools;
+    private final ServiceDiscoveryTools serviceDiscoveryTools;
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
@@ -53,6 +55,7 @@ public class OpsAgentService {
         - 两者都涉及 → 先查资料再调工具，综合回答
         - 用户问"有哪些指标"或不确定指标名 → 用 listMetrics
         - 用户问具体指标的值 → 用 queryMetric
+        - 用户问"哪些服务异常"、"有多少服务 DOWN" → 必须调用 listServicesByStatus
 
         【参考资料】
         {context}
@@ -99,7 +102,7 @@ public class OpsAgentService {
                 .system(systemPrompt)
                 .user(question)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
-                .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools)
+                .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
                 .call()
                 .content();
         log.info("RAG 问答完成，召回 {} 个片段", documents.size());
