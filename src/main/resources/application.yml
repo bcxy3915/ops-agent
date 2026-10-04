@@ -56,3 +56,18 @@ ops-agent:
     rerank:
       enabled: false
       model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+      expiration: 7200
+      issuer: ops-agent
+
+# 管理端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
