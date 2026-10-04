@@ -1,5 +1,6 @@
 package com.example.opsaiagent.security.config;
 
+import com.example.opsaiagent.exception.ApiAccessDeniedHandler;
 import com.example.opsaiagent.exception.ApiAuthenticationEntryPoint;
 import com.example.opsaiagent.security.filter.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
@@ -26,8 +27,9 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final ApiAuthenticationEntryPoint authenticationEntryPoint;
+    private final ApiAccessDeniedHandler accessDeniedHandler;
 
-    /** 白名单：不需要认证 */
+    // 白名单：不需要认证
     private static final String[] WHITELIST = {
             "/api/auth/login",
             "/swagger-ui/**",
@@ -47,9 +49,8 @@ public class SecurityConfig {
                         .requestMatchers(WHITELIST).permitAll()
                         .anyRequest().authenticated()
                 )
-                .exceptionHandling(e -> e
-                        .authenticationEntryPoint(authenticationEntryPoint)
-                )
+                .exceptionHandling(e -> e.authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
