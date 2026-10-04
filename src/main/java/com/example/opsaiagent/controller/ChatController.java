@@ -1,13 +1,16 @@
 package com.example.opsaiagent.controller;
 
+import com.example.opsaiagent.retrieval.KeywordRetriever;
 import com.example.opsaiagent.service.OpsAgentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.document.Document;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,6 +23,7 @@ import java.util.Map;
 public class ChatController {
 
     private final OpsAgentService opsAgentService;
+    private final KeywordRetriever keywordRetriever;
 
     /**
      * 手动触发文档加载（也可在启动时自动执行）
@@ -51,6 +55,21 @@ public class ChatController {
                 "question", question,
                 "answer", answer
         );
+    }
+
+    @Operation(summary = "[测试] BM25 独立检索")
+    @GetMapping("/bm25-search")
+    public Map<String, Object> bm25Search(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "5") int topK) {
+        List<Document> docs = keywordRetriever.search(query, topK);
+        List<Map<String, Object>> results = docs.stream()
+                .map(d -> Map.<String, Object>of(
+                        "source", d.getMetadata().getOrDefault("source", "unknown"),
+                        "preview", d.getText().substring(0, Math.min(80, d.getText().length()))
+                ))
+                .toList();
+        return Map.of("query", query, "count", docs.size(), "results", results);
     }
 
     /**

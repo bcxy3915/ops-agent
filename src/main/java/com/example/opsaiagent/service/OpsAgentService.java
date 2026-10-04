@@ -1,5 +1,6 @@
 package com.example.opsaiagent.service;
 
+import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
@@ -10,8 +11,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -30,12 +29,12 @@ public class OpsAgentService {
 
     // 聊天客户端
     private final ChatClient chatClient;
-    // 向量存储
-    private final VectorStore vectorStore;
+
     private final HealthCheckTools healthCheckTools;
     private final MetricQueryTools metricQueryTools;
     private final MetricDiscoveryTools metricDiscoveryTools;
     private final ServiceDiscoveryTools serviceDiscoveryTools;
+    private final HybridRetriever hybridRetriever;
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
@@ -77,14 +76,10 @@ public class OpsAgentService {
      * @return 答案
      */
     public String ask(String sessionId, String question) {
-        // 1.向量检索，从PgVector中召回相关片段
-        List<Document> documents = vectorStore.similaritySearch(
-                SearchRequest.builder()
-                        .query(question)
-                        .topK(8)                    // 召回8个相关片段
-                        .similarityThreshold(0.5)   // 相似度阈值
-                        .build()
-        );
+        log.info("问题: {}", question);
+
+        // 1.混合检索
+        List<Document> documents = hybridRetriever.retrieve(question, 5);
         String context;
         if (documents.isEmpty()) {
             context = "（知识库中未找到相关内容，请基于工具查询或已有知识回答）";
@@ -94,7 +89,7 @@ public class OpsAgentService {
                             + Objects.requireNonNullElse(d.getText(), ""))
                     .collect(Collectors.joining("\n\n---\n\n"));
         }
-        log.info("问题: {}", question);
+
         // 打印召回的片段
         documents.forEach(d -> log.info("召回片段[来源={}][距离={}]: {}",
                 d.getMetadata().get("source"),
@@ -124,12 +119,8 @@ public class OpsAgentService {
      * @return 答案
      */
     public Flux<String> askStream(String sessionId, String question) {
-        // 1.RAG检索
-        List<Document> documents = vectorStore.similaritySearch(SearchRequest.builder()
-                .query(question)
-                .topK(8)
-                .similarityThreshold(0.5)
-                .build());
+        // 1.混合检索
+        List<Document> documents = hybridRetriever.retrieve(question, 5);
 
         String context;
         if (documents.isEmpty()) {

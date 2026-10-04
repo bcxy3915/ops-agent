@@ -47,3 +47,12 @@ mybatis-plus:
       table-underline: true
   mapper-locations: classpath*:mapper/*.xml
   type-aliases-package: com.example.opsagentcore.registry.entity
+
+# 检索方式 type：in-memory / postgres / elasticsearch
+ops-agent:
+  retrieval:
+    keyword:
+      type: in-memory
+    rerank:
+      enabled: false
+      model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank
