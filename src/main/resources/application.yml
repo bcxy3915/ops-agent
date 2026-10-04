@@ -48,8 +48,9 @@ mybatis-plus:
   mapper-locations: classpath*:mapper/*.xml
   type-aliases-package: com.example.opsagentcore.registry.entity
 
-# 检索方式 type：in-memory / postgres / elasticsearch
+
 ops-agent:
+  # 检索方式 type：in-memory / postgres / elasticsearch
   retrieval:
     keyword:
       type: in-memory
@@ -61,6 +62,10 @@ ops-agent:
       secret: ${JWT_SECRET:}
       expiration: 7200
       issuer: ops-agent
+  # 限流方案 bucket4j / redis / sentinel
+  rate-limit:
+    enabled: true
+    type: bucket4j
 
 # 管理端点
 management:

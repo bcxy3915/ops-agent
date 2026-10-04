@@ -8,6 +8,7 @@ import com.example.opsaiagent.dto.ServiceUpdateRequest;
 import com.example.opsaiagent.entity.OpsServiceEntity;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.service.OpsServiceManager;
 import com.example.opsaiagent.service.ServiceHealthChecker;
@@ -43,6 +44,7 @@ public class ServiceController {
      * @return 注册结果
      */
     @Operation(summary = "注册服务", description = "注册一个新的被监控服务。需要 ADMIN 或 OPERATOR 角色")
+    @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @AuditLog(operation = "REGISTER_SERVICE", description = "注册服务")
     @PostMapping
@@ -99,6 +101,7 @@ public class ServiceController {
      * @return 更新结果
      */
     @Operation(summary = "更新服务", description = "需要 ADMIN 或 OPERATOR 角色")
+    @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @AuditLog(operation = "UPDATE_SERVICE", description = "更新服务")
     @PutMapping("/{name}")
@@ -121,6 +124,7 @@ public class ServiceController {
      * @return 删除结果
      */
     @Operation(summary = "下线服务", description = "需要 ADMIN 角色")
+    @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(operation = "DELETE_SERVICE", description = "下线服务")
     @DeleteMapping("/{name}")
@@ -137,6 +141,7 @@ public class ServiceController {
      * @return 健康状态
      */
     @Operation(summary = "触发健康检查", description = "立即检查一次指定服务的健康状态。需要 ADMIN 或 OPERATOR 角色")
+    @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @PostMapping("/{name}/check")
     public ApiResponse<Map<String, Object>> check(@PathVariable String name) {
