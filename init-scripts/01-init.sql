@@ -41,3 +41,27 @@ CREATE TABLE IF NOT EXISTS ops_user (
 CREATE INDEX IF NOT EXISTS idx_ops_user_username ON ops_user(username);
 
 
+-- =====================================================
+-- 审计日志表（P4-3 新增）
+-- =====================================================
+CREATE TABLE IF NOT EXISTS ops_audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+    username        VARCHAR(64),
+    operation       VARCHAR(64) NOT NULL,
+    target          VARCHAR(255),
+    method          VARCHAR(16),
+    uri             VARCHAR(255),
+    params          TEXT,
+    result          VARCHAR(16) NOT NULL,      -- SUCCESS / FAILURE
+    error_message   TEXT,
+    ip              VARCHAR(64),
+    user_agent      VARCHAR(512),
+    duration_ms     BIGINT,
+    created_at      TIMESTAMP DEFAULT NOW()
+    );
+
+CREATE INDEX IF NOT EXISTS idx_audit_username ON ops_audit_log(username);
+CREATE INDEX IF NOT EXISTS idx_audit_operation ON ops_audit_log(operation);
+CREATE INDEX IF NOT EXISTS idx_audit_created_at ON ops_audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_result ON ops_audit_log(result);
+

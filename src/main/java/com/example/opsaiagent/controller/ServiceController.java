@@ -1,5 +1,6 @@
 package com.example.opsaiagent.controller;
 
+import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.dto.ApiResponse;
 import com.example.opsaiagent.dto.ServiceRegisterRequest;
 import com.example.opsaiagent.dto.ServiceResponse;
@@ -43,6 +44,7 @@ public class ServiceController {
      */
     @Operation(summary = "注册服务", description = "注册一个新的被监控服务。需要 ADMIN 或 OPERATOR 角色")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @AuditLog(operation = "REGISTER_SERVICE", description = "注册服务")
     @PostMapping
     public ApiResponse<ServiceResponse> register(@Valid @RequestBody ServiceRegisterRequest request) {
         if (serviceManager.findByName(request.getName()).isPresent()) {
@@ -98,6 +100,7 @@ public class ServiceController {
      */
     @Operation(summary = "更新服务", description = "需要 ADMIN 或 OPERATOR 角色")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @AuditLog(operation = "UPDATE_SERVICE", description = "更新服务")
     @PutMapping("/{name}")
     public ApiResponse<ServiceResponse> update(
             @PathVariable String name,
@@ -119,6 +122,7 @@ public class ServiceController {
      */
     @Operation(summary = "下线服务", description = "需要 ADMIN 角色")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(operation = "DELETE_SERVICE", description = "下线服务")
     @DeleteMapping("/{name}")
     public ApiResponse<Map<String, String>> delete(@PathVariable String name) {
         if (!serviceManager.deleteByName(name)) {

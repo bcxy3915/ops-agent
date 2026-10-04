@@ -1,5 +1,6 @@
 package com.example.opsaiagent.controller;
 
+import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
 import com.example.opsaiagent.service.OpsAgentService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,6 +34,7 @@ public class ChatController {
     @Operation(summary = "重新加载知识库文档",
             description = "手动触发文档加载，用于更新知识库内容。通常不需要调用，应用启动时自动加载。需要 ADMIN 角色")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(operation = "RELOAD_KNOWLEDGE", description = "重载知识库")
     @PostMapping("/knowledge/load")
     public Map<String,String> loadDocument(){
         return Map.of("status", "success", "message", "文档加载完成");

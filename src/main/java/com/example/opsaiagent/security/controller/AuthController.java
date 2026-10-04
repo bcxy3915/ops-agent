@@ -1,5 +1,6 @@
 package com.example.opsaiagent.security.controller;
 
+import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.dto.ApiResponse;
 import com.example.opsaiagent.security.dto.LoginRequest;
 import com.example.opsaiagent.security.dto.LoginResponse;
@@ -22,6 +23,7 @@ public class AuthController {
     private final AuthService authService;
 
     @Operation(summary = "登录", description = "用户名密码登录，返回 JWT Token")
+    @AuditLog(operation = "LOGIN", description = "用户登录")
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success(authService.login(request));
