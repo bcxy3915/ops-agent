@@ -21,7 +21,7 @@ public class ScheduledHealthChecker {
      * fixedDelay：上一次执行完成后，等 30 秒再执行下一次
      * initialDelay：启动后等 10 秒再开始第一次检查
      */
-    @Scheduled(fixedDelay = 30_000, initialDelay = 10_000)
+//    @Scheduled(fixedDelay = 30_000, initialDelay = 10_000) TODO 暂不开启
     public void checkAllServices() {
         List<OpsServiceEntity> services = serviceManager.listAll();
         if (services.isEmpty()) {
