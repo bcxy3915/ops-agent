@@ -75,6 +75,7 @@ public class DashScopeReranker implements RerankerClient {
                     .body(body)
                     .retrieve()
                     .body(String.class);
+            log.debug("百炼 Reranker 响应: {}", response);
 
             return parseResponse(response, documents);
         } catch (Exception e) {

@@ -58,7 +58,7 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     public void rebuild() {
         try {
             List<Document> docs = jdbcTemplate.query(
-                    "SELECT content, metadata FROM vector_store",
+                    "SELECT id, content, metadata FROM vector_store",
                     (rs, rowNum) -> {
                         String id = rs.getString("id");
                         String content = rs.getString("content");

@@ -76,7 +76,9 @@ public class OpsAgentService {
      * @return 答案
      */
     public String ask(String sessionId, String question) {
-        // 1.向量检索，从PgVector中召回相关片段
+        log.info("问题: {}", question);
+
+        // 1.混合检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
         String context;
         if (documents.isEmpty()) {
@@ -87,7 +89,7 @@ public class OpsAgentService {
                             + Objects.requireNonNullElse(d.getText(), ""))
                     .collect(Collectors.joining("\n\n---\n\n"));
         }
-        log.info("问题: {}", question);
+
         // 打印召回的片段
         documents.forEach(d -> log.info("召回片段[来源={}][距离={}]: {}",
                 d.getMetadata().get("source"),
@@ -117,7 +119,7 @@ public class OpsAgentService {
      * @return 答案
      */
     public Flux<String> askStream(String sessionId, String question) {
-        // 1.RAG检索
+        // 1.混合检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
 
         String context;
