@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -36,5 +37,13 @@ public class OpsUserService {
     public boolean existsByUsername(String username) {
         return userMapper.exists(new LambdaQueryWrapper<OpsUserEntity>()
                 .eq(OpsUserEntity::getUsername, username));
+    }
+
+    public List<OpsUserEntity> listAll() {
+        return userMapper.selectList(null);
+    }
+
+    public Optional<OpsUserEntity> findById(String id) {
+        return Optional.ofNullable(userMapper.selectById(id));
     }
 }
