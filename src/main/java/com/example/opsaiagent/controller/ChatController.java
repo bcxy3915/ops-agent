@@ -1,6 +1,7 @@
 package com.example.opsaiagent.controller;
 
 import com.example.opsaiagent.audit.annotation.AuditLog;
+import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
 import com.example.opsaiagent.service.OpsAgentService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,6 +34,7 @@ public class ChatController {
      */
     @Operation(summary = "重新加载知识库文档",
             description = "手动触发文档加载，用于更新知识库内容。通常不需要调用，应用启动时自动加载。需要 ADMIN 角色")
+    @RateLimit(key = "reload", limit = 3, period = 300, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(operation = "RELOAD_KNOWLEDGE", description = "重载知识库")
     @PostMapping("/knowledge/load")
@@ -49,6 +51,7 @@ public class ChatController {
             summary = "同步问答",
             description = "一次性返回完整答案。适合后端调用、Postman 测试。"
     )
+    @RateLimit(key = "ask", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
     @GetMapping("/ask")
     public Map<String, String> ask(
             @RequestParam String question,
@@ -86,6 +89,7 @@ public class ChatController {
             summary = "流式问答（SSE）",
             description = "逐字返回答案，适合 Web 前端。返回 text/event-stream，需用 EventSource 消费。"
     )
+    @RateLimit(key = "askStream", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
     @GetMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")
     public Flux<String> askStream(
             @RequestParam String question,

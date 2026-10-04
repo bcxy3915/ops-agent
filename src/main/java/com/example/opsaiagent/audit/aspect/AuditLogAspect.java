@@ -3,6 +3,8 @@ package com.example.opsaiagent.audit.aspect;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.util.IpUtils;
+import com.example.opsaiagent.util.SecurityUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -14,8 +16,7 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -37,6 +38,7 @@ import java.time.LocalDateTime;
  * 3. 参数脱敏采用递归遍历，支持嵌套对象和数组
  */
 @Slf4j
+@Order(2)
 @Aspect
 @Component
 @RequiredArgsConstructor
@@ -71,7 +73,7 @@ public class AuditLogAspect {
             HttpServletRequest request = attributes.getRequest();
             entity.setMethod(request.getMethod());
             entity.setUri(request.getRequestURI());
-            entity.setIp(getClientIp(request));
+            entity.setIp(IpUtils.getClientIp(request));
             entity.setUserAgent(request.getHeader("User-Agent"));
         }
 
@@ -104,11 +106,8 @@ public class AuditLogAspect {
      * - 登录等未认证请求：从方法参数里的 username 字段提取
      */
     private String resolveUsername(ProceedingJoinPoint joinPoint) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated()
-                && !"anonymousUser".equals(auth.getPrincipal())) {
-            return auth.getName();
-        }
+        String username = SecurityUtils.getCurrentUsername();
+        if (username != null) return username;
         return extractUsernameFromArgs(joinPoint);
     }
 
@@ -264,48 +263,6 @@ public class AuditLogAspect {
                 || obj instanceof jakarta.servlet.http.HttpServletResponse
                 || obj instanceof java.io.InputStream
                 || obj instanceof java.io.OutputStream;
-    }
-
-    // ==================== IP 规范化 ====================
-
-    /**
-     * 获取客户端真实 IP
-     * 按优先级尝试常见的代理转发 header：
-     * - X-Forwarded-For：Nginx/网关常用
-     * - X-Real-IP：Nginx 单 IP 场景
-     * - Proxy-Client-IP：Apache mod_proxy 使用
-     * 多级代理时 X-Forwarded-For 形如 "客户端IP, 代理1IP, 代理2IP"，
-     * 取第一个（最左侧）就是真实客户端 IP。
-     */
-    private String getClientIp(HttpServletRequest request) {
-        String[] headers = {"X-Forwarded-For", "X-Real-IP", "Proxy-Client-IP"};
-        for (String header : headers) {
-            String ip = request.getHeader(header);
-            if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {
-                return normalizeIp(ip.split(",")[0].trim());
-            }
-        }
-        return normalizeIp(request.getRemoteAddr());
-    }
-
-    /**
-     * 规范化 IP 地址
-     * 场景：本机通过 localhost 访问时，Java 会优先返回 IPv6 地址，
-     * 显示为 "0:0:0:0:0:0:0:1" 或 "::1"，可读性差且与其他日志不一致。
-     * 处理规则：
-     * - IPv6 localhost → 127.0.0.1
-     * - IPv4-mapped IPv6（::ffff:192.168.1.1）→ 192.168.1.1
-     * - 其他 IP 原样返回
-     */
-    private String normalizeIp(String ip) {
-        if (ip == null) return null;
-        if ("0:0:0:0:0:0:0:1".equals(ip) || "::1".equals(ip)) {
-            return "127.0.0.1";
-        }
-        if (ip.startsWith("::ffff:")) {
-            return ip.substring(7);
-        }
-        return ip;
     }
 
     /**
