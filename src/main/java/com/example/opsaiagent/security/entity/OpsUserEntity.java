@@ -30,6 +30,16 @@ public class OpsUserEntity {
      */
     private Boolean enabled;
 
+    /**
+     * 手机号
+     */
+    private String phone;
+
+    /**
+     * 邮箱
+     */
+    private String email;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

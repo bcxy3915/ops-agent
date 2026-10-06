@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS ops_user (
     password        VARCHAR(128) NOT NULL,
     role            VARCHAR(32) NOT NULL,
     enabled         BOOLEAN DEFAULT TRUE,
+    phone           VARCHAR(32),
+    email           VARCHAR(128),
     created_at      TIMESTAMP DEFAULT NOW(),
     updated_at      TIMESTAMP DEFAULT NOW()
     );
