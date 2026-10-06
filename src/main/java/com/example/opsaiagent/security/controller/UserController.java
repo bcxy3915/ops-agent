@@ -43,6 +43,7 @@ public class UserController {
         OpsUserEntity user = userService.findById(id)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.SERVICE_NOT_FOUND, "用户不存在: " + id));
+        userService.decryptSensitiveFields(user);
         return ApiResponse.success(toResponse(user));
     }
 

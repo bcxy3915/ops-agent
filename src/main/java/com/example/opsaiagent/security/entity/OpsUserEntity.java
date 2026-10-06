@@ -31,13 +31,35 @@ public class OpsUserEntity {
     private Boolean enabled;
 
     /**
-     * 手机号
+     * 加密后的手机号（AES-256-GCM）
      */
+    private String phoneEnc;
+
+    /**
+     * 手机号哈希（SHA-256，供精确查询）
+     */
+    private String phoneHash;
+
+    /**
+     * 加密后的邮箱
+     */
+    private String emailEnc;
+
+    /**
+     * 邮箱哈希
+     */
+    private String emailHash;
+
+    /**
+     * 明文手机号（不映射 DB 字段，供业务层临时传递）
+     */
+    @TableField(exist = false)
     private String phone;
 
     /**
-     * 邮箱
+     * 明文邮箱（不映射 DB 字段，供业务层临时传递）
      */
+    @TableField(exist = false)
     private String email;
 
     @TableField(value = "created_at", fill = FieldFill.INSERT)
