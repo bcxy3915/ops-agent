@@ -1,6 +1,8 @@
 package com.example.opsaiagent.security.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.opsaiagent.crypto.util.AesGcmUtil;
+import com.example.opsaiagent.crypto.util.HashUtil;
 import com.example.opsaiagent.dto.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
@@ -21,6 +23,8 @@ public class OpsUserService {
 
     private final OpsUserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final AesGcmUtil aesGcmUtil;
+    private final HashUtil hashUtil;
 
     public Optional<OpsUserEntity> findByUsername(String username) {
         return Optional.ofNullable(
@@ -65,7 +69,9 @@ public class OpsUserService {
         }
 
         wrapper.orderByDesc(OpsUserEntity::getCreatedAt);
-        return userMapper.selectList(wrapper);
+        List<OpsUserEntity> list = userMapper.selectList(wrapper);
+        // ★ 解密
+        return list.stream().peek(this::decryptSensitiveFields).toList();
     }
 
     /**
@@ -87,11 +93,57 @@ public class OpsUserService {
         user.setEnabled(true);
         user.setPhone(request.getPhone());
         user.setEmail(request.getEmail());
+        // 加密敏感字段（如手机号、邮箱）
+        encryptSensitiveFields(user);
 
         // 3. 插入
         userMapper.insert(user);
         log.info("创建用户成功: username={}, role={}", user.getUsername(), user.getRole());
 
         return user;
+    }
+
+    /**
+     * 按手机号精确查询
+     */
+    public OpsUserEntity findByPhone(String phone) {
+        String hash = hashUtil.sha256(phone);
+        return userMapper.selectOne(new LambdaQueryWrapper<OpsUserEntity>()
+                .eq(OpsUserEntity::getPhoneHash, hash));
+    }
+
+    /**
+     * 按邮箱精确查询
+     */
+    public OpsUserEntity findByEmail(String email) {
+        String hash = hashUtil.sha256(email);
+        return userMapper.selectOne(new LambdaQueryWrapper<OpsUserEntity>()
+                .eq(OpsUserEntity::getEmailHash, hash));
+    }
+
+    /**
+     * 加密敏感字段（写库前调用）
+     */
+    private void encryptSensitiveFields(OpsUserEntity entity) {
+        if (entity.getPhone() != null && !entity.getPhone().isEmpty()) {
+            entity.setPhoneEnc(aesGcmUtil.encrypt(entity.getPhone()));
+            entity.setPhoneHash(hashUtil.sha256(entity.getPhone()));
+        }
+        if (entity.getEmail() != null && !entity.getEmail().isEmpty()) {
+            entity.setEmailEnc(aesGcmUtil.encrypt(entity.getEmail()));
+            entity.setEmailHash(hashUtil.sha256(entity.getEmail()));
+        }
+    }
+
+    /**
+     * 解密敏感字段（返回给前端前调用）
+     */
+    public void decryptSensitiveFields(OpsUserEntity entity) {
+        if (entity.getPhoneEnc() != null) {
+            entity.setPhone(aesGcmUtil.decrypt(entity.getPhoneEnc()));
+        }
+        if (entity.getEmailEnc() != null) {
+            entity.setEmail(aesGcmUtil.decrypt(entity.getEmailEnc()));
+        }
     }
 }

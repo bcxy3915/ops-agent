@@ -34,13 +34,17 @@ CREATE TABLE IF NOT EXISTS ops_user (
     password        VARCHAR(128) NOT NULL,
     role            VARCHAR(32) NOT NULL,
     enabled         BOOLEAN DEFAULT TRUE,
-    phone           VARCHAR(32),
-    email           VARCHAR(128),
+    phone_enc       VARCHAR(256),
+    phone_hash      VARCHAR(64),
+    email_enc       VARCHAR(256),
+    email_hash      VARCHAR(64),
     created_at      TIMESTAMP DEFAULT NOW(),
     updated_at      TIMESTAMP DEFAULT NOW()
     );
 
 CREATE INDEX IF NOT EXISTS idx_ops_user_username ON ops_user(username);
+CREATE INDEX IF NOT EXISTS idx_ops_user_phone_hash ON ops_user(phone_hash) WHERE phone_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ops_user_email_hash ON ops_user(email_hash) WHERE email_hash IS NOT NULL;
 
 
 -- =====================================================

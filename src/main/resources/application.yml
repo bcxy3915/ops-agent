@@ -62,6 +62,13 @@ ops-agent:
       secret: ${JWT_SECRET:}
       expiration: 7200
       issuer: ops-agent
+  crypto:
+    # 密钥从 application-local.yml 或环境变量注入，这里只给默认值占位
+    aes-key: "${OPS_AES_KEY:}"
+    # 密钥版本（未来轮换用）
+    key-version: "v1"
+    # 存量数据迁移开关
+    migrate-on-startup: false
   # 限流方案 bucket4j / redis / sentinel
   rate-limit:
     enabled: true
