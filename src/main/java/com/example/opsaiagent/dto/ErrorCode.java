@@ -10,6 +10,7 @@ public enum ErrorCode {
     SERVICE_ALREADY_EXISTS(1002, "服务已存在"),
     INVALID_PARAMETER(1003, "参数不合法"),
     HEALTH_CHECK_FAILED(1004, "健康检查失败"),
+    USER_ALREADY_EXISTS(1005, "用户名已存在"),
     INTERNAL_ERROR(9999, "内部错误");
 
     private final int code;
