@@ -9,6 +9,7 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -34,10 +35,20 @@ public class HybridRetriever {
     public List<Document> retrieve(String query, int topK) {
         // 1. 双路召回
         // 向量检索
-        List<Document> vectorResults = vectorSearch(query, 20);
+        List<Document> vectorResults = new ArrayList<>();
+        try {
+            vectorResults = vectorSearch(query, 20);
+        } catch (Exception e) {
+            // 降级策略：不抛出异常，向量结果为空，后续依赖 BM25
+            log.warn("向量检索失败（可能网络问题或 API 限流），降级为仅使用 BM25。错误: {}", e.getMessage());
+        }
+
         // BM25 检索
         List<Document> bm25Results = keywordRetriever.search(query, 20);
         log.info("混合检索: 向量命中 {} 个, BM25 命中 {} 个", vectorResults.size(), bm25Results.size());
+        if (vectorResults.isEmpty()) {
+            return bm25Results.stream().limit(topK).toList();
+        }
 
         // 2. RRF 融合
         List<Document> fused = rrfFuser.fuseAndLimit(20, vectorResults, bm25Results);

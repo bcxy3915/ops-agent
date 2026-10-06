@@ -67,3 +67,33 @@ CREATE INDEX IF NOT EXISTS idx_audit_operation ON ops_audit_log(operation);
 CREATE INDEX IF NOT EXISTS idx_audit_created_at ON ops_audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_result ON ops_audit_log(result);
 
+
+-- =====================================================
+-- 对话历史（P5-8 新增）
+-- =====================================================
+CREATE TABLE IF NOT EXISTS ops_conversation (
+                                                id              VARCHAR(36) PRIMARY KEY,
+    session_id      VARCHAR(64) NOT NULL UNIQUE,
+    title           VARCHAR(128),
+    username        VARCHAR(64) NOT NULL,
+    message_count   INT DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW(),
+    last_active_at  TIMESTAMP DEFAULT NOW()
+    );
+
+CREATE INDEX IF NOT EXISTS idx_conv_username ON ops_conversation(username);
+CREATE INDEX IF NOT EXISTS idx_conv_last_active ON ops_conversation(username, last_active_at DESC);
+
+CREATE TABLE IF NOT EXISTS ops_message (
+                                           id              BIGSERIAL PRIMARY KEY,
+                                           session_id      VARCHAR(64) NOT NULL,
+    role            VARCHAR(16) NOT NULL,
+    content         TEXT NOT NULL,
+    reasoning       TEXT,
+    tool_calls      JSONB,
+    tokens_used     INT,
+    created_at      TIMESTAMP DEFAULT NOW()
+    );
+
+CREATE INDEX IF NOT EXISTS idx_msg_session_id ON ops_message(session_id, created_at);
