@@ -70,6 +70,17 @@ ops-agent:
     bucket-expire-minutes: 10
     # 限流桶缓存：最多缓存多少个用户/IP（超出按 LRU 淘汰）
     bucket-max-size: 10000
+  audit:
+    # 是否启用审计日志定时清理
+    cleanup-enabled: true
+    # 日志保留天数（超过该天数的将被删除）
+    retention-days: 30
+    # 每批删除条数（避免一次性锁表太久）
+    batch-size: 1000
+    # 每批之间的休眠毫秒数（给数据库喘息）
+    batch-sleep-millis: 200
+    # 每天几点执行（cron 表达式，默认凌晨 3 点）
+    cron: "0 0 3 * * ?"
 
 # 管理端点
 management:
