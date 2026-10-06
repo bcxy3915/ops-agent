@@ -10,6 +10,7 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -29,11 +30,10 @@ public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
 
-        Map<String, Object> body = Map.of(
-                "code", 401,
-                "message", "未认证或 Token 无效",
-                "data", null
-        );
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", 401);
+        body.put("message", "未认证或 Token 无效");
+        body.put("data", null);
         response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 }

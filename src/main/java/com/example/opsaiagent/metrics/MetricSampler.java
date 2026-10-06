@@ -44,6 +44,10 @@ public class MetricSampler {
             "cpu", "memory", "threadCount", "gcPause", "hikariActive"
     };
 
+    // 记录每个服务的上次 HTTP 累计 COUNT 和时间戳
+    private final Map<String, long[]> lastHttpCount = new ConcurrentHashMap<>();
+
+
     /**
      * 定时采样
      */
@@ -97,12 +101,21 @@ public class MetricSampler {
         double httpErrorRate = 0;
         double httpAvgDuration = 0;
         if (httpMetric != null) {
-            httpAvgDuration = httpMetric.count() > 0
-                    ? httpMetric.totalTime() / httpMetric.count()
-                    : 0;
-            // 简化：直接用累计 count 除以运行时间估算每分钟
-            // 更精确的做法是保存上一次的 count 做差值——这里先简化
-            httpCount = (long) httpMetric.count();
+            long currentCount = (long) httpMetric.count();
+            long currentTimeMillis = System.currentTimeMillis();
+
+            long[] last = lastHttpCount.get(name);
+            if (last != null && currentCount >= last[0]) {
+                long deltaCount = currentCount - last[0];
+                long deltaMs = currentTimeMillis - last[1];
+                if (deltaMs > 0) {
+                    // 每分钟速率
+                    httpCount = deltaCount * 60_000 / deltaMs;
+                }
+            }
+
+            // 更新记录
+            lastHttpCount.put(name, new long[]{currentCount, currentTimeMillis});
         }
 
         int hikariActiveVal = hikariActive != null ? (int) hikariActive.value() : 0;

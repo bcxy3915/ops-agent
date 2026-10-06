@@ -1,5 +1,6 @@
 package com.example.opsaiagent.service;
 
+import com.example.opsaiagent.chat.service.ConversationService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
@@ -11,6 +12,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -35,6 +38,7 @@ public class OpsAgentService {
     private final MetricDiscoveryTools metricDiscoveryTools;
     private final ServiceDiscoveryTools serviceDiscoveryTools;
     private final HybridRetriever hybridRetriever;
+    private final ConversationService conversationService;
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
@@ -119,7 +123,20 @@ public class OpsAgentService {
      * @return 答案
      */
     public Flux<String> askStream(String sessionId, String question) {
-        // 1.混合检索
+        // 1. 拿当前用户名
+        String username = getCurrentUsername();
+
+        // 2. 确保会话存在（同步）
+        if (username != null) {
+            try {
+                conversationService.ensureConversation(sessionId, username, question);
+                conversationService.saveUserMessage(sessionId, question);
+            } catch (Exception e) {
+                log.error("保存会话/用户消息失败", e);
+            }
+        }
+
+        // 3.RAG 检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
 
         String context;
@@ -132,16 +149,45 @@ public class OpsAgentService {
                     .collect(Collectors.joining("\n\n---\n\n"));
         }
 
-        // 2.拼接 System Prompt
+        // 4.拼接 System Prompt
         String systemPrompt = new PromptTemplate(SYSTEM_PROMPT).render(Map.of("context", context));
 
-        // 3.流式调用（关键：.stream() 替代 .call()）
+        // 5.流式调用（关键：.stream() 替代 .call()）
+        // 累积 buffer
+        StringBuilder answerBuffer = new StringBuilder();
         return chatClient.prompt()
                 .system(systemPrompt)
                 .user(question)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
                 .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
                 .stream()
-                .content();
+                .content()
+                .doOnNext(answerBuffer::append)          // 累积
+                .concatWith(Flux.just("[DONE]"))
+                .doFinally(signal -> {
+                    // 无论完成、出错、取消，都保存
+                    String answer = answerBuffer.toString();
+                    if (username != null && !answer.isEmpty()) {
+                        try {
+                            conversationService.saveAssistantMessage(sessionId, answer);
+                        } catch (Exception e) {
+                            log.error("保存 AI 消息失败", e);
+                        }
+                    }
+                })
+                ;
     }
+
+    /**
+     * 从 SecurityContext 拿当前用户名
+     */
+    private String getCurrentUsername() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated()
+                && !"anonymousUser".equals(auth.getPrincipal())) {
+            return auth.getName();
+        }
+        return null;
+    }
+
 }

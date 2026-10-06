@@ -11,6 +11,7 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -30,11 +31,11 @@ public class ApiAccessDeniedHandler implements AccessDeniedHandler {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
 
-        Map<String, Object> body = Map.of(
-                "code", 403,
-                "message", "没有访问权限",
-                "data", null
-        );
+        // 不能用 Map.of()，因为 null value 会抛 NPE
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", 403);
+        body.put("message", "权限不足，无法执行该操作");
+        body.put("data", null);
         response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 }
