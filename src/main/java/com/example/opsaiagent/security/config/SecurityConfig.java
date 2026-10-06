@@ -3,6 +3,7 @@ package com.example.opsaiagent.security.config;
 import com.example.opsaiagent.exception.ApiAccessDeniedHandler;
 import com.example.opsaiagent.exception.ApiAuthenticationEntryPoint;
 import com.example.opsaiagent.security.filter.JwtAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -46,6 +47,8 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // ASYNC dispatch 时放行，避免 SSE 二次拦截（只有通过认证的请求才会进入 Controller 并触发异步,后续 ASYNC dispatch 是同一个请求的延续，不需要重复校验）
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.FORWARD).permitAll()
                         .requestMatchers(WHITELIST).permitAll()
                         .anyRequest().authenticated()
                 )
