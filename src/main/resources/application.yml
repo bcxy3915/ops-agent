@@ -66,6 +66,10 @@ ops-agent:
   rate-limit:
     enabled: true
     type: bucket4j
+    # 限流桶缓存：多久不访问后自动淘汰
+    bucket-expire-minutes: 10
+    # 限流桶缓存：最多缓存多少个用户/IP（超出按 LRU 淘汰）
+    bucket-max-size: 10000
 
 # 管理端点
 management:
