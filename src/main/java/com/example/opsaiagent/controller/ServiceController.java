@@ -70,9 +70,9 @@ public class ServiceController {
             @RequestParam(required = false) String env,
             @RequestParam(required = false) String status) {
         List<OpsServiceEntity> list;
-        if (env != null) {
+        if (env != null && !env.isEmpty()) {
             list = serviceManager.findByEnv(env);
-        } else if (status != null) {
+        } else if (status != null && !status.isEmpty()) {
             list = serviceManager.findByStatus(status);
         } else {
             list = serviceManager.listAll();
