@@ -3,6 +3,7 @@ package com.example.opsaiagent.audit.aspect;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.sensitive.SensitiveType;
 import com.example.opsaiagent.util.IpUtils;
 import com.example.opsaiagent.util.SecurityUtils;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,6 +24,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 
 /**
  * 审计日志切面
@@ -205,6 +207,8 @@ public class AuditLogAspect {
 
     /**
      * 把对象转成 JsonNode 后递归脱敏
+     * @param value 待脱敏对象
+     * @return 脱敏后的 JsonNode
      */
     private JsonNode sanitizeValue(Object value) {
         JsonNode node = objectMapper.valueToTree(value);
@@ -228,7 +232,7 @@ public class AuditLogAspect {
             node.fields().forEachRemaining(entry -> {
                 String key = entry.getKey();
                 if (isSensitiveField(key)) {
-                    result.put(key, "***");
+                    result.put(key, maskSensitiveValue(key, entry.getValue()));
                 } else {
                     result.set(key, sanitizeNode(entry.getValue()));
                 }
@@ -244,19 +248,70 @@ public class AuditLogAspect {
     }
 
     /**
-     * 敏感字段判断：字段名包含以下关键词之一即视为敏感
+     * 敏感字段判断：字段名命中 SensitiveType 中的任一关键词即视为敏感
      * 使用 contains 而非 equals，兼容 password / oldPassword / userPassword 等命名
+     * @param name 字段名
+     * @return 是否敏感字段
      */
     private boolean isSensitiveField(String name) {
+        if (name == null) return false;
         String lower = name.toLowerCase();
-        return lower.contains("password")
-                || lower.contains("token")
-                || lower.contains("secret")
-                || lower.contains("apikey");
+        return Arrays.stream(SensitiveType.values())
+                .flatMap(t -> Arrays.stream(t.getFieldNames()))
+                .anyMatch(lower::contains);
+    }
+
+    /**
+     * 按敏感类型对字段值做精细脱敏
+     * 匹配顺序：PASSWORD → PHONE → EMAIL → ID_CARD → BANK_CARD → NAME
+     * 未命中任何类型时兜底返回 ***
+     * @param fieldName 字段名
+     * @param valueNode 字段值的 JsonNode
+     * @return 脱敏后的字段值
+     */
+    private String maskSensitiveValue(String fieldName, JsonNode valueNode) {
+        String value = valueNode == null || valueNode.isNull() ? "" : valueNode.asText();
+        if (value.isEmpty()) return "***";
+
+        String lower = fieldName.toLowerCase();
+
+        for (SensitiveType type : SensitiveType.values()) {
+            boolean matched = Arrays.stream(type.getFieldNames()).anyMatch(lower::contains);
+            if (!matched) continue;
+
+            switch (type) {
+                case PASSWORD:
+                    return "******";
+                case PHONE:
+                    return value.length() >= 7
+                            ? value.substring(0, 3) + "****" + value.substring(value.length() - 4)
+                            : "***";
+                case EMAIL:
+                    int at = value.indexOf('@');
+                    if (at <= 0) return "***";
+                    String local = value.substring(0, at);
+                    return (local.length() <= 1 ? "*" : local.charAt(0) + "***") + value.substring(at);
+                case ID_CARD:
+                    return value.length() >= 10
+                            ? value.substring(0, 3) + "********" + value.substring(value.length() - 4)
+                            : "***";
+                case BANK_CARD:
+                    return value.length() >= 8
+                            ? value.substring(0, 4) + " **** **** " + value.substring(value.length() - 4)
+                            : "***";
+                case NAME:
+                    return value.length() <= 1
+                            ? value
+                            : value.charAt(0) + "*".repeat(value.length() - 1);
+            }
+        }
+        return "***";
     }
 
     /**
      * 判断是否为 Servlet/IO 对象，这类对象无法序列化，直接跳过
+     * @param obj 待判断对象
+     * @return 是否为 Servlet/IO 对象
      */
     private boolean isServletObject(Object obj) {
         return obj instanceof HttpServletRequest
@@ -267,6 +322,9 @@ public class AuditLogAspect {
 
     /**
      * 截断超长字符串，防止审计日志字段溢出
+     * @param s 原字符串
+     * @param max 最大长度
+     * @return 截断后的字符串
      */
     private String truncate(String s, int max) {
         if (s == null) return null;
