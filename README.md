@@ -1,5 +1,6 @@
-# Ops Agent
+![Backend CI](https://github.com/bcxy3915/ops-agent/actions/workflows/ci.yml/badge.svg)
 
+# Ops Agent
 通用运维智能体 —— 用自然语言诊断服务问题的 AI 应用
 
 ## 简介
