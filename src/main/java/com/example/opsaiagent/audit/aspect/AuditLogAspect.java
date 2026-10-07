@@ -4,6 +4,7 @@ import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.service.AuditLogService;
 import com.example.opsaiagent.sensitive.SensitiveType;
+import com.example.opsaiagent.sensitive.util.SensitiveUtil;
 import com.example.opsaiagent.util.IpUtils;
 import com.example.opsaiagent.util.SecurityUtils;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -254,11 +255,7 @@ public class AuditLogAspect {
      * @return 是否敏感字段
      */
     private boolean isSensitiveField(String name) {
-        if (name == null) return false;
-        String lower = name.toLowerCase();
-        return Arrays.stream(SensitiveType.values())
-                .flatMap(t -> Arrays.stream(t.getFieldNames()))
-                .anyMatch(lower::contains);
+        return SensitiveUtil.isSensitiveField(name);
     }
 
     /**
@@ -271,41 +268,7 @@ public class AuditLogAspect {
      */
     private String maskSensitiveValue(String fieldName, JsonNode valueNode) {
         String value = valueNode == null || valueNode.isNull() ? "" : valueNode.asText();
-        if (value.isEmpty()) return "***";
-
-        String lower = fieldName.toLowerCase();
-
-        for (SensitiveType type : SensitiveType.values()) {
-            boolean matched = Arrays.stream(type.getFieldNames()).anyMatch(lower::contains);
-            if (!matched) continue;
-
-            switch (type) {
-                case PASSWORD:
-                    return "******";
-                case PHONE:
-                    return value.length() >= 7
-                            ? value.substring(0, 3) + "****" + value.substring(value.length() - 4)
-                            : "***";
-                case EMAIL:
-                    int at = value.indexOf('@');
-                    if (at <= 0) return "***";
-                    String local = value.substring(0, at);
-                    return (local.length() <= 1 ? "*" : local.charAt(0) + "***") + value.substring(at);
-                case ID_CARD:
-                    return value.length() >= 10
-                            ? value.substring(0, 3) + "********" + value.substring(value.length() - 4)
-                            : "***";
-                case BANK_CARD:
-                    return value.length() >= 8
-                            ? value.substring(0, 4) + " **** **** " + value.substring(value.length() - 4)
-                            : "***";
-                case NAME:
-                    return value.length() <= 1
-                            ? value
-                            : value.charAt(0) + "*".repeat(value.length() - 1);
-            }
-        }
-        return "***";
+        return SensitiveUtil.mask(fieldName, value);
     }
 
     /**

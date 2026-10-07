@@ -101,7 +101,7 @@ public class AesGcmUtil {
 
             return new String(plainBytes, StandardCharsets.UTF_8);
         } catch (Exception e) {
-            log.error("[加密] 解密失败", e);
+            log.warn("[加密] 解密失败", e);
             return null;
         }
     }

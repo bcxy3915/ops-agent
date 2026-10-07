@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_result ON ops_audit_log(result);
 -- 对话历史（P5-8 新增）
 -- =====================================================
 CREATE TABLE IF NOT EXISTS ops_conversation (
-                                                id              VARCHAR(36) PRIMARY KEY,
+    id              VARCHAR(36) PRIMARY KEY,
     session_id      VARCHAR(64) NOT NULL UNIQUE,
     title           VARCHAR(128),
     username        VARCHAR(64) NOT NULL,
@@ -90,8 +90,8 @@ CREATE INDEX IF NOT EXISTS idx_conv_username ON ops_conversation(username);
 CREATE INDEX IF NOT EXISTS idx_conv_last_active ON ops_conversation(username, last_active_at DESC);
 
 CREATE TABLE IF NOT EXISTS ops_message (
-                                           id              BIGSERIAL PRIMARY KEY,
-                                           session_id      VARCHAR(64) NOT NULL,
+    id              BIGSERIAL PRIMARY KEY,
+    session_id      VARCHAR(64) NOT NULL,
     role            VARCHAR(16) NOT NULL,
     content         TEXT NOT NULL,
     reasoning       TEXT,
