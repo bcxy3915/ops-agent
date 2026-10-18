@@ -2,7 +2,9 @@ package com.example.opsaiagent.notification.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.notification.NotificationChannelType;
+import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.NotificationProperties;
 import com.example.opsaiagent.notification.Notifier;
 import com.example.opsaiagent.notification.NotifierRegistry;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -145,6 +148,69 @@ class NotificationCenterTest {
 
         verify(notifier, org.mockito.Mockito.times(2)).send(any(), any());
         verify(recordMapper, org.mockito.Mockito.times(2)).insert(any(NotificationRecordEntity.class));
+    }
+
+    // ==================== sendOnEvent + 诊断联动（T18） ====================
+
+    @Test
+    @DisplayName("闭环通知：附带诊断成功时内容追加诊断摘要")
+    void sendOnEvent_withDiagnosis_appendsContent() throws Exception {
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "飞书", "FEISHU_WEBHOOK")));
+        when(notifierRegistry.get(NotificationChannelType.FEISHU_WEBHOOK)).thenReturn(notifier);
+        when(templateService.render(any(AlertEventEntity.class), any())).thenReturn(
+                NotificationContent.builder().title("告警通知 - cpu-high").content("cpu=95").build());
+
+        DiagnosisRecordEntity diag = new DiagnosisRecordEntity();
+        diag.setStatus("SUCCESS");
+        diag.setRootCause("CPU 打满");
+        diag.setConfidence(85);
+        diag.setSuggestions("[\"扩容\",\"回滚\"]");
+        diag.setSummary("CPU 持续打满导致服务不可用");
+
+        notificationCenter.sendOnEvent(event(1L), diag);
+
+        ArgumentCaptor<NotificationContent> captor = ArgumentCaptor.forClass(NotificationContent.class);
+        verify(notifier).send(any(NotificationChannelConfigEntity.class), captor.capture());
+        assertThat(captor.getValue().getContent())
+                .contains("【智能诊断】")
+                .contains("根因：CPU 打满")
+                .contains("置信度：85%")
+                .contains("扩容")
+                .contains("摘要：CPU 持续打满");
+    }
+
+    @Test
+    @DisplayName("闭环通知：诊断失败（FAILED）时不追加诊断摘要")
+    void sendOnEvent_withFailedDiagnosis_noAppend() throws Exception {
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "飞书", "FEISHU_WEBHOOK")));
+        when(notifierRegistry.get(NotificationChannelType.FEISHU_WEBHOOK)).thenReturn(notifier);
+        when(templateService.render(any(AlertEventEntity.class), any())).thenReturn(
+                NotificationContent.builder().title("t").content("c").build());
+
+        DiagnosisRecordEntity diag = new DiagnosisRecordEntity();
+        diag.setStatus("FAILED");
+        diag.setErrorMessage("LLM timeout");
+
+        notificationCenter.sendOnEvent(event(1L), diag);
+
+        ArgumentCaptor<NotificationContent> captor = ArgumentCaptor.forClass(NotificationContent.class);
+        verify(notifier).send(any(NotificationChannelConfigEntity.class), captor.capture());
+        assertThat(captor.getValue().getContent()).isEqualTo("c");
+        assertThat(captor.getValue().getContent()).doesNotContain("【智能诊断】");
+    }
+
+    @Test
+    @DisplayName("appendDiagnosis：诊断字段为空时只输出已有字段")
+    void appendDiagnosis_partialFields() {
+        DiagnosisRecordEntity diag = new DiagnosisRecordEntity();
+        diag.setStatus("SUCCESS");
+        diag.setRootCause("根因A");
+
+        NotificationContent result = notificationCenter.appendDiagnosis(
+                NotificationContent.builder().title("t").content("base").build(), diag);
+
+        assertThat(result.getContent()).contains("根因：根因A");
+        assertThat(result.getContent()).doesNotContain("置信度");
     }
 
     // ==================== sendTest ====================

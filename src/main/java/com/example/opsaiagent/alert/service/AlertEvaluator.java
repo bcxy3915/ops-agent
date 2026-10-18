@@ -6,9 +6,12 @@ import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.alert.entity.AlertRuleEntity;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
+import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
+import com.example.opsaiagent.diagnosis.service.DiagnosisService;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.notification.service.NotificationCenter;
+import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +49,7 @@ public class AlertEvaluator {
     private final AlertThrottleService throttle;
     private final NotificationCenter notificationCenter;
     private final FailureSnapshotService snapshotService;
+    private final DiagnosisService diagnosisService;
 
     /** ruleId -> 连续命中起始时间戳（ms） */
     private final Map<Long, Long> sustainedSince = new ConcurrentHashMap<>();
@@ -114,16 +118,28 @@ public class AlertEvaluator {
     }
 
     /**
-     * 触发 FIRING 后联动：生成故障快照 + 通知启用渠道（各自容错，不因失败中断评估）
+     * 触发 FIRING 后闭环编排（T18）：生成故障快照 → LLM 智能诊断 → 通知启用渠道。
+     * 每个环节独立容错：任一失败不中断后续环节，也不影响评估主流程。
      */
     private void afterFiring(AlertEventEntity event) {
+        FailureSnapshotEntity snapshot = null;
         try {
-            snapshotService.buildAndSave(event);
+            snapshot = snapshotService.buildAndSave(event);
         } catch (Exception e) {
             log.warn("故障快照生成失败 eventId={}: {}", event.getId(), e.getMessage());
         }
+
+        DiagnosisRecordEntity diagnosis = null;
+        if (snapshot != null) {
+            try {
+                diagnosis = diagnosisService.diagnose(snapshot);
+            } catch (Exception e) {
+                log.warn("LLM 诊断失败 eventId={}: {}", event.getId(), e.getMessage());
+            }
+        }
+
         try {
-            notificationCenter.sendOnEvent(event);
+            notificationCenter.sendOnEvent(event, diagnosis);
         } catch (Exception e) {
             log.warn("告警通知发送失败 eventId={}: {}", event.getId(), e.getMessage());
         }

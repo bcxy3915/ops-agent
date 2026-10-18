@@ -19,6 +19,7 @@ public enum ErrorCode {
     NOTIFICATION_CHANNEL_NAME_EXISTS(1011, "通知渠道名称已存在"),
     NOTIFICATION_CHANNEL_INVALID(1012, "通知渠道参数不合法"),
     SNAPSHOT_NOT_FOUND(1013, "故障快照不存在"),
+    DIAGNOSIS_NOT_FOUND(1014, "诊断记录不存在"),
     INTERNAL_ERROR(9999, "内部错误");
 
     private final int code;

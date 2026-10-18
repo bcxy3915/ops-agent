@@ -5,9 +5,12 @@ import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.alert.entity.AlertRuleEntity;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
+import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
+import com.example.opsaiagent.diagnosis.service.DiagnosisService;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.notification.service.NotificationCenter;
+import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -55,6 +59,9 @@ class AlertEvaluatorTest {
 
     @Mock
     private FailureSnapshotService snapshotService;
+
+    @Mock
+    private DiagnosisService diagnosisService;
 
     @InjectMocks
     private AlertEvaluator evaluator;
@@ -102,8 +109,11 @@ class AlertEvaluatorTest {
     @DisplayName("阈值模式：命中且无 FIRING 时创建 FIRING 事件")
     void threshold_hitCreatesFiring() {
         AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
+        FailureSnapshotEntity snap = new FailureSnapshotEntity();
+        snap.setId(10L);
         when(metricSampleStore.queryLatest("svc-a", "cpu", NOW))
                 .thenReturn(new MetricPoint(NOW, 95.0));
+        when(snapshotService.buildAndSave(any())).thenReturn(snap);
 
         evaluator.evaluateRule(rule, NOW);
 
@@ -114,9 +124,59 @@ class AlertEvaluatorTest {
         assertThat(inserted.getFiredAt()).isNotNull();
         verify(throttle).recordFired(1L, NOW);
         verify(throttle).recordEvent("svc-a", NOW);
-        // 联动：生成故障快照 + 通知启用渠道
+        // 闭环编排（T18）：快照生成成功 → LLM 诊断 → 通知（带诊断结果）
         verify(snapshotService).buildAndSave(inserted);
-        verify(notificationCenter).sendOnEvent(inserted);
+        verify(diagnosisService).diagnose(snap);
+        verify(notificationCenter).sendOnEvent(eq(inserted), any());
+    }
+
+    @Test
+    @DisplayName("闭环编排：快照生成失败时跳过诊断，仍发送通知（降级）")
+    void afterFiring_snapshotFails_skipDiagnosis() {
+        AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
+        when(metricSampleStore.queryLatest("svc-a", "cpu", NOW))
+                .thenReturn(new MetricPoint(NOW, 95.0));
+        when(snapshotService.buildAndSave(any())).thenThrow(new RuntimeException("snapshot fail"));
+
+        evaluator.evaluateRule(rule, NOW);
+
+        verify(diagnosisService, never()).diagnose(any());
+        verify(notificationCenter).sendOnEvent(any(), isNull());
+    }
+
+    @Test
+    @DisplayName("闭环编排：诊断失败时仍发送通知（降级）")
+    void afterFiring_diagnosisFails_stillNotify() {
+        AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
+        FailureSnapshotEntity snap = new FailureSnapshotEntity();
+        snap.setId(10L);
+        when(metricSampleStore.queryLatest("svc-a", "cpu", NOW))
+                .thenReturn(new MetricPoint(NOW, 95.0));
+        when(snapshotService.buildAndSave(any())).thenReturn(snap);
+        when(diagnosisService.diagnose(any())).thenThrow(new RuntimeException("llm fail"));
+
+        evaluator.evaluateRule(rule, NOW);
+
+        verify(notificationCenter).sendOnEvent(any(), isNull());
+    }
+
+    @Test
+    @DisplayName("闭环编排：诊断成功时把诊断结果传给通知")
+    void afterFiring_diagnosisSuccess_passesDiagnosis() {
+        AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
+        FailureSnapshotEntity snap = new FailureSnapshotEntity();
+        snap.setId(10L);
+        DiagnosisRecordEntity diag = new DiagnosisRecordEntity();
+        diag.setStatus("SUCCESS");
+        diag.setRootCause("CPU 打满");
+        when(metricSampleStore.queryLatest("svc-a", "cpu", NOW))
+                .thenReturn(new MetricPoint(NOW, 95.0));
+        when(snapshotService.buildAndSave(any())).thenReturn(snap);
+        when(diagnosisService.diagnose(any())).thenReturn(diag);
+
+        evaluator.evaluateRule(rule, NOW);
+
+        verify(notificationCenter).sendOnEvent(any(), eq(diag));
     }
 
     @Test

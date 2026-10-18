@@ -2,6 +2,7 @@ package com.example.opsaiagent.notification.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.NotificationProperties;
@@ -22,6 +23,7 @@ import java.util.List;
  * 通知中心（T10）
  * 统一入口：告警事件 → 渲染模板 → 遍历启用渠道发送 → 发送记录落库
  * 失败记录进入重试队列，由 {@link NotificationRetryTask} 定时重试。
+ * T18 闭环：可附带 LLM 诊断结果一起通知。
  */
 @Slf4j
 @Service
@@ -38,6 +40,13 @@ public class NotificationCenter {
      * 按告警事件通知所有启用渠道（告警触发时调用）
      */
     public void sendOnEvent(AlertEventEntity event) {
+        sendOnEvent(event, null);
+    }
+
+    /**
+     * 按告警事件通知所有启用渠道（T18 闭环：附带 LLM 诊断结果）
+     */
+    public void sendOnEvent(AlertEventEntity event, DiagnosisRecordEntity diagnosis) {
         List<NotificationChannelConfigEntity> channels = channelMapper.selectList(
                 new LambdaQueryWrapper<NotificationChannelConfigEntity>()
                         .eq(NotificationChannelConfigEntity::getEnabled, true));
@@ -46,7 +55,7 @@ public class NotificationCenter {
             return;
         }
         for (NotificationChannelConfigEntity channel : channels) {
-            sendToChannel(channel, event, null);
+            sendToChannel(channel, event, null, diagnosis);
         }
     }
 
@@ -76,6 +85,15 @@ public class NotificationCenter {
      */
     private NotificationRecordEntity sendToChannel(NotificationChannelConfigEntity channel,
                                                    AlertEventEntity event, String tag) {
+        return sendToChannel(channel, event, tag, null);
+    }
+
+    /**
+     * 单渠道发送 + 记录落库（T18：附带诊断结果时追加诊断摘要到内容）
+     */
+    private NotificationRecordEntity sendToChannel(NotificationChannelConfigEntity channel,
+                                                   AlertEventEntity event, String tag,
+                                                   DiagnosisRecordEntity diagnosis) {
         NotificationRecordEntity record = buildRecord(channel, event, tag);
         record.setStatus("PENDING");
         recordMapper.insert(record);
@@ -84,6 +102,9 @@ public class NotificationCenter {
             NotificationChannelType type = NotificationChannelType.valueOf(channel.getType());
             Notifier notifier = notifierRegistry.get(type);
             NotificationContent content = templateService.render(event, null);
+            if (diagnosis != null && "SUCCESS".equals(diagnosis.getStatus())) {
+                content = appendDiagnosis(content, diagnosis);
+            }
             notifier.send(channel, content);
 
             record.setStatus("SUCCESS");
@@ -150,6 +171,29 @@ public class NotificationCenter {
             record.setUpdatedAt(LocalDateTime.now());
             recordMapper.updateById(record);
         }
+    }
+
+    /**
+     * 把诊断结果摘要追加到通知内容（T18 闭环联动）
+     */
+    NotificationContent appendDiagnosis(NotificationContent content, DiagnosisRecordEntity diagnosis) {
+        StringBuilder sb = new StringBuilder(content.getContent()).append("\n\n【智能诊断】\n");
+        if (diagnosis.getRootCause() != null && !diagnosis.getRootCause().isBlank()) {
+            sb.append("根因：").append(diagnosis.getRootCause()).append("\n");
+        }
+        if (diagnosis.getConfidence() != null) {
+            sb.append("置信度：").append(diagnosis.getConfidence()).append("%\n");
+        }
+        if (diagnosis.getSuggestions() != null && !diagnosis.getSuggestions().isBlank()) {
+            sb.append("建议：").append(diagnosis.getSuggestions()).append("\n");
+        }
+        if (diagnosis.getSummary() != null && !diagnosis.getSummary().isBlank()) {
+            sb.append("摘要：").append(diagnosis.getSummary()).append("\n");
+        }
+        return NotificationContent.builder()
+                .title(content.getTitle())
+                .content(sb.toString())
+                .build();
     }
 
     private NotificationRecordEntity buildRecord(NotificationChannelConfigEntity channel,
