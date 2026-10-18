@@ -44,3 +44,5 @@ application-local.yml
 
 # 保留模板
 !.env.example
+
+/docs/design
