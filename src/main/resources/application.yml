@@ -10,6 +10,16 @@ spring:
     async:
       request-timeout: 5m # SSE 长连接超时（默认 30s 太短，5 分钟足够）
 
+  mail:
+    # 邮件通知渠道的 SMTP 配置（T09/T11），通过环境变量注入
+    host: "${SMTP_HOST:}"
+    port: "${SMTP_PORT:465}"
+    username: "${SMTP_USERNAME:}"
+    password: "${SMTP_PASSWORD:}"
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: true
+
   datasource:
     url: jdbc:postgresql://localhost:5433/opsdb
     username: postgres
@@ -24,6 +34,7 @@ spring:
         options:
           model: deepseek-chat
           temperature: 0.7
+          timeout: 60s # LLM 调用超时（第三方容错）
       embedding:
         base-url: https://dashscope.aliyuncs.com/compatible-mode
         api-key: ${DASHSCOPE_API_KEY:}
@@ -89,6 +100,28 @@ ops-agent:
     # 每天几点执行（cron 表达式，默认凌晨 3 点）
     cron: "0 0 3 * * ?"
 
+  # 第三方调用容错（超时 / 重试 / 熔断）
+  resilience:
+    connect-timeout-ms: 3000
+    read-timeout-ms: 15000
+    retry-max-attempts: 2
+    retry-wait-ms: 1000
+    cb-failure-rate-threshold: 50
+    cb-sliding-window-size: 10
+    cb-wait-duration-sec: 30
+
+  # 指标采样持久化
+  metrics:
+    # 采样数据保留天数
+    retention-days: 7
+    # 清理任务执行时间（每天凌晨 2:30）
+    cleanup-cron: "0 30 2 * * ?"
+
+  # 告警引擎
+  alert:
+    # 告警评估轮询 cron（默认每 30 秒）
+    evaluate-cron: "*/30 * * * * ?"
+
 # 管理端点
 management:
   endpoints:
@@ -98,3 +131,7 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    # 未配置 SMTP 环境变量时，禁用邮件健康检查，避免启动时尝试连接报错
+    mail:
+      enabled: false

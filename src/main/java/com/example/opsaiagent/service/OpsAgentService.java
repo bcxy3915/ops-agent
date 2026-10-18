@@ -1,17 +1,24 @@
 package com.example.opsaiagent.service;
 
+import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.chat.service.ConversationService;
+import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
+import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
+import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
 import com.example.opsaiagent.tools.ServiceDiscoveryTools;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -39,11 +46,14 @@ public class OpsAgentService {
     private final ServiceDiscoveryTools serviceDiscoveryTools;
     private final HybridRetriever hybridRetriever;
     private final ConversationService conversationService;
+    private final KnowledgeRetrievalService knowledgeRetrievalService;
+    private final KnowledgeHitLogService knowledgeHitLogService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
      */
-    private static final String SYSTEM_PROMPT = """ 
+    private static final String SYSTEM_PROMPT = """
         你是一个运维智能体。你的职责是帮助用户排查和诊断服务问题。
 
         【强制规则】
@@ -72,27 +82,28 @@ public class OpsAgentService {
         {context}
         """;
 
-
     /**
-     * 根据问题生成答案
+     * 根据问题生成答案（兼容入口：仅返回答案文本）
      * @param sessionId 会话ID
      * @param question 问题
      * @return 答案
      */
     public String ask(String sessionId, String question) {
+        return askWithCitations(sessionId, question).getAnswer();
+    }
+
+    /**
+     * 根据问题生成答案，并携带结构化引用 citations
+     * @param sessionId 会话ID
+     * @param question 问题
+     * @return 答案 + 引用列表
+     */
+    public AskResponse askWithCitations(String sessionId, String question) {
         log.info("问题: {}", question);
 
         // 1.混合检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
-        String context;
-        if (documents.isEmpty()) {
-            context = "（知识库中未找到相关内容，请基于工具查询或已有知识回答）";
-        } else {
-            context = documents.stream()
-                    .map(d -> "【来源：" + d.getMetadata().getOrDefault("source", "未知文档") + "】\n"
-                            + Objects.requireNonNullElse(d.getText(), ""))
-                    .collect(Collectors.joining("\n\n---\n\n"));
-        }
+        String context = buildContext(documents);
 
         // 打印召回的片段
         documents.forEach(d -> log.info("召回片段[来源={}][距离={}]: {}",
@@ -113,16 +124,49 @@ public class OpsAgentService {
                 .call()
                 .content();
         log.info("RAG 问答完成，召回 {} 个片段", documents.size());
-        return answer;
+
+        // 5.构建结构化引用
+        List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
+
+        // 6.记录命中流水（对话引用来源 ASK），失败不影响主流程
+        try {
+            knowledgeHitLogService.recordHits(citations, question,
+                    KnowledgeHitLogService.SOURCE_ASK, getCurrentUsername());
+        } catch (Exception e) {
+            log.warn("记录问答命中流水失败", e);
+        }
+
+        return AskResponse.builder()
+                .sessionId(sessionId)
+                .question(question)
+                .answer(answer)
+                .citations(citations)
+                .build();
     }
 
     /**
-     * 根据问题生成答案 流式问答：逐字返回答案
+     * 根据问题生成答案 流式问答：逐字返回答案（兼容入口：仅返回文本流）
      * @param sessionId 会话ID
      * @param question 问题
      * @return 答案
      */
     public Flux<String> askStream(String sessionId, String question) {
+        return askStreamWithCitations(sessionId, question)
+                .map(ServerSentEvent::data)
+                .map(String::valueOf);
+    }
+
+    /**
+     * 根据问题生成答案 流式问答：先推送 citations 事件，再逐字返回答案
+     * SSE 事件：
+     *   - event=citations, data=引用列表 JSON（首个事件）
+     *   - 默认事件（onmessage）：答案 token
+     *   - 最后追加 data=[DONE]
+     * @param sessionId 会话ID
+     * @param question 问题
+     * @return SSE 事件流
+     */
+    public Flux<ServerSentEvent<String>> askStreamWithCitations(String sessionId, String question) {
         // 1. 拿当前用户名
         String username = getCurrentUsername();
 
@@ -138,32 +182,37 @@ public class OpsAgentService {
 
         // 3.RAG 检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
+        String context = buildContext(documents);
+        List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
 
-        String context;
-        if (documents.isEmpty()) {
-            context = "（知识库中未找到相关内容，请基于工具查询或已有知识回答）";
-        } else {
-            context = documents.stream()
-                    .map(d -> "【来源：" + d.getMetadata().getOrDefault("source", "未知文档") + "】\n"
-                            + Objects.requireNonNullElse(d.getText(), ""))
-                    .collect(Collectors.joining("\n\n---\n\n"));
+        // 3.1 记录命中流水（对话引用来源 ASK），失败不影响主流程
+        try {
+            knowledgeHitLogService.recordHits(citations, question, KnowledgeHitLogService.SOURCE_ASK, username);
+        } catch (Exception e) {
+            log.warn("记录流式问答命中流水失败", e);
         }
+        String citationsJson = toJson(citations);
 
         // 4.拼接 System Prompt
         String systemPrompt = new PromptTemplate(SYSTEM_PROMPT).render(Map.of("context", context));
 
-        // 5.流式调用（关键：.stream() 替代 .call()）
-        // 累积 buffer
+        // 5.流式调用：citations 事件 + token 事件 + [DONE]
         StringBuilder answerBuffer = new StringBuilder();
-        return chatClient.prompt()
+        Flux<ServerSentEvent<String>> citationsEvent = Flux.just(
+                ServerSentEvent.builder("").event("citations").data(citationsJson).build());
+        Flux<ServerSentEvent<String>> tokenEvents = chatClient.prompt()
                 .system(systemPrompt)
                 .user(question)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
                 .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
                 .stream()
                 .content()
-                .doOnNext(answerBuffer::append)          // 累积
-                .concatWith(Flux.just("[DONE]"))
+                .map(token -> ServerSentEvent.builder(token).build())      // 默认 message 事件
+                .doOnNext(ev -> answerBuffer.append(String.valueOf(ev.data())));
+        Flux<ServerSentEvent<String>> doneEvent = Flux.just(
+                ServerSentEvent.builder("[DONE]").build());
+
+        return Flux.concat(citationsEvent, tokenEvents, doneEvent)
                 .doFinally(signal -> {
                     // 无论完成、出错、取消，都保存
                     String answer = answerBuffer.toString();
@@ -174,8 +223,7 @@ public class OpsAgentService {
                             log.error("保存 AI 消息失败", e);
                         }
                     }
-                })
-                ;
+                });
     }
 
     /**
@@ -188,6 +236,31 @@ public class OpsAgentService {
             return auth.getName();
         }
         return null;
+    }
+
+    /**
+     * 拼接检索上下文
+     */
+    private String buildContext(List<Document> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return "（知识库中未找到相关内容，请基于工具查询或已有知识回答）";
+        }
+        return documents.stream()
+                .map(d -> "【来源：" + d.getMetadata().getOrDefault("source", "未知文档") + "】\n"
+                        + Objects.requireNonNullElse(d.getText(), ""))
+                .collect(Collectors.joining("\n\n---\n\n"));
+    }
+
+    /**
+     * 引用列表转 JSON 字符串
+     */
+    private String toJson(List<RetrievalHitResponse> citations) {
+        try {
+            return objectMapper.writeValueAsString(citations);
+        } catch (JsonProcessingException e) {
+            log.warn("citations 序列化失败", e);
+            return "[]";
+        }
     }
 
 }

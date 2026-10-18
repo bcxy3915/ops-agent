@@ -2,6 +2,7 @@ package com.example.opsaiagent.metrics;
 
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.dto.MetricSnapshotResponse;
+import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -18,8 +20,9 @@ import java.util.concurrent.LinkedBlockingDeque;
 
 /**
  *
- * 每 10 秒轮询所有注册服务，采样关键指标，存入内存环形队列。
- * 保留最近 6 小时的采样数据。
+ * 每 10 秒轮询所有注册服务，采样关键指标。
+ * 1) 内存环形队列：保留最近 6 小时的采样数据，用于即时查询。
+ * 2) 持久化落库（metric_sample）：供告警引擎、故障快照、历史大盘使用。
  */
 @Slf4j
 @Component
@@ -33,6 +36,7 @@ public class MetricSampler {
 
     private final ServiceRegistry serviceRegistry;
     private final ActuatorMetricFetcher fetcher;
+    private final MetricSampleStore metricSampleStore;
 
     // 每个服务一份历史数据：{serviceName -> {metricName -> deque}}
     private final Map<String, Map<String, Deque<MetricPoint>>> history = new ConcurrentHashMap<>();
@@ -136,6 +140,15 @@ public class MetricSampler {
                 .build();
 
         latestSnapshots.put(name, snapshot);
+
+        // 3.5 持久化采样到数据库（供告警引擎/故障快照/历史大盘使用）
+        Map<String, Double> points = new HashMap<>();
+        points.put("cpu", cpu);
+        points.put("memory", memoryUsed / 1024 / 1024);
+        points.put("threadCount", (double) threadCount);
+        points.put("gcPause", gcPause);
+        points.put("hikariActive", (double) hikariActiveVal);
+        metricSampleStore.saveBatch(name, now, points);
 
         // 4. 存储时序点
         appendPoint(name, "cpu", now, cpu);

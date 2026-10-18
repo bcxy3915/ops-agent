@@ -2,6 +2,7 @@ package com.example.opsaiagent.metrics;
 
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.dto.MetricSnapshotResponse;
+import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
 import org.junit.jupiter.api.DisplayName;
@@ -14,13 +15,18 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * MetricSampler 单元测试
- * 覆盖：空服务列表 / 单服务采样快照 / 时序点存储 / 历史查询过滤
+ * 覆盖：空服务列表 / 单服务采样快照 / 时序点存储 / 历史查询过滤 / 落库 / 落库失败容错
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("指标采样器")
@@ -31,6 +37,9 @@ class MetricSamplerTest {
 
     @Mock
     private ActuatorMetricFetcher fetcher;
+
+    @Mock
+    private MetricSampleStore metricSampleStore;
 
     @InjectMocks
     private MetricSampler sampler;
@@ -51,10 +60,11 @@ class MetricSamplerTest {
         sampler.sample();
 
         verifyNoInteractions(fetcher);
+        verifyNoInteractions(metricSampleStore);
     }
 
     @Test
-    @DisplayName("sample：采样成功生成快照与时序点")
+    @DisplayName("sample：采样成功生成快照与时序点，并落库 5 个指标")
     void sample_success() {
         ServiceInfo service = svc("svc-a");
         when(serviceRegistry.listAll()).thenReturn(List.of(service));
@@ -88,6 +98,9 @@ class MetricSamplerTest {
         assertThat(snapshot.getHttpCount()).isZero();
         assertThat(snapshot.getHikariActive()).isEqualTo(3);
         assertThat(snapshot.getHikariPending()).isEqualTo(1);
+
+        // 落库 5 个指标
+        verify(metricSampleStore).saveBatch(eq("svc-a"), anyLong(), anyMap());
     }
 
     @Test
@@ -104,6 +117,22 @@ class MetricSamplerTest {
         assertThat(snapshot.getMemoryUsed()).isZero();
         // memMax 默认 1GB
         assertThat(snapshot.getMemoryMax()).isEqualTo(1024L * 1024 * 1024);
+    }
+
+    @Test
+    @DisplayName("sample：落库失败不影响快照生成")
+    void sample_persistFailureDoesNotBreakSampling() {
+        ServiceInfo service = svc("svc-a");
+        when(serviceRegistry.listAll()).thenReturn(List.of(service));
+        when(fetcher.fetch(anyString(), anyString()))
+                .thenReturn(new ActuatorMetricFetcher.MetricValue(0.5, 0, 0, 0));
+        doThrow(new RuntimeException("db down")).when(metricSampleStore).saveBatch(anyString(), anyLong(), anyMap());
+
+        sampler.sample();
+
+        MetricSnapshotResponse.Snapshot snapshot = sampler.getLatestSnapshot("svc-a");
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.getCpu()).isEqualTo(0.5);
     }
 
     @Test
