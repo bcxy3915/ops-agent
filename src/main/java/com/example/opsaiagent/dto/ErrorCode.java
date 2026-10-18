@@ -20,7 +20,13 @@ public enum ErrorCode {
     NOTIFICATION_CHANNEL_INVALID(1012, "通知渠道参数不合法"),
     SNAPSHOT_NOT_FOUND(1013, "故障快照不存在"),
     DIAGNOSIS_NOT_FOUND(1014, "诊断记录不存在"),
-    INTERNAL_ERROR(9999, "内部错误");
+    INTERNAL_ERROR(9999, "内部错误"),
+    KNOWLEDGE_DOCUMENT_NOT_FOUND(1015, "知识文档不存在"),
+    KNOWLEDGE_DOCUMENT_INVALID(1016, "知识文档参数不合法"),
+    KNOWLEDGE_CASE_NOT_FOUND(1017, "知识案例不存在"),
+    KNOWLEDGE_CASE_INVALID(1018, "知识案例参数不合法"),
+    KNOWLEDGE_UPLOAD_FAILED(1019, "知识文档上传失败"),
+    KNOWLEDGE_RELOAD_FAILED(1020, "知识库重载失败");
 
     private final int code;
     private final String message;
