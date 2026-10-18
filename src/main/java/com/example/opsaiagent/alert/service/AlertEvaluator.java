@@ -8,6 +8,8 @@ import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
+import com.example.opsaiagent.notification.service.NotificationCenter;
+import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -26,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   同一规则已有 FIRING 事件时不重复触发（去重）
  *   静默期 / 每小时节流内的事件以 SILENCED 状态落库
  *   不再命中时恢复最新 FIRING 事件为 RESOLVED
+ *   触发 FIRING 时生成故障快照（T12）并通知启用渠道（T10）
  */
 @Slf4j
 @Component
@@ -41,6 +44,8 @@ public class AlertEvaluator {
     private final AlertEventMapper eventMapper;
     private final MetricSampleStore metricSampleStore;
     private final AlertThrottleService throttle;
+    private final NotificationCenter notificationCenter;
+    private final FailureSnapshotService snapshotService;
 
     /** ruleId -> 连续命中起始时间戳（ms） */
     private final Map<Long, Long> sustainedSince = new ConcurrentHashMap<>();
@@ -99,11 +104,28 @@ public class AlertEvaluator {
             }
             throttle.recordFired(rule.getId(), nowMs);
             throttle.recordEvent(service, nowMs);
-            recordEvent(rule, value, nowMs, AlertEventStatus.FIRING, buildDetail(rule, value));
+            AlertEventEntity event = recordEvent(rule, value, nowMs, AlertEventStatus.FIRING, buildDetail(rule, value));
+            afterFiring(event);
         } else {
             // 不再命中：清除持续状态并恢复
             clearSustained(rule.getId());
             resolveFiring(rule.getId(), nowMs);
+        }
+    }
+
+    /**
+     * 触发 FIRING 后联动：生成故障快照 + 通知启用渠道（各自容错，不因失败中断评估）
+     */
+    private void afterFiring(AlertEventEntity event) {
+        try {
+            snapshotService.buildAndSave(event);
+        } catch (Exception e) {
+            log.warn("故障快照生成失败 eventId={}: {}", event.getId(), e.getMessage());
+        }
+        try {
+            notificationCenter.sendOnEvent(event);
+        } catch (Exception e) {
+            log.warn("告警通知发送失败 eventId={}: {}", event.getId(), e.getMessage());
         }
     }
 
@@ -182,7 +204,7 @@ public class AlertEvaluator {
         eventMapper.updateById(event);
     }
 
-    private void recordEvent(AlertRuleEntity rule, double value, long nowMs,
+    private AlertEventEntity recordEvent(AlertRuleEntity rule, double value, long nowMs,
                              AlertEventStatus status, String detail) {
         AlertEventEntity event = new AlertEventEntity();
         event.setRuleId(rule.getId());
@@ -197,6 +219,7 @@ public class AlertEvaluator {
         event.setFiredAt(LocalDateTime.now());
         event.setUpdatedAt(LocalDateTime.now());
         eventMapper.insert(event);
+        return event;
     }
 
     private String buildDetail(AlertRuleEntity rule, double value) {

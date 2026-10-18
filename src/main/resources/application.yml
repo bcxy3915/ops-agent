@@ -10,6 +10,16 @@ spring:
     async:
       request-timeout: 5m # SSE 长连接超时（默认 30s 太短，5 分钟足够）
 
+  mail:
+    # 邮件通知渠道的 SMTP 配置（T09/T11），通过环境变量注入
+    host: "${SMTP_HOST:}"
+    port: "${SMTP_PORT:465}"
+    username: "${SMTP_USERNAME:}"
+    password: "${SMTP_PASSWORD:}"
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.ssl.enable: true
+
   datasource:
     url: jdbc:postgresql://localhost:5433/opsdb
     username: postgres
@@ -121,3 +131,7 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    # 未配置 SMTP 环境变量时，禁用邮件健康检查，避免启动时尝试连接报错
+    mail:
+      enabled: false

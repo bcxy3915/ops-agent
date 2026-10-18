@@ -186,6 +186,12 @@
             <version>2.3.0</version>
         </dependency>
 
+        <!-- JavaMail：通知渠道邮件发送 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-test</artifactId>

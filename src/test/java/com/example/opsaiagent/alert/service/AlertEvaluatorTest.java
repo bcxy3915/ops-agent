@@ -7,6 +7,8 @@ import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
+import com.example.opsaiagent.notification.service.NotificationCenter;
+import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,6 +49,12 @@ class AlertEvaluatorTest {
 
     @Mock
     private AlertThrottleService throttle;
+
+    @Mock
+    private NotificationCenter notificationCenter;
+
+    @Mock
+    private FailureSnapshotService snapshotService;
 
     @InjectMocks
     private AlertEvaluator evaluator;
@@ -106,6 +114,9 @@ class AlertEvaluatorTest {
         assertThat(inserted.getFiredAt()).isNotNull();
         verify(throttle).recordFired(1L, NOW);
         verify(throttle).recordEvent("svc-a", NOW);
+        // 联动：生成故障快照 + 通知启用渠道
+        verify(snapshotService).buildAndSave(inserted);
+        verify(notificationCenter).sendOnEvent(inserted);
     }
 
     @Test
