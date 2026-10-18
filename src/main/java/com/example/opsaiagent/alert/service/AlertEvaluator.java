@@ -1,0 +1,213 @@
+package com.example.opsaiagent.alert.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.opsaiagent.alert.dto.AlertEventStatus;
+import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.alert.entity.AlertRuleEntity;
+import com.example.opsaiagent.alert.mapper.AlertEventMapper;
+import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
+import com.example.opsaiagent.metrics.dto.MetricPoint;
+import com.example.opsaiagent.metrics.store.MetricSampleStore;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * 告警评估器（T06/T07/T08）。
+ * 定时扫描所有启用规则：
+ *   从持久化采样中取当前指标值，按 compareMode（THRESHOLD / YOY / SIGMA）判断是否命中
+ *   命中需持续 duration_seconds 才触发，避免毛刺误报
+ *   同一规则已有 FIRING 事件时不重复触发（去重）
+ *   静默期 / 每小时节流内的事件以 SILENCED 状态落库
+ *   不再命中时恢复最新 FIRING 事件为 RESOLVED
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AlertEvaluator {
+
+    /** 同比基线窗口：取 24 小时前 ±2h 的采样 */
+    private static final long YOY_BASELINE_WINDOW_MS = 2 * 60 * 60 * 1000L;
+    /** σ 评估：取最近 1 小时采样 */
+    private static final long SIGMA_WINDOW_MS = 60 * 60 * 1000L;
+
+    private final AlertRuleMapper ruleMapper;
+    private final AlertEventMapper eventMapper;
+    private final MetricSampleStore metricSampleStore;
+    private final AlertThrottleService throttle;
+
+    /** ruleId -> 连续命中起始时间戳（ms） */
+    private final Map<Long, Long> sustainedSince = new ConcurrentHashMap<>();
+
+    /**
+     * 定时评估全部启用规则
+     */
+    @Scheduled(cron = "${ops-agent.alert.evaluate-cron:*/30 * * * * ?}")
+    public void evaluate() {
+        List<AlertRuleEntity> rules = ruleMapper.selectList(
+                new LambdaQueryWrapper<AlertRuleEntity>()
+                        .eq(AlertRuleEntity::getEnabled, true));
+        long now = System.currentTimeMillis();
+        for (AlertRuleEntity rule : rules) {
+            try {
+                evaluateRule(rule, now);
+            } catch (Exception e) {
+                log.warn("告警评估失败 rule={}: {}", rule.getId(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 评估单条规则
+     */
+    void evaluateRule(AlertRuleEntity rule, long nowMs) {
+        String service = rule.getService();
+        MetricPoint latest = metricSampleStore.queryLatest(service, rule.getMetric(), nowMs);
+        if (latest == null) {
+            // 无数据：无法评估，清除持续状态并尝试恢复（数据断流视为恢复）
+            clearSustained(rule.getId());
+            resolveFiring(rule.getId(), nowMs);
+            return;
+        }
+        double value = latest.getValue();
+
+        if (isHit(rule, value, nowMs)) {
+            long start = sustainedSince.computeIfAbsent(rule.getId(), k -> nowMs);
+            long sustainedSec = (nowMs - start) / 1000;
+            int durationSec = rule.getDurationSeconds() == null ? 60 : rule.getDurationSeconds();
+            if (sustainedSec < durationSec) {
+                return; // 未达持续时长，等待下次评估
+            }
+            // 去重：已有 FIRING 事件则不重复触发
+            if (findFiringId(rule.getId()) != null) {
+                return;
+            }
+            // 静默 / 节流
+            if (throttle.shouldSilence(rule.getId(), rule.getSilenceSeconds(), nowMs)) {
+                recordEvent(rule, value, nowMs, AlertEventStatus.SILENCED, "静默期内压制，未重复告警");
+                return;
+            }
+            if (!throttle.allowEvent(service, nowMs)) {
+                recordEvent(rule, value, nowMs, AlertEventStatus.SILENCED, "超出每小时告警上限");
+                return;
+            }
+            throttle.recordFired(rule.getId(), nowMs);
+            throttle.recordEvent(service, nowMs);
+            recordEvent(rule, value, nowMs, AlertEventStatus.FIRING, buildDetail(rule, value));
+        } else {
+            // 不再命中：清除持续状态并恢复
+            clearSustained(rule.getId());
+            resolveFiring(rule.getId(), nowMs);
+        }
+    }
+
+    /**
+     * 判断指标值是否命中规则
+     */
+    boolean isHit(AlertRuleEntity rule, double value, long nowMs) {
+        String mode = rule.getCompareMode() == null ? "THRESHOLD" : rule.getCompareMode();
+        return switch (mode) {
+            case "YOY" -> hitYoy(rule, value, nowMs);
+            case "SIGMA" -> hitSigma(rule, value, nowMs);
+            default -> hitThreshold(rule, value);
+        };
+    }
+
+    private boolean hitThreshold(AlertRuleEntity rule, double value) {
+        boolean gt = "gt".equalsIgnoreCase(rule.getOperator());
+        return gt ? value > rule.getThreshold() : value < rule.getThreshold();
+    }
+
+    private boolean hitYoy(AlertRuleEntity rule, double value, long nowMs) {
+        // 基线 = 24 小时前窗口内最近一次采样
+        long baselineEnd = nowMs - 24 * 60 * 60 * 1000L;
+        MetricPoint baseline = metricSampleStore.queryLatest(rule.getService(), rule.getMetric(), baselineEnd);
+        if (baseline == null || Math.abs(baseline.getValue()) < 1e-9) {
+            return false;
+        }
+        double changePct = (value - baseline.getValue()) / Math.abs(baseline.getValue()) * 100;
+        boolean gt = "gt".equalsIgnoreCase(rule.getOperator());
+        return gt ? changePct > rule.getThreshold() : changePct < -rule.getThreshold();
+    }
+
+    private boolean hitSigma(AlertRuleEntity rule, double value, long nowMs) {
+        List<MetricPoint> points = metricSampleStore.query(
+                rule.getService(), rule.getMetric(), nowMs - SIGMA_WINDOW_MS, nowMs);
+        if (points.size() < 5) {
+            return false; // 样本不足不评估
+        }
+        double mean = points.stream().mapToDouble(MetricPoint::getValue).average().orElse(0);
+        double variance = points.stream()
+                .mapToDouble(p -> Math.pow(p.getValue() - mean, 2))
+                .average().orElse(0);
+        double std = Math.sqrt(variance);
+        if (std < 1e-9) {
+            return false;
+        }
+        double z = (value - mean) / std;
+        boolean gt = "gt".equalsIgnoreCase(rule.getOperator());
+        return gt ? z > rule.getThreshold() : z < -rule.getThreshold();
+    }
+
+    private Long findFiringId(Long ruleId) {
+        List<AlertEventEntity> rows = eventMapper.selectList(
+                new LambdaQueryWrapper<AlertEventEntity>()
+                        .eq(AlertEventEntity::getRuleId, ruleId)
+                        .eq(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name())
+                        .orderByDesc(AlertEventEntity::getFiredAt)
+                        .last("LIMIT 1"));
+        return rows.isEmpty() ? null : rows.get(0).getId();
+    }
+
+    private void resolveFiring(Long ruleId, long nowMs) {
+        List<AlertEventEntity> rows = eventMapper.selectList(
+                new LambdaQueryWrapper<AlertEventEntity>()
+                        .eq(AlertEventEntity::getRuleId, ruleId)
+                        .eq(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name())
+                        .orderByDesc(AlertEventEntity::getFiredAt)
+                        .last("LIMIT 1"));
+        if (rows.isEmpty()) {
+            return;
+        }
+        AlertEventEntity event = rows.get(0);
+        event.setStatus(AlertEventStatus.RESOLVED.name());
+        event.setResolvedAt(LocalDateTime.now());
+        event.setUpdatedAt(LocalDateTime.now());
+        eventMapper.updateById(event);
+    }
+
+    private void recordEvent(AlertRuleEntity rule, double value, long nowMs,
+                             AlertEventStatus status, String detail) {
+        AlertEventEntity event = new AlertEventEntity();
+        event.setRuleId(rule.getId());
+        event.setRuleName(rule.getName());
+        event.setService(rule.getService());
+        event.setMetric(rule.getMetric());
+        event.setOperator(rule.getOperator());
+        event.setThreshold(rule.getThreshold());
+        event.setCurrentValue(value);
+        event.setStatus(status.name());
+        event.setDetail(detail);
+        event.setFiredAt(LocalDateTime.now());
+        event.setUpdatedAt(LocalDateTime.now());
+        eventMapper.insert(event);
+    }
+
+    private String buildDetail(AlertRuleEntity rule, double value) {
+        return String.format("规则[%s] 指标[%s] 当前值=%.3f %s 阈值=%.3f（%s）",
+                rule.getName(), rule.getMetric(), value,
+                "gt".equalsIgnoreCase(rule.getOperator()) ? ">" : "<",
+                rule.getThreshold(),
+                rule.getCompareMode() == null ? "THRESHOLD" : rule.getCompareMode());
+    }
+
+    private void clearSustained(Long ruleId) {
+        sustainedSince.remove(ruleId);
+    }
+}

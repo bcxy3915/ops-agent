@@ -24,6 +24,7 @@ spring:
         options:
           model: deepseek-chat
           temperature: 0.7
+          timeout: 60s # LLM 调用超时（第三方容错）
       embedding:
         base-url: https://dashscope.aliyuncs.com/compatible-mode
         api-key: ${DASHSCOPE_API_KEY:}
@@ -88,6 +89,28 @@ ops-agent:
     batch-sleep-millis: 200
     # 每天几点执行（cron 表达式，默认凌晨 3 点）
     cron: "0 0 3 * * ?"
+
+  # 第三方调用容错（超时 / 重试 / 熔断）
+  resilience:
+    connect-timeout-ms: 3000
+    read-timeout-ms: 15000
+    retry-max-attempts: 2
+    retry-wait-ms: 1000
+    cb-failure-rate-threshold: 50
+    cb-sliding-window-size: 10
+    cb-wait-duration-sec: 30
+
+  # 指标采样持久化
+  metrics:
+    # 采样数据保留天数
+    retention-days: 7
+    # 清理任务执行时间（每天凌晨 2:30）
+    cleanup-cron: "0 30 2 * * ?"
+
+  # 告警引擎
+  alert:
+    # 告警评估轮询 cron（默认每 30 秒）
+    evaluate-cron: "*/30 * * * * ?"
 
 # 管理端点
 management:

@@ -1,5 +1,8 @@
 package com.example.opsaiagent.retrieval.rerank;
 
+import com.example.opsaiagent.resilience.ResilienceProperties;
+import com.example.opsaiagent.resilience.ResilienceSupport;
+import com.example.opsaiagent.resilience.RestClientFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +19,9 @@ import java.util.Map;
 /**
  * 阿里云百炼 Reranker 实现
  * 模型：gte-rerank-v2
+ * <p>
+ * 网络调用经过 ResilienceSupport 保护：超时（RestClientFactory）+ 重试 + 熔断。
+ * 调用失败时降级为不重排（按原顺序截断）。
  */
 @Slf4j
 @Component
@@ -28,7 +34,7 @@ public class DashScopeReranker implements RerankerClient {
     private static final String API_URL =
             "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
 
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${spring.ai.openai.embedding.api-key}")
@@ -36,6 +42,12 @@ public class DashScopeReranker implements RerankerClient {
 
     @Value("${ops-agent.retrieval.rerank.model:gte-rerank-v2}")
     private String model;
+
+    public DashScopeReranker(ResilienceProperties resilienceProperties) {
+        ResilienceProperties props = resilienceProperties == null ? new ResilienceProperties() : resilienceProperties;
+        ResilienceSupport.configure(props);
+        this.restClient = RestClientFactory.builder(props).build();
+    }
 
     /**
      * 对文档列表进行重排序
@@ -68,13 +80,13 @@ public class DashScopeReranker implements RerankerClient {
                     "parameters", parameters
             );
 
-            String response = restClient.post()
+            String response = ResilienceSupport.execute("rerank", () -> restClient.post()
                     .uri(API_URL)
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .body(body)
                     .retrieve()
-                    .body(String.class);
+                    .body(String.class));
             log.debug("百炼 Reranker 响应: {}", response);
 
             return parseResponse(response, documents);

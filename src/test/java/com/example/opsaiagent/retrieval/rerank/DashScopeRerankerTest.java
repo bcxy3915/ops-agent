@@ -1,6 +1,8 @@
 package com.example.opsaiagent.retrieval.rerank;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.opsaiagent.resilience.ResilienceProperties;
+import com.example.opsaiagent.resilience.ResilienceSupport;
+import com.example.opsaiagent.resilience.RestClientFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,7 +23,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 /**
  * DashScopeReranker 单元测试
- * 覆盖：重排成功按 index 排序 / 空文档 / 接口失败降级 / 响应解析失败返回原文
+ * 覆盖：重排成功按 index 排序 / 空文档 / 接口失败降级（重试后）/ 响应解析失败返回原文 / 重试生效
  */
 @DisplayName("DashScope Reranker")
 class DashScopeRerankerTest {
@@ -34,10 +36,13 @@ class DashScopeRerankerTest {
 
     @BeforeEach
     void setUp() {
-        RestClient.Builder builder = RestClient.builder();
+        ResilienceSupport.reset();
+        ResilienceProperties props = new ResilienceProperties();
+        props.setRetryWaitMs(1);
+        RestClient.Builder builder = RestClientFactory.builder(props);
         server = MockRestServiceServer.bindTo(builder).build();
         RestClient restClient = builder.build();
-        reranker = new DashScopeReranker();
+        reranker = new DashScopeReranker(props);
         ReflectionTestUtils.setField(reranker, "restClient", restClient);
         ReflectionTestUtils.setField(reranker, "apiKey", "sk-test");
         ReflectionTestUtils.setField(reranker, "model", "gte-rerank-v2");
@@ -70,8 +75,10 @@ class DashScopeRerankerTest {
     }
 
     @Test
-    @DisplayName("rerank：接口失败降级为不重排截断")
+    @DisplayName("rerank：接口 500 时自动重试后降级为不重排截断")
     void rerank_apiFailureFallsBack() {
+        // 默认重试 2 次：两次都失败后降级
+        server.expect(requestTo(API_URL)).andRespond(withServerError());
         server.expect(requestTo(API_URL)).andRespond(withServerError());
 
         List<Document> result = reranker.rerank("q", List.of(doc("a"), doc("b"), doc("c")), 2);
