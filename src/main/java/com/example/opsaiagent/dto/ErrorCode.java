@@ -26,7 +26,10 @@ public enum ErrorCode {
     KNOWLEDGE_CASE_NOT_FOUND(1017, "知识案例不存在"),
     KNOWLEDGE_CASE_INVALID(1018, "知识案例参数不合法"),
     KNOWLEDGE_UPLOAD_FAILED(1019, "知识文档上传失败"),
-    KNOWLEDGE_RELOAD_FAILED(1020, "知识库重载失败");
+    KNOWLEDGE_RELOAD_FAILED(1020, "知识库重载失败"),
+    KNOWLEDGE_CONFLICT_NOT_FOUND(1021, "知识冲突记录不存在"),
+    KNOWLEDGE_CONFLICT_INVALID(1022, "知识冲突裁定参数不合法"),
+    KNOWLEDGE_VERSION_NOT_FOUND(1023, "知识文档版本不存在");
 
     private final int code;
     private final String message;

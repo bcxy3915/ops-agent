@@ -25,6 +25,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -104,6 +105,20 @@ class KnowledgeCaseServiceTest {
         d.setRootCause("数据库连接数达到上限，未及时释放");
         d.setConfidence(85);
         d.setCreatedAt(LocalDateTime.of(2026, 1, 2, 10, 1));
+        return d;
+    }
+
+    /** 构造主诊断记录（status=SUCCESS，非追问） */
+    private DiagnosisRecordEntity diag(Long id, String service, String rootCause, String summary, int confidence) {
+        DiagnosisRecordEntity d = new DiagnosisRecordEntity();
+        d.setId(id);
+        d.setStatus("SUCCESS");
+        d.setAlertEventId(100L);
+        d.setService(service);
+        d.setRootCause(rootCause);
+        d.setSummary(summary);
+        d.setConfidence(confidence);
+        d.setCreatedAt(LocalDateTime.now());
         return d;
     }
 
@@ -442,6 +457,79 @@ class KnowledgeCaseServiceTest {
             assertThatThrownBy(() -> service.discard(1L))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("故障案例不存在");
+        }
+    }
+
+    @Nested
+    @DisplayName("P1-⑤ 案例自动生成")
+    class GenerateCandidatesTests {
+
+        @Test
+        @DisplayName("成功：从成功主诊断记录生成待确认候选并去重")
+        void generate_newCandidates() {
+            DiagnosisRecordEntity d1 = diag(1L, "todo-service", "连接池耗尽", "连接池打满", 85);
+            DiagnosisRecordEntity d2 = diag(2L, "todo-service", "磁盘满", null, 90);
+            when(diagnosisRecordMapper.selectList(any())).thenReturn(List.of(d1, d2));
+            when(caseMapper.selectCount(any())).thenReturn(0L);
+
+            int generated = service.generateCandidates(10);
+
+            assertThat(generated).isEqualTo(2);
+            ArgumentCaptor<KnowledgeCaseEntity> captor = ArgumentCaptor.forClass(KnowledgeCaseEntity.class);
+            verify(caseMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
+            KnowledgeCaseEntity first = captor.getAllValues().get(0);
+            assertThat(first.getDiagnosisRecordId()).isEqualTo(1L);
+            assertThat(first.getSourceAlertId()).isEqualTo(100L);
+            assertThat(first.getTitle()).contains("[todo-service]").contains("连接池耗尽");
+            assertThat(first.getSymptom()).isEqualTo("连接池打满");
+            assertThat(first.getRootCause()).isEqualTo("连接池耗尽");
+            assertThat(first.getConfidence()).isEqualTo(85);
+            assertThat(first.getStatus()).isEqualTo("PENDING");
+            assertThat(first.getMaskedStatus()).isEqualTo("NONE");
+            assertThat(first.getCitedCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("已存在候选跳过：诊断记录已生成过案例不重复")
+        void generate_skipExisting() {
+            DiagnosisRecordEntity d1 = diag(1L, "todo-service", "连接池耗尽", "连接池打满", 85);
+            when(diagnosisRecordMapper.selectList(any())).thenReturn(List.of(d1));
+            when(caseMapper.selectCount(any())).thenReturn(1L);
+
+            int generated = service.generateCandidates(10);
+
+            assertThat(generated).isZero();
+            verify(caseMapper, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("诊断记录为空：返回 0 且不插入")
+        void generate_noRecords() {
+            when(diagnosisRecordMapper.selectList(any())).thenReturn(List.of());
+            assertThat(service.generateCandidates(20)).isZero();
+            verify(caseMapper, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("标题/症状兜底：无根因用摘要，无摘要用规则名+指标")
+        void generate_fallbackFields() {
+            DiagnosisRecordEntity d1 = new DiagnosisRecordEntity();
+            d1.setId(3L);
+            d1.setStatus("SUCCESS");
+            d1.setService("cache-service");
+            d1.setRuleName("缓存命中率过低");
+            d1.setMetric("hit_rate");
+            d1.setRootCause(null);
+            d1.setSummary(null);
+            when(diagnosisRecordMapper.selectList(any())).thenReturn(List.of(d1));
+            when(caseMapper.selectCount(any())).thenReturn(0L);
+
+            service.generateCandidates(10);
+
+            ArgumentCaptor<KnowledgeCaseEntity> captor = ArgumentCaptor.forClass(KnowledgeCaseEntity.class);
+            verify(caseMapper).insert(captor.capture());
+            assertThat(captor.getValue().getTitle()).contains("诊断记录");
+            assertThat(captor.getValue().getSymptom()).isEqualTo("缓存命中率过低：hit_rate");
         }
     }
 }

@@ -190,6 +190,77 @@ public class KnowledgeCaseService {
     }
 
     /**
+     * 案例自动生成（P1）
+     * 从成功的主诊断记录（status=SUCCESS 且非追问）批量生成待确认候选案例，按诊断记录去重。
+     * @param limit 本次最多生成条数（1~100）
+     * @return 本次新生成的候选数量
+     */
+    @Transactional
+    public int generateCandidates(int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), 100);
+        List<DiagnosisRecordEntity> records = diagnosisRecordMapper.selectList(
+                new LambdaQueryWrapper<DiagnosisRecordEntity>()
+                        .eq(DiagnosisRecordEntity::getStatus, "SUCCESS")
+                        .isNull(DiagnosisRecordEntity::getQuestion)
+                        .orderByDesc(DiagnosisRecordEntity::getCreatedAt)
+                        .last("LIMIT " + safeLimit));
+
+        int generated = 0;
+        for (DiagnosisRecordEntity diag : records) {
+            Long existed = caseMapper.selectCount(new LambdaQueryWrapper<KnowledgeCaseEntity>()
+                    .eq(KnowledgeCaseEntity::getDiagnosisRecordId, diag.getId()));
+            if (existed != null && existed > 0) {
+                continue;
+            }
+            KnowledgeCaseEntity entity = new KnowledgeCaseEntity();
+            entity.setSourceAlertId(diag.getAlertEventId());
+            entity.setDiagnosisRecordId(diag.getId());
+            entity.setService(diag.getService());
+            entity.setTitle(buildCaseTitle(diag));
+            entity.setSymptom(buildCaseSymptom(diag));
+            entity.setRootCause(diag.getRootCause());
+            entity.setEvidence(diag.getEvidence());
+            entity.setConfidence(diag.getConfidence());
+            entity.setMaskedStatus(MASK_NONE);
+            entity.setStatus(STATUS_PENDING);
+            entity.setCitedCount(0);
+            caseMapper.insert(entity);
+            generated++;
+        }
+        if (generated > 0) {
+            log.info("案例自动生成完成: 新候选 {} 条（本次扫描 {} 条诊断）", generated, records.size());
+        }
+        return generated;
+    }
+
+    /**
+     * 由诊断记录拼接案例标题
+     * @param diag 诊断记录
+     * @return 案例标题（截断 100 字）
+     */
+    private String buildCaseTitle(DiagnosisRecordEntity diag) {
+        String base = StringUtils.hasText(diag.getRootCause()) ? diag.getRootCause()
+                : (StringUtils.hasText(diag.getSummary()) ? diag.getSummary() : "诊断记录");
+        String prefix = StringUtils.hasText(diag.getService()) ? "[" + diag.getService() + "] " : "";
+        return truncate(prefix + "故障根因：" + base, 100);
+    }
+
+    /**
+     * 由诊断记录拼接故障现象
+     * @param diag 诊断记录
+     * @return 症状描述
+     */
+    private String buildCaseSymptom(DiagnosisRecordEntity diag) {
+        if (StringUtils.hasText(diag.getSummary())) {
+            return diag.getSummary();
+        }
+        if (StringUtils.hasText(diag.getRuleName())) {
+            return diag.getRuleName() + (diag.getMetric() == null ? "" : "：" + diag.getMetric());
+        }
+        return "AI 诊断异常";
+    }
+
+    /**
      * 沉淀 CASE 知识文档：生成文档实体 → 分块 → 写 chunk → 向量化
      */
     private void indexCaseDocument(KnowledgeCaseEntity entity) {

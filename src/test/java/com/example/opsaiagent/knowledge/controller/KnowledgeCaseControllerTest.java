@@ -209,6 +209,7 @@ class KnowledgeCaseControllerTest {
         assertWriteRequires("confirm", Long.class);
         assertWriteRequires("revise", Long.class, CaseReviseRequest.class);
         assertWriteRequires("discard", Long.class);
+        assertWriteRequires("generate", int.class);
     }
 
     @Test
@@ -227,5 +228,18 @@ class KnowledgeCaseControllerTest {
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("ADMIN").contains("OPERATOR");
+    }
+
+    // ==================== P1-⑤ 案例自动生成 ====================
+
+    @Test
+    @DisplayName("POST /api/knowledge/cases/generate：返回生成数量")
+    void generate() throws Exception {
+        when(caseService.generateCandidates(20)).thenReturn(5);
+
+        mvc.perform(post("/api/knowledge/cases/generate").param("limit", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generated").value(5));
+        verify(caseService).generateCandidates(20);
     }
 }

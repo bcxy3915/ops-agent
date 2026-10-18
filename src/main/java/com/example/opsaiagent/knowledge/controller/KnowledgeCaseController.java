@@ -50,6 +50,15 @@ public class KnowledgeCaseController {
         return ApiResponse.success(caseService.getById(id));
     }
 
+    @Operation(summary = "自动生成案例候选", description = "从成功主诊断记录批量生成待确认候选，按诊断记录去重，需 ADMIN 或 OPERATOR 角色")
+    @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @AuditLog(operation = "CASE_GENERATE", description = "自动生成故障案例")
+    @PostMapping("/generate")
+    public ApiResponse<Map<String, Integer>> generate(@RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.success(Map.of("generated", caseService.generateCandidates(limit)));
+    }
+
     @Operation(summary = "确认沉淀案例", description = "PENDING → CONFIRMED，生成 CASE 层知识文档并分块向量化，需 ADMIN 或 OPERATOR 角色")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")

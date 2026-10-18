@@ -7,8 +7,10 @@ import com.example.opsaiagent.dto.PageResult;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
+import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,13 +58,16 @@ class KnowledgeDocumentServiceTest {
     private VectorStore vectorStore;
     @Mock
     private JdbcTemplate jdbcTemplate;
+    @Mock
+    private KnowledgeVersionService versionService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private KnowledgeDocumentService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorStore, jdbcTemplate, objectMapper);
+        service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorStore, jdbcTemplate, objectMapper,
+                versionService);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 
@@ -458,5 +463,129 @@ class KnowledgeDocumentServiceTest {
         assertThat(service.extractSection("", "TXT")).isNull();
         assertThat(service.extractSection("  ", "TXT")).isNull();
         assertThat(service.extractSection(null, "TXT")).isNull();
+    }
+
+    // ==================== P1-⑤ 在线编写 / 超期判定 ====================
+
+    @Test
+    @DisplayName("onlineCreate：创建待审核文档，source 为 online 前缀，默认元数据正确")
+    void onlineCreate_success() {
+        KnowledgeOnlineCreateRequest req = new KnowledgeOnlineCreateRequest();
+        req.setTitle("Nginx 部署手册");
+        req.setContent("# Nginx\n配置说明");
+        req.setOwner("ops");
+        req.setServiceIds(List.of("todo-service"));
+        req.setTags(List.of("nginx"));
+
+        service.onlineCreate(req);
+
+        ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+        verify(documentMapper).insert(captor.capture());
+        KnowledgeDocumentEntity saved = captor.getValue();
+        assertThat(saved.getTitle()).isEqualTo("Nginx 部署手册");
+        assertThat(saved.getDocType()).isEqualTo("MARKDOWN");
+        assertThat(saved.getLayer()).isEqualTo("PRIVATE");
+        assertThat(saved.getTrustStatus()).isEqualTo("PENDING");
+        assertThat(saved.getVersion()).isEqualTo(1);
+        assertThat(saved.getHitCount()).isEqualTo(0L);
+        assertThat(saved.getChunkCount()).isZero();
+        assertThat(saved.getSource()).startsWith("online:");
+        assertThat(saved.getFilePath()).startsWith("online:");
+        assertThat(saved.getEffectiveAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("onlineCreate：标题或内容为空抛参数异常")
+    void onlineCreate_blankRejected() {
+        KnowledgeOnlineCreateRequest emptyTitle = new KnowledgeOnlineCreateRequest();
+        emptyTitle.setContent("内容");
+        assertThatThrownBy(() -> service.onlineCreate(emptyTitle))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+
+        KnowledgeOnlineCreateRequest emptyContent = new KnowledgeOnlineCreateRequest();
+        emptyContent.setTitle("标题");
+        assertThatThrownBy(() -> service.onlineCreate(emptyContent))
+                .isInstanceOf(BusinessException.class);
+
+        assertThatThrownBy(() -> service.onlineCreate(null))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("expireOverdueDocuments：复核到期的 VERIFIED 文档标记为 EXPIRED")
+    void expireOverdueDocuments_marksOverdue() {
+        KnowledgeDocumentEntity overdue = doc(1L, "旧文档", "VERIFIED", "PRIVATE", "内容");
+        overdue.setReviewAt(LocalDateTime.now().minusDays(3));
+        KnowledgeDocumentEntity ok = doc(2L, "正常文档", "VERIFIED", "PRIVATE", "内容");
+        ok.setReviewAt(LocalDateTime.now().plusDays(3));
+        when(documentMapper.selectList(any())).thenReturn(List.of(overdue, ok));
+
+        int count = service.expireOverdueDocuments();
+
+        assertThat(count).isEqualTo(2);
+        ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+        verify(documentMapper, org.mockito.Mockito.times(2)).updateById(captor.capture());
+        assertThat(captor.getAllValues()).allMatch(d -> "EXPIRED".equals(d.getTrustStatus()));
+    }
+
+    @Test
+    @DisplayName("expireOverdueDocuments：无到期文档返回 0")
+    void expireOverdueDocuments_none() {
+        when(documentMapper.selectList(any())).thenReturn(List.of());
+        assertThat(service.expireOverdueDocuments()).isZero();
+    }
+
+    // ==================== P2-① 版本回滚 ====================
+
+    @Test
+    @DisplayName("rollback：回滚到历史版本并重新分块入库")
+    void rollback_success() {
+        KnowledgeDocumentVersionEntity target = new KnowledgeDocumentVersionEntity();
+        target.setId(5L);
+        target.setDocId(1L);
+        target.setVersion(1);
+        target.setContentSnapshot("历史版本内容");
+        when(versionService.requireVersion(1L, 5L)).thenReturn(target);
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "当前内容"));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+
+        KnowledgeDocumentResponse r = service.rollback(1L, 5L);
+
+        assertThat(r.getRawContent()).isEqualTo("历史版本内容");
+        assertThat(r.getVersion()).isEqualTo(2);
+        assertThat(r.getTrustStatus()).isEqualTo("PENDING");
+        // 回滚前先备份当前内容为历史快照
+        verify(versionService).recordSnapshot(eq(1L), eq("当前内容"), any(), eq("ROLLBACK_BACKUP"));
+        verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
+        verify(vectorStore).add(anyList());
+        verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
+    }
+
+    @Test
+    @DisplayName("rollback：目标版本不存在抛业务异常")
+    void rollback_versionNotFound() {
+        when(versionService.requireVersion(1L, 999L))
+                .thenThrow(new BusinessException(ErrorCode.KNOWLEDGE_VERSION_NOT_FOUND, "知识文档版本不存在"));
+
+        assertThatThrownBy(() -> service.rollback(1L, 999L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_VERSION_NOT_FOUND);
+        verify(documentMapper, never()).updateById(any());
+    }
+
+    @Test
+    @DisplayName("rollback：文档不存在抛业务异常")
+    void rollback_documentNotFound() {
+        KnowledgeDocumentVersionEntity target = new KnowledgeDocumentVersionEntity();
+        target.setId(5L);
+        target.setDocId(99L);
+        target.setVersion(1);
+        when(versionService.requireVersion(99L, 5L)).thenReturn(target);
+
+        assertThatThrownBy(() -> service.rollback(99L, 5L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
     }
 }

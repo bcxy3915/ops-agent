@@ -63,9 +63,12 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("chunkCount", "chunk_count")
                 .containsEntry("submittedAt", "submitted_at")
                 .containsEntry("lastReviewAt", "last_review_at")
+                .containsEntry("effectiveAt", "effective_at")
+                .containsEntry("reviewAt", "review_at")
+                .containsEntry("conflictStatus", "conflict_status")
                 .containsEntry("createdAt", "created_at")
                 .containsEntry("updatedAt", "updated_at");
-        assertThat(map).hasSize(17);
+        assertThat(map).hasSize(20);
     }
 
     @Test
@@ -151,5 +154,79 @@ class KnowledgeEntityMappingTest {
                 .contains("VERIFIED", "PENDING", "AI_DRAFT", "EXPIRED");
         assertThat(new String[]{"PENDING", "CONFIRMED", "DISCARDED"})
                 .contains("PENDING", "CONFIRMED", "DISCARDED");
+    }
+
+    // ==================== knowledge_hit_log（P1） ====================
+
+    @Test
+    @DisplayName("knowledge_hit_log：表名与主键")
+    void hitLog_tableNameAndId() {
+        TableInfo info = tableInfo(KnowledgeHitLogEntity.class);
+        assertThat(info.getTableName()).isEqualTo("knowledge_hit_log");
+        assertThat(info.getKeyProperty()).isEqualTo("id");
+        assertThat(info.getKeyColumn()).isEqualTo("id");
+    }
+
+    @Test
+    @DisplayName("knowledge_hit_log：全部字段列名映射正确")
+    void hitLog_columns() {
+        Map<String, String> map = columnByProperty(tableInfo(KnowledgeHitLogEntity.class));
+        assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("query", "query")
+                .containsEntry("hitSource", "hit_source")
+                .containsEntry("channel", "channel")
+                .containsEntry("createdAt", "created_at");
+        assertThat(map).hasSize(5);
+    }
+
+    // ==================== knowledge_conflict（P1） ====================
+
+    @Test
+    @DisplayName("knowledge_conflict：表名与主键")
+    void conflict_tableNameAndId() {
+        TableInfo info = tableInfo(KnowledgeConflictEntity.class);
+        assertThat(info.getTableName()).isEqualTo("knowledge_conflict");
+        assertThat(info.getKeyProperty()).isEqualTo("id");
+        assertThat(info.getKeyColumn()).isEqualTo("id");
+    }
+
+    @Test
+    @DisplayName("knowledge_conflict：全部字段列名映射正确")
+    void conflict_columns() {
+        Map<String, String> map = columnByProperty(tableInfo(KnowledgeConflictEntity.class));
+        assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("matchedDocId", "matched_doc_id")
+                .containsEntry("conflictType", "conflict_type")
+                .containsEntry("similarity", "similarity")
+                .containsEntry("status", "status")
+                .containsEntry("decision", "decision")
+                .containsEntry("resolvedBy", "resolved_by")
+                .containsEntry("createdAt", "created_at")
+                .containsEntry("resolvedAt", "resolved_at");
+        assertThat(map).hasSize(9);
+    }
+
+    // ==================== knowledge_document_version（P2） ====================
+
+    @Test
+    @DisplayName("knowledge_document_version：表名与主键")
+    void version_tableNameAndId() {
+        TableInfo info = tableInfo(KnowledgeDocumentVersionEntity.class);
+        assertThat(info.getTableName()).isEqualTo("knowledge_document_version");
+        assertThat(info.getKeyProperty()).isEqualTo("id");
+        assertThat(info.getKeyColumn()).isEqualTo("id");
+    }
+
+    @Test
+    @DisplayName("knowledge_document_version：全部字段列名映射正确")
+    void version_columns() {
+        Map<String, String> map = columnByProperty(tableInfo(KnowledgeDocumentVersionEntity.class));
+        assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("version", "version")
+                .containsEntry("contentSnapshot", "content_snapshot")
+                .containsEntry("changedBy", "changed_by")
+                .containsEntry("changeReason", "change_reason")
+                .containsEntry("createdAt", "created_at");
+        assertThat(map).hasSize(6);
     }
 }

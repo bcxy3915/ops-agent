@@ -81,6 +81,18 @@ public class KnowledgeDocumentEntity {
     @TableField("last_review_at")
     private LocalDateTime lastReviewAt;
 
+    /** 生效日期（P1：在线编写/编辑时设置） */
+    @TableField("effective_at")
+    private LocalDateTime effectiveAt;
+
+    /** 复核到期时间（P1：超期判定依据，到期后文档标记为 EXPIRED） */
+    @TableField("review_at")
+    private LocalDateTime reviewAt;
+
+    /** 冲突状态（P1：NONE / KEEP_NEW / KEEP_OLD / MANUAL） */
+    @TableField("conflict_status")
+    private String conflictStatus;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

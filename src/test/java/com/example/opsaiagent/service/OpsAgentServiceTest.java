@@ -3,6 +3,7 @@ package com.example.opsaiagent.service;
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.chat.service.ConversationService;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
+import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.HealthCheckTools;
@@ -70,6 +71,9 @@ class OpsAgentServiceTest {
     @Mock
     private KnowledgeRetrievalService knowledgeRetrievalService;
 
+    @Mock
+    private KnowledgeHitLogService knowledgeHitLogService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private OpsAgentService service;
@@ -80,7 +84,7 @@ class OpsAgentServiceTest {
                 chatClient, healthCheckTools, metricQueryTools,
                 metricDiscoveryTools, serviceDiscoveryTools,
                 hybridRetriever, conversationService,
-                knowledgeRetrievalService, objectMapper);
+                knowledgeRetrievalService, knowledgeHitLogService, objectMapper);
     }
 
     @AfterEach

@@ -71,6 +71,8 @@ public class SnapshotData {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ServiceStatusView {
         private String status;
         private LocalDateTime lastCheckedAt;

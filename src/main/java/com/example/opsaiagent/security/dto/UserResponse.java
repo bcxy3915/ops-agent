@@ -3,13 +3,17 @@ package com.example.opsaiagent.security.dto;
 import com.example.opsaiagent.sensitive.Sensitive;
 import com.example.opsaiagent.sensitive.SensitiveType;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Schema(description = "用户信息响应（敏感字段已脱敏）")
 public class UserResponse {
 

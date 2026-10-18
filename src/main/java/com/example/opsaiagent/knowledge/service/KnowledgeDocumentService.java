@@ -8,10 +8,13 @@ import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeChunkResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
+import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
+import com.example.opsaiagent.util.SecurityUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,8 +62,12 @@ public class KnowledgeDocumentService {
     public static final String TRUST_VERIFIED = "VERIFIED";
     /** 待审核 */
     public static final String TRUST_PENDING = "PENDING";
+    /** 复核到期（自动超期判定标记） */
+    public static final String TRUST_EXPIRED = "EXPIRED";
     /** 上传文档向量在 vector_store.metadata.source 的前缀 */
     public static final String UPLOAD_VECTOR_SOURCE_PREFIX = "upload:";
+    /** 在线编写文档 source 前缀 */
+    public static final String ONLINE_SOURCE_PREFIX = "online:";
 
     private static final Pattern MD_HEADING = Pattern.compile("^#{1,6}\\s+(.+)$", Pattern.MULTILINE);
 
@@ -69,6 +76,7 @@ public class KnowledgeDocumentService {
     private final VectorStore vectorStore;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final KnowledgeVersionService versionService;
 
     /**
      * 分页查询文档列表
@@ -171,6 +179,78 @@ public class KnowledgeDocumentService {
     }
 
     /**
+     * 在线编写知识文档（P1）
+     * 与上传文档同流程：先保存为待审核，审核通过后分块向量化入库。
+     * @param request 在线编写请求（title/content 必填）
+     * @return 文档响应
+     */
+    @Transactional
+    public KnowledgeDocumentResponse onlineCreate(KnowledgeOnlineCreateRequest request) {
+        if (request == null || !StringUtils.hasText(request.getTitle()) || !StringUtils.hasText(request.getContent())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "标题和内容不能为空");
+        }
+        String title = request.getTitle().trim();
+
+        KnowledgeDocumentEntity entity = new KnowledgeDocumentEntity();
+        entity.setTitle(title);
+        entity.setDocType("MARKDOWN");
+        entity.setLayer(LAYER_PRIVATE);
+        entity.setTrustStatus(TRUST_PENDING);
+        entity.setVersion(1);
+        entity.setOwner(request.getOwner());
+        entity.setServiceIds(toJson(request.getServiceIds()));
+        entity.setTags(toJson(request.getTags()));
+        entity.setHitCount(0L);
+        entity.setSource(ONLINE_SOURCE_PREFIX + title);
+        entity.setFilePath(ONLINE_SOURCE_PREFIX + title);
+        entity.setRawContent(request.getContent());
+        entity.setChunkCount(0);
+        entity.setEffectiveAt(LocalDateTime.now());
+        entity.setSubmittedAt(LocalDateTime.now());
+        documentMapper.insert(entity);
+        // 记录初始版本快照，便于后续编辑回滚
+        versionService.recordSnapshot(entity.getId(), request.getContent(),
+                StringUtils.hasText(request.getOwner()) ? request.getOwner() : currentUsername(),
+                KnowledgeVersionService.REASON_ONLINE_CREATE);
+        log.info("在线编写知识文档成功: id={}, title={}", entity.getId(), entity.getTitle());
+        return toResponse(entity, false);
+    }
+
+    /**
+     * 获取当前登录用户名，未登录时返回 system
+     * @return 用户名
+     */
+    private String currentUsername() {
+        String username = SecurityUtils.getCurrentUsername();
+        return StringUtils.hasText(username) ? username : "system";
+    }
+
+    /**
+     * 自动超期判定（P1）
+     * 扫描所有已复核到期（review_at < now）的 VERIFIED 文档，标记为 EXPIRED。
+     * @return 被标记为过期的文档数量
+     */
+    @Transactional
+    public int expireOverdueDocuments() {
+        LocalDateTime now = LocalDateTime.now();
+        List<KnowledgeDocumentEntity> overdue = documentMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                        .eq(KnowledgeDocumentEntity::getTrustStatus, TRUST_VERIFIED)
+                        .isNotNull(KnowledgeDocumentEntity::getReviewAt)
+                        .lt(KnowledgeDocumentEntity::getReviewAt, now));
+        int count = 0;
+        for (KnowledgeDocumentEntity doc : overdue) {
+            doc.setTrustStatus(TRUST_EXPIRED);
+            documentMapper.updateById(doc);
+            count++;
+        }
+        if (count > 0) {
+            log.info("自动超期判定完成: 过期文档 {} 篇", count);
+        }
+        return count;
+    }
+
+    /**
      * 发布审核
      * @param id 文档 ID
      * @param approved true=通过（向量化入库）；false=驳回（保持待处理）
@@ -231,10 +311,44 @@ public class KnowledgeDocumentService {
             deleteChunksAndVectors(id);
             documentMapper.updateById(entity);
             chunkAndIndex(entity);
+            // 记录变更后的版本快照，支持历史回滚
+            versionService.recordSnapshot(id, request.getRawContent(), currentUsername(),
+                    KnowledgeVersionService.REASON_UPDATE);
         } else {
             documentMapper.updateById(entity);
         }
         return toResponse(requireDocument(id), true);
+    }
+
+    /**
+     * 回滚文档到指定历史版本（P2）
+     * 回滚前先把当前内容备份为一条历史快照，再以目标版本内容覆盖文档；
+     * 文档版本号 +1、状态重置为待审核，并重新分块向量化入库。
+     * @param docId 文档 ID
+     * @param versionId 目标版本记录 ID
+     * @return 回滚后的文档响应
+     */
+    @Transactional
+    public KnowledgeDocumentResponse rollback(Long docId, Long versionId) {
+        KnowledgeDocumentVersionEntity target = versionService.requireVersion(docId, versionId);
+        KnowledgeDocumentEntity entity = requireDocument(docId);
+
+        // 1. 备份当前内容为历史版本，保留回滚现场
+        versionService.recordSnapshot(docId, entity.getRawContent(), currentUsername(),
+                KnowledgeVersionService.REASON_ROLLBACK_BACKUP);
+
+        // 2. 用目标版本内容覆盖文档
+        entity.setRawContent(target.getContentSnapshot());
+        entity.setVersion(entity.getVersion() == null ? 1 : entity.getVersion() + 1);
+        entity.setTrustStatus(TRUST_PENDING);
+        entity.setSubmittedAt(LocalDateTime.now());
+
+        // 3. 清理旧分块与向量，重新入库
+        deleteChunksAndVectors(docId);
+        documentMapper.updateById(entity);
+        chunkAndIndex(entity);
+        log.info("知识文档版本回滚: docId={}, versionId={}, version={}", docId, versionId, target.getVersion());
+        return toResponse(requireDocument(docId), true);
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.example.opsaiagent.notification.dto;
 
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -10,6 +12,8 @@ import java.time.LocalDateTime;
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class NotificationRecordResponse {
 
     private Long id;

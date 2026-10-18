@@ -32,7 +32,11 @@ public enum AuditOperation {
     CONFIRM_CASE("确认沉淀故障案例"),
     REVISE_CASE("修正沉淀故障案例"),
     DISCARD_CASE("丢弃故障案例候选"),
-    RELOAD_KNOWLEDGE("重建知识库索引");
+    RELOAD_KNOWLEDGE("重建知识库索引"),
+    ONLINE_CREATE_KNOWLEDGE("在线编写知识文档"),
+    CONFLICT_RESOLVE("裁定知识冲突"),
+    CASE_GENERATE("自动生成故障案例"),
+    ROLLBACK_KNOWLEDGE("回滚知识文档版本");
 
     /** 操作中文名 */
     private final String label;

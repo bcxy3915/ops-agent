@@ -46,3 +46,4 @@ application-local.yml
 !.env.example
 
 /docs/design
+.runtime/

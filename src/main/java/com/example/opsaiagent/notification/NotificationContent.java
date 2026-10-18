@@ -1,6 +1,8 @@
 package com.example.opsaiagent.notification;
 
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 
 /**
@@ -8,6 +10,8 @@ import lombok.Data;
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class NotificationContent {
 
     /** 标题 */

@@ -1,6 +1,8 @@
 package com.example.opsaiagent.knowledge.dto;
 
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -11,6 +13,8 @@ import java.time.LocalDateTime;
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class KnowledgeCaseSummaryResponse {
 
     private Long id;

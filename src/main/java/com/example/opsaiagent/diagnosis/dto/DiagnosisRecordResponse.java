@@ -2,6 +2,8 @@ package com.example.opsaiagent.diagnosis.dto;
 
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,6 +15,8 @@ import java.util.List;
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class DiagnosisRecordResponse {
 
     private Long id;

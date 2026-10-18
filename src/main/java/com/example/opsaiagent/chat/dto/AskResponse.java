@@ -2,6 +2,8 @@ package com.example.opsaiagent.chat.dto;
 
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.util.List;
@@ -13,6 +15,8 @@ import java.util.List;
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class AskResponse {
 
     private String sessionId;

@@ -4,6 +4,7 @@ import com.example.opsaiagent.dto.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgePublishRequest;
 import com.example.opsaiagent.knowledge.service.KnowledgeDocumentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -244,7 +245,32 @@ class KnowledgeDocumentControllerTest {
         verify(documentService).delete(1L);
     }
 
-    // ==================== 鉴权注解 ====================
+    // ==================== P1-⑤ 在线编写 / 超期扫描 ====================
+
+    @Test
+    @DisplayName("POST /api/knowledge/documents/online-create：在线编写返回待审核文档")
+    void onlineCreate() throws Exception {
+        when(documentService.onlineCreate(any())).thenReturn(KnowledgeDocumentResponse.builder()
+                .id(9L).title("Nginx 手册").docType("MARKDOWN").layer("PRIVATE")
+                .trustStatus("PENDING").version(1).build());
+
+        mvc.perform(post("/api/knowledge/documents/online-create")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Nginx 手册\",\"content\":\"配置说明\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("Nginx 手册"))
+                .andExpect(jsonPath("$.data.trustStatus").value("PENDING"));
+    }
+
+    @Test
+    @DisplayName("POST /api/knowledge/documents/expire-scan：返回过期标记数量")
+    void expireScan() throws Exception {
+        when(documentService.expireOverdueDocuments()).thenReturn(3);
+
+        mvc.perform(post("/api/knowledge/documents/expire-scan"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.expired").value(3));
+    }
 
     @Test
     @DisplayName("鉴权：写接口要求 ADMIN/OPERATOR")
@@ -253,6 +279,8 @@ class KnowledgeDocumentControllerTest {
         assertWriteRequires("publish", Long.class, KnowledgePublishRequest.class);
         assertWriteRequires("update", Long.class, KnowledgeDocumentUpdateRequest.class);
         assertWriteRequires("delete", Long.class);
+        assertWriteRequires("onlineCreate", KnowledgeOnlineCreateRequest.class);
+        assertWriteRequires("expireScan");
     }
 
     @Test

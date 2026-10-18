@@ -3,6 +3,7 @@ package com.example.opsaiagent.service;
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.chat.service.ConversationService;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
+import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.HealthCheckTools;
@@ -46,6 +47,7 @@ public class OpsAgentService {
     private final HybridRetriever hybridRetriever;
     private final ConversationService conversationService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
+    private final KnowledgeHitLogService knowledgeHitLogService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -125,6 +127,15 @@ public class OpsAgentService {
 
         // 5.构建结构化引用
         List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
+
+        // 6.记录命中流水（对话引用来源 ASK），失败不影响主流程
+        try {
+            knowledgeHitLogService.recordHits(citations, question,
+                    KnowledgeHitLogService.SOURCE_ASK, getCurrentUsername());
+        } catch (Exception e) {
+            log.warn("记录问答命中流水失败", e);
+        }
+
         return AskResponse.builder()
                 .sessionId(sessionId)
                 .question(question)
@@ -173,6 +184,13 @@ public class OpsAgentService {
         List<Document> documents = hybridRetriever.retrieve(question, 5);
         String context = buildContext(documents);
         List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
+
+        // 3.1 记录命中流水（对话引用来源 ASK），失败不影响主流程
+        try {
+            knowledgeHitLogService.recordHits(citations, question, KnowledgeHitLogService.SOURCE_ASK, username);
+        } catch (Exception e) {
+            log.warn("记录流式问答命中流水失败", e);
+        }
         String citationsJson = toJson(citations);
 
         // 4.拼接 System Prompt

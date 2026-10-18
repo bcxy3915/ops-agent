@@ -5,6 +5,7 @@ import com.example.opsaiagent.dto.ApiResponse;
 import com.example.opsaiagent.dto.PageResult;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgePublishRequest;
 import com.example.opsaiagent.knowledge.service.KnowledgeDocumentService;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
@@ -73,6 +74,24 @@ public class KnowledgeDocumentController {
             @RequestParam(required = false) String tags) {
         return ApiResponse.success(documentService.upload(
                 file, title, layer, owner, split(serviceIds), split(tags)));
+    }
+
+    @Operation(summary = "在线编写知识文档", description = "直接填写标题与正文创建文档，保存为待审核，需 ADMIN 或 OPERATOR 角色")
+    @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @AuditLog(operation = "ONLINE_CREATE_KNOWLEDGE", description = "在线编写知识文档")
+    @PostMapping("/online-create")
+    public ApiResponse<KnowledgeDocumentResponse> onlineCreate(@Valid @RequestBody KnowledgeOnlineCreateRequest request) {
+        return ApiResponse.success(documentService.onlineCreate(request));
+    }
+
+    @Operation(summary = "自动超期判定", description = "扫描复核到期的 VERIFIED 文档并标记为 EXPIRED，需 ADMIN 或 OPERATOR 角色")
+    @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @AuditLog(operation = "UPDATE_KNOWLEDGE", description = "自动超期判定")
+    @PostMapping("/expire-scan")
+    public ApiResponse<Map<String, Integer>> expireScan() {
+        return ApiResponse.success(Map.of("expired", documentService.expireOverdueDocuments()));
     }
 
     @Operation(summary = "发布审核", description = "通过则向量化入库（VERIFIED），驳回保持待审核，需 ADMIN 或 OPERATOR 角色")
