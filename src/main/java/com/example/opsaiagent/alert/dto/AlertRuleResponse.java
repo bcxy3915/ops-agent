@@ -1,11 +1,12 @@
 package com.example.opsaiagent.alert.dto;
 
-import lombok.Builder;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 告警规则响应
@@ -27,6 +28,13 @@ public class AlertRuleResponse {
     private Integer durationSeconds;
     private Integer silenceSeconds;
     private Boolean enabled;
+
+    /** 升级策略 */
+    private Boolean escalationEnabled;
+    private Integer escalationIntervalSeconds;
+    private Integer escalationMaxLevel;
+    private List<AlertRuleLevelDto> escalationLevels;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

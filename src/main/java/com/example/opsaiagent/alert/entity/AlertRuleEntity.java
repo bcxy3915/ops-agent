@@ -59,6 +59,18 @@ public class AlertRuleEntity {
     @TableField("enabled")
     private Boolean enabled;
 
+    /** 升级策略：是否启用（未确认告警超时自动升级） */
+    @TableField("escalation_enabled")
+    private Boolean escalationEnabled;
+
+    /** 升级策略：升级间隔（秒），超过仍未确认则升一级 */
+    @TableField("escalation_interval_seconds")
+    private Integer escalationIntervalSeconds;
+
+    /** 升级策略：最大升级级别 */
+    @TableField("escalation_max_level")
+    private Integer escalationMaxLevel;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

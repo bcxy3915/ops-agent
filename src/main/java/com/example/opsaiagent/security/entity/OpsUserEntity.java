@@ -18,6 +18,12 @@ public class OpsUserEntity {
 
     private String username;
 
+    /**
+     * 显示名称（displayName，规格 5.1）
+     */
+    @TableField("display_name")
+    private String displayName;
+
     private String password;
 
     /**

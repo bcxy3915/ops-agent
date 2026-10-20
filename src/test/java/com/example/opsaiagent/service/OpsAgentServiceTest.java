@@ -205,8 +205,9 @@ class OpsAgentServiceTest {
         Flux<String> flux = service.askStream("sess-1", "问题");
 
         StepVerifier.create(flux)
+                .expectNext("你", "好")
                 .expectNextMatches(s -> s.contains("\"title\":\"运维手册\"") && s.contains("\"docId\":1"))
-                .expectNext("你", "好", "[DONE]")
+                .expectNext("[DONE]")
                 .verifyComplete();
 
         // 会话和消息都应保存
@@ -226,8 +227,8 @@ class OpsAgentServiceTest {
         Flux<String> flux = service.askStream("sess-anon", "问题");
 
         StepVerifier.create(flux)
-                .expectNext("[]")
-                .expectNext("回答", "[DONE]")
+                .expectNext("回答")
+                .expectNext("[]", "[DONE]")
                 .verifyComplete();
 
         verify(conversationService, never()).ensureConversation(anyString(), anyString(), anyString());
@@ -246,8 +247,8 @@ class OpsAgentServiceTest {
         Flux<String> flux = service.askStream("sess-1", "问题");
 
         StepVerifier.create(flux)
-                .expectNext("[]")
-                .expectNext("A", "[DONE]")
+                .expectNext("A")
+                .expectNext("[]", "[DONE]")
                 .verifyComplete();
     }
 
@@ -262,7 +263,6 @@ class OpsAgentServiceTest {
         Flux<String> flux = service.askStream("sess-1", "问题");
 
         StepVerifier.create(flux)
-                .expectNext("[]")
                 .expectError()
                 .verify();
 
@@ -285,10 +285,10 @@ class OpsAgentServiceTest {
         Flux<ServerSentEvent<String>> flux = service.askStreamWithCitations("sess-1", "问题");
 
         StepVerifier.create(flux)
-                .expectNextMatches(ev -> "citations".equals(ev.event())
-                        && ev.data().contains("\"title\":\"运维手册\""))
                 .expectNextMatches(ev -> ev.event() == null && "你".equals(ev.data()))
                 .expectNextMatches(ev -> ev.event() == null && "好".equals(ev.data()))
+                .expectNextMatches(ev -> "citations".equals(ev.event())
+                        && ev.data().contains("\"title\":\"运维手册\""))
                 .expectNextMatches(ev -> "[DONE]".equals(ev.data()))
                 .verifyComplete();
 
@@ -307,8 +307,8 @@ class OpsAgentServiceTest {
         Flux<ServerSentEvent<String>> flux = service.askStreamWithCitations("sess-anon", "问题");
 
         StepVerifier.create(flux)
-                .expectNextMatches(ev -> "citations".equals(ev.event()) && "[]".equals(ev.data()))
                 .expectNextMatches(ev -> "回答".equals(ev.data()))
+                .expectNextMatches(ev -> "citations".equals(ev.event()) && "[]".equals(ev.data()))
                 .expectNextMatches(ev -> "[DONE]".equals(ev.data()))
                 .verifyComplete();
     }
