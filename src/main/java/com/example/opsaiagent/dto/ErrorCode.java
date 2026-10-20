@@ -32,7 +32,8 @@ public enum ErrorCode {
     KNOWLEDGE_VERSION_NOT_FOUND(1023, "知识文档版本不存在"),
     USER_NOT_FOUND(1024, "用户不存在"),
     USER_OPERATION_FORBIDDEN(1025, "禁止对该用户执行该操作"),
-    ALERT_EVENT_INVALID(1026, "告警事件操作非法");
+    ALERT_EVENT_INVALID(1026, "告警事件操作非法"),
+    MAINTENANCE_WINDOW_NOT_FOUND(1027, "维护窗口不存在");
 
     private final int code;
     private final String message;

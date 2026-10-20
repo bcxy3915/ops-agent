@@ -13,6 +13,7 @@ import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.oncall.service.OncallMemberService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -41,6 +42,7 @@ public class AlertEscalationService {
     private final AlertEscalationRecordMapper escalationMapper;
     private final AlertEventService eventService;
     private final AuditLogService auditLogService;
+    private final OncallMemberService oncallMemberService;
 
     /**
      * 定时扫描：升级 + 静默到期恢复（规格 4.4：30s）
@@ -142,6 +144,14 @@ public class AlertEscalationService {
         record.setTriggeredAt(now);
         escalationMapper.insert(record);
 
+        // P1 值班联动：规则显式 toUsers 优先，否则按级别取值班人（L1→备值班、L2→ADMIN）
+        List<Long> recipients = oncallMemberService.resolveRecipients(
+                level.getToUsers(), level.getToRole(), level.getLevelNo());
+        String recipientDesc = recipients.isEmpty()
+                ? (level.getToUsers() != null && !level.getToUsers().isBlank()
+                        ? level.getToUsers() : (level.getToRole() == null ? "角色兜底" : level.getToRole()))
+                : recipients.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+
         AuditLogEntity audit = new AuditLogEntity();
         audit.setUsername("system");
         audit.setOperation(AuditOperation.ESCALATE_ALERT_EVENT.name());
@@ -149,11 +159,10 @@ public class AlertEscalationService {
         audit.setMethod("AlertEscalationService.escalate");
         audit.setResult("升级到级别 " + level.getLevelNo()
                 + (level.getToRole() != null ? "，通知角色 " + level.getToRole() : "")
-                + (level.getToUsers() != null && !level.getToUsers().isBlank()
-                        ? "，通知用户 " + level.getToUsers() : ""));
+                + "，收件人 " + recipientDesc);
         audit.setCreatedAt(now);
         auditLogService.save(audit);
 
-        log.info("告警事件 {} 自动升级到级别 {}（{}）", event.getId(), level.getLevelNo(), reason);
+        log.info("告警事件 {} 自动升级到级别 {}（{}），收件人 {}", event.getId(), level.getLevelNo(), reason, recipientDesc);
     }
 }

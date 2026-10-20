@@ -397,6 +397,46 @@ class AlertEventServiceTest {
         verify(mapper, never()).updateById(any(AlertEventEntity.class));
     }
 
+    // ==================== batchSilence（P1 批量静默 / 维护窗口） ====================
+
+    @Test
+    @DisplayName("batchSilence：批量静默成功并返回条数")
+    void batchSilence_counts() {
+        AlertEventEntity firing = event(22L, "FIRING");
+        when(mapper.selectById(22L)).thenReturn(firing);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            int count = service.batchSilence(List.of(22L), "PLANNED_MAINTENANCE",
+                    LocalDateTime.now().plusHours(2), "维护窗口批量静默");
+
+            assertThat(count).isEqualTo(1);
+            assertThat(firing.getStatus()).isEqualTo("SILENCED");
+        }
+    }
+
+    @Test
+    @DisplayName("batchSilence：跳过已恢复等不可静默事件，返回成功条数")
+    void batchSilence_skipsResolved() {
+        when(mapper.selectById(22L)).thenReturn(event(22L, "FIRING"));
+        when(mapper.selectById(23L)).thenReturn(event(23L, "RESOLVED"));
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            int count = service.batchSilence(List.of(22L, 23L), "OTHER",
+                    LocalDateTime.now().plusHours(1), null);
+
+            assertThat(count).isEqualTo(1);
+        }
+    }
+
+    @Test
+    @DisplayName("batchSilence：空列表返回 0")
+    void batchSilence_empty() {
+        assertThat(service.batchSilence(List.of(), "OTHER",
+                LocalDateTime.now().plusHours(1), null)).isZero();
+    }
+
     // ==================== toResponse（已读填充） ====================
 
     @Test

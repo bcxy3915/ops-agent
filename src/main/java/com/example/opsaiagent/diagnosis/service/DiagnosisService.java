@@ -2,11 +2,17 @@ package com.example.opsaiagent.diagnosis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.diagnosis.dto.DiagnosisRecordResponse;
+import com.example.opsaiagent.diagnosis.dto.DiagnosisReferenceResponse;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
 import com.example.opsaiagent.dto.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.knowledge.entity.KnowledgeCaseEntity;
+import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
@@ -17,9 +23,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -40,6 +49,8 @@ public class DiagnosisService {
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
     private final HybridRetriever hybridRetriever;
+    private final KnowledgeDocumentMapper documentMapper;
+    private final KnowledgeCaseMapper caseMapper;
 
     /**
      * 基于故障快照执行一次 LLM 诊断并落库
@@ -53,6 +64,7 @@ public class DiagnosisService {
 
     /**
      * 内部诊断执行：取快照 JSON → 组装提示词 → LLM 结构化输出 → 落库
+     * P1：记录诊断耗时（durationMs，供首页 avgDiagnoseMs）与引用来源（referencesJson，供溯源展示）。
      */
     public DiagnosisRecordEntity diagnose(FailureSnapshotEntity snapshot) {
         DiagnosisRecordEntity record = new DiagnosisRecordEntity();
@@ -66,14 +78,18 @@ public class DiagnosisService {
         record.setCreatedAt(LocalDateTime.now());
         record.setUpdatedAt(LocalDateTime.now());
 
+        long start = System.currentTimeMillis();
         try {
             DiagnosisResult result = callLlm(snapshot.getSnapshotJson(), null);
             applyResult(record, result);
+            // P1 溯源：把本次 RAG 检索命中（参考知识/历史案例）落库
+            record.setReferencesJson(buildReferencesJson(snapshot.getSnapshotJson()));
         } catch (Exception e) {
             log.warn("LLM 诊断失败 snapshotId={}: {}", snapshot.getId(), e.getMessage());
             record.setStatus("FAILED");
             record.setErrorMessage(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
         }
+        record.setDurationMs(System.currentTimeMillis() - start);
         diagnosisMapper.insert(record);
         return record;
     }
@@ -181,6 +197,169 @@ public class DiagnosisService {
         } catch (Exception e) {
             log.warn("知识库检索失败，降级为无参考: {}", e.getMessage());
             return "（知识库检索失败，请仅基于快照事实诊断）";
+        }
+    }
+
+    /**
+     * 生成诊断引用来源 JSON（P1 规格 4.5 溯源）
+     * 以快照检索词执行 RAG 检索，把命中项转换为结构化引用列表（类型/标题/章节/片段/相关度/层级/版本/作者/被引用次数）。
+     * 检索失败或为空时返回空数组 JSON，不阻断诊断。
+     */
+    protected String buildReferencesJson(String snapshotJson) {
+        try {
+            String query = buildSearchQuery(snapshotJson);
+            List<Document> docs = hybridRetriever.retrieve(query, 5);
+            if (docs.isEmpty()) {
+                return "[]";
+            }
+            List<DiagnosisReferenceResponse> refs = docs.stream()
+                    .map(doc -> toReference(doc, query))
+                    .filter(Objects::nonNull)
+                    .toList();
+            return objectMapper.writeValueAsString(refs);
+        } catch (Exception e) {
+            log.warn("诊断引用生成失败，降级为空引用: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
+    /**
+     * 检索命中 Document 转结构化引用
+     * 复用知识文档元数据（docId/title/layer/version/owner），案例层反查 citedCount。
+     */
+    private DiagnosisReferenceResponse toReference(Document doc, String query) {
+        if (doc == null || !StringUtils.hasText(doc.getText())) {
+            return null;
+        }
+        Map<String, Object> md = doc.getMetadata() == null ? Map.of() : doc.getMetadata();
+        String docIdStr = String.valueOf(md.getOrDefault("docId", ""));
+        String layer = str(md.get("layer"));
+        String title = str(md.get("title"));
+        if (!StringUtils.hasText(title)) {
+            title = str(md.get("source"));
+        }
+        if (!StringUtils.hasText(title)) {
+            title = "知识条目";
+        }
+
+        Long docId = parseLong(docIdStr);
+        Long caseId = parseCaseIdFromSource(str(md.get("source")));
+        String refType = refTypeOf(layer, caseId);
+        Long refId = refType.equals("CASE") ? caseId : docId;
+
+        DiagnosisReferenceResponse response = DiagnosisReferenceResponse.builder()
+                .refType(refType)
+                .refId(refId)
+                .title(title)
+                .section(str(md.get("section")))
+                .snippet(snippet(doc.getText(), query))
+                .score(scoreOf(md))
+                .layer(layer)
+                .version(versionText(md))
+                .build();
+
+        // 文档层：反查真实 owner/version；案例层：反查被引用次数
+        if (docId != null && "CASE".equals(refType) && caseId != null) {
+            KnowledgeCaseEntity kc = caseMapper.selectById(caseId);
+            if (kc != null) {
+                if (StringUtils.hasText(kc.getTitle())) {
+                    response.setTitle(kc.getTitle());
+                }
+                response.setCitedCount(kc.getCitedCount() == null ? 0L : kc.getCitedCount().longValue());
+            }
+        } else if (docId != null) {
+            KnowledgeDocumentEntity kd = documentMapper.selectById(docId);
+            if (kd != null) {
+                response.setAuthor(kd.getOwner());
+                if (kd.getVersion() != null) {
+                    response.setVersion("v" + kd.getVersion());
+                }
+            }
+        }
+        return response;
+    }
+
+    /** 引用类型：CASE 案例 / BUILTIN 内置底座 / 其他为私有知识文档 */
+    private String refTypeOf(String layer, Long caseId) {
+        if (caseId != null || "CASE".equalsIgnoreCase(layer)) {
+            return "CASE";
+        }
+        if ("BUILTIN".equalsIgnoreCase(layer)) {
+            return "BASE_DOC";
+        }
+        return "KNOWLEDGE_DOC";
+    }
+
+    /** 从文档 source（case:{id}）解析案例 ID */
+    private Long parseCaseIdFromSource(String source) {
+        if (!StringUtils.hasText(source) || !source.startsWith("case:")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(source.substring("case:".length()).trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 相关度：优先用 metadata.score，缺省用索引位置估算 */
+    private Double scoreOf(Map<String, Object> md) {
+        Object score = md.get("score");
+        if (score instanceof Number n) {
+            double v = n.doubleValue();
+            if (v > 0 && v <= 1) {
+                return Math.round(v * 100.0) / 100.0;
+            }
+        }
+        return null;
+    }
+
+    /** 版本展示：v2.4（缺省省略） */
+    private String versionText(Map<String, Object> md) {
+        Object v = md.get("version");
+        if (v == null) {
+            return null;
+        }
+        return v.toString().startsWith("v") ? v.toString() : "v" + v;
+    }
+
+    /** 命中片段：去除换行压缩为单行，最多 200 字 */
+    private String snippet(String text, String query) {
+        String clean = text.replaceAll("\\s+", " ").trim();
+        int idx = StringUtils.hasText(query) ? clean.indexOf(query) : -1;
+        if (idx > 80) {
+            clean = "…" + clean.substring(Math.max(0, idx - 60));
+        }
+        return clean.length() <= 200 ? clean : clean.substring(0, 200) + "…";
+    }
+
+    private String str(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private Long parseLong(String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(text.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 解析引用来源 JSON（供 API 展示）
+     */
+    public List<DiagnosisReferenceResponse> parseReferences(String referencesJson) {
+        if (referencesJson == null || referencesJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(referencesJson,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, DiagnosisReferenceResponse.class));
+        } catch (Exception e) {
+            return List.of();
         }
     }
 

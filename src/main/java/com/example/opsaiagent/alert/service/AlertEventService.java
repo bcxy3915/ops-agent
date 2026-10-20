@@ -121,6 +121,25 @@ public class AlertEventService {
     }
 
     /**
+     * 批量静默（跳过已恢复等不可静默事件，返回成功条数）
+     */
+    public int batchSilence(List<Long> ids, String reason, LocalDateTime silencedUntil, String note) {
+        int count = 0;
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        for (Long id : ids) {
+            try {
+                silence(id, reason, silencedUntil, note);
+                count++;
+            } catch (BusinessException ignored) {
+                // 已恢复等不可静默事件跳过
+            }
+        }
+        return count;
+    }
+
+    /**
      * 手动恢复：任意非 RESOLVED 状态 → RESOLVED，记录恢复人/时间/备注（规格 2.4）
      */
     public AlertEventEntity resolve(Long id, String resolutionNote) {

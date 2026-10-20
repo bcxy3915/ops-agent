@@ -8,6 +8,7 @@ import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.service.DiagnosisService;
+import com.example.opsaiagent.maintenance.service.MaintenanceWindowService;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.notification.service.NotificationCenter;
@@ -50,6 +51,7 @@ public class AlertEvaluator {
     private final NotificationCenter notificationCenter;
     private final FailureSnapshotService snapshotService;
     private final DiagnosisService diagnosisService;
+    private final MaintenanceWindowService maintenanceWindowService;
 
     /** ruleId -> 连续命中起始时间戳（ms） */
     private final Map<Long, Long> sustainedSince = new ConcurrentHashMap<>();
@@ -59,6 +61,9 @@ public class AlertEvaluator {
      */
     @Scheduled(cron = "${ops-agent.alert.evaluate-cron:*/30 * * * * ?}")
     public void evaluate() {
+        // 先处理维护窗口到期：恢复窗口内压制的告警，仍异常则重新通知
+        recoverExpiredMaintenanceWindows();
+
         List<AlertRuleEntity> rules = ruleMapper.selectList(
                 new LambdaQueryWrapper<AlertRuleEntity>()
                         .eq(AlertRuleEntity::getEnabled, true));
@@ -70,6 +75,63 @@ public class AlertEvaluator {
                 log.warn("告警评估失败 rule={}: {}", rule.getId(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * 维护窗口到期恢复（P1 规格 5）
+     * 到期窗口置 ended_at；把窗口期间以维护静默压制的告警恢复为 FIRING，
+     * 若指标仍命中则重新走闭环（快照/诊断/通知），否则恢复为 RESOLVED。
+     */
+    private void recoverExpiredMaintenanceWindows() {
+        List<String> expiredServices = maintenanceWindowService.expireDueWindows(LocalDateTime.now());
+        if (expiredServices.isEmpty()) {
+            return;
+        }
+        List<AlertEventEntity> suppressed = eventMapper.selectList(
+                new LambdaQueryWrapper<AlertEventEntity>()
+                        .in(AlertEventEntity::getService, expiredServices)
+                        .eq(AlertEventEntity::getStatus, AlertEventStatus.SILENCED.name())
+                        .apply("silenced_reason LIKE '" + MaintenanceWindowService.SILENCE_REASON_PREFIX + "%'")
+                        .last("LIMIT 200"));
+        for (AlertEventEntity event : suppressed) {
+            try {
+                restoreMaintenanceEvent(event);
+            } catch (Exception e) {
+                log.warn("维护窗口告警恢复失败 eventId={}: {}", event.getId(), e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * 恢复单条维护压制告警：按规则重新评估是否仍命中。
+     * 命中 → 转 FIRING 并触发闭环通知；不命中 → RESOLVED。
+     */
+    private void restoreMaintenanceEvent(AlertEventEntity event) {
+        AlertRuleEntity rule = ruleMapper.selectById(event.getRuleId());
+        LocalDateTime now = LocalDateTime.now();
+        if (rule == null || !Boolean.TRUE.equals(rule.getEnabled())) {
+            // 规则已删除/停用：直接恢复为静默前状态（无规则可评估）
+            event.setStatus(AlertEventStatus.RESOLVED.name());
+            event.setResolvedAt(now);
+            event.setUpdatedAt(now);
+            eventMapper.updateById(event);
+            return;
+        }
+        MetricPoint latest = metricSampleStore.queryLatest(rule.getService(), rule.getMetric(),
+                System.currentTimeMillis());
+        if (latest == null || !isHit(rule, latest.getValue(), System.currentTimeMillis())) {
+            event.setStatus(AlertEventStatus.RESOLVED.name());
+            event.setResolvedAt(now);
+            event.setUpdatedAt(now);
+            eventMapper.updateById(event);
+            return;
+        }
+        event.setStatus(AlertEventStatus.FIRING.name());
+        event.setSilencedReason(null);
+        event.setSilencedUntil(null);
+        event.setUpdatedAt(now);
+        eventMapper.updateById(event);
+        afterFiring(event);
     }
 
     /**
@@ -95,6 +157,11 @@ public class AlertEvaluator {
             }
             // 去重：已有 FIRING 事件则不重复触发
             if (findFiringId(rule.getId()) != null) {
+                return;
+            }
+            // 维护窗口：命中但服务处于维护窗口 → 以维护静默落库，不通知不升级（P1 规格 5）
+            if (maintenanceWindowService.isServiceInWindow(service, LocalDateTime.now())) {
+                recordMaintenanceSuppressed(rule, value, nowMs);
                 return;
             }
             // 静默 / 节流
@@ -232,6 +299,31 @@ public class AlertEvaluator {
         event.setCurrentValue(value);
         event.setStatus(status.name());
         event.setDetail(detail);
+        event.setFiredAt(LocalDateTime.now());
+        event.setUpdatedAt(LocalDateTime.now());
+        eventMapper.insert(event);
+        return event;
+    }
+
+    /**
+     * 维护窗口压制落库（P1 规格 5）
+     * 服务在维护窗口内命中规则时：告警照常落库（SILENCED），但不通知不升级。
+     * silenced_reason 打上维护窗口前缀，便于到期扫描识别并恢复。
+     */
+    private AlertEventEntity recordMaintenanceSuppressed(AlertRuleEntity rule, double value, long nowMs) {
+        AlertEventEntity event = new AlertEventEntity();
+        event.setRuleId(rule.getId());
+        event.setRuleName(rule.getName());
+        event.setService(rule.getService());
+        event.setMetric(rule.getMetric());
+        event.setOperator(rule.getOperator());
+        event.setThreshold(rule.getThreshold());
+        event.setCurrentValue(value);
+        event.setStatus(AlertEventStatus.SILENCED.name());
+        event.setDetail("维护窗口期内命中，已压制通知与升级（P1 维护窗口）");
+        event.setSilencedFrom(AlertEventStatus.FIRING.name());
+        event.setSilencedReason(MaintenanceWindowService.SILENCE_REASON_PREFIX + "维护窗口");
+        event.setSilencedAt(LocalDateTime.now());
         event.setFiredAt(LocalDateTime.now());
         event.setUpdatedAt(LocalDateTime.now());
         eventMapper.insert(event);

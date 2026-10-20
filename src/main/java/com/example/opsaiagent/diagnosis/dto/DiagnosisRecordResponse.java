@@ -35,6 +35,8 @@ public class DiagnosisRecordResponse {
     private String question;
     private String answer;
     private String errorMessage;
+    private Long durationMs;
+    private List<DiagnosisReferenceResponse> references;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -56,11 +58,14 @@ public class DiagnosisRecordResponse {
                 .question(entity.getQuestion())
                 .answer(entity.getAnswer())
                 .errorMessage(entity.getErrorMessage())
+                .durationMs(entity.getDurationMs())
+                .references(view.references())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();
     }
 
-    public record DiagnosisServiceView(List<String> evidence, List<String> suggestions) {
+    public record DiagnosisServiceView(List<String> evidence, List<String> suggestions,
+                                       List<DiagnosisReferenceResponse> references) {
     }
 }

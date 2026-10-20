@@ -5,6 +5,8 @@ import com.example.opsaiagent.alert.dto.AlertEventResponse;
 import com.example.opsaiagent.alert.dto.AlertEventStatus;
 import com.example.opsaiagent.alert.dto.BatchAckRequest;
 import com.example.opsaiagent.alert.dto.BatchReadRequest;
+import com.example.opsaiagent.alert.dto.BatchSilenceRequest;
+import com.example.opsaiagent.alert.dto.AlertSummaryResponse;
 import com.example.opsaiagent.alert.dto.ResolveRequest;
 import com.example.opsaiagent.alert.dto.SilenceRequest;
 import com.example.opsaiagent.alert.entity.AlertEscalationRecordEntity;
@@ -13,6 +15,7 @@ import com.example.opsaiagent.alert.mapper.AlertEscalationRecordMapper;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.service.AlertEventService;
 import com.example.opsaiagent.alert.service.AlertReadService;
+import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.dto.ApiResponse;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
@@ -31,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -49,6 +53,7 @@ public class AlertEventController {
     private final AlertReadService alertReadService;
     private final AlertEventMapper alertEventMapper;
     private final AlertEscalationRecordMapper escalationRecordMapper;
+    private final DiagnosisRecordMapper diagnosisRecordMapper;
 
     @Operation(summary = "查询告警事件列表", description = "可按服务 / 状态 / 规则过滤。所有角色可访问")
     @GetMapping
@@ -131,6 +136,41 @@ public class AlertEventController {
     @PostMapping("/batch-acknowledge")
     public ApiResponse<Map<String, Integer>> batchAcknowledge(@RequestBody @Valid BatchAckRequest request) {
         return ApiResponse.success(Map.of("count", alertEventService.batchAcknowledge(request.getIds())));
+    }
+
+    @Operation(summary = "批量静默告警", description = "跳过已恢复等不可静默事件（P1 维护窗口）。需 ADMIN / OPERATOR")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @AuditLog(operation = "SILENCE_ALERT_EVENT", description = "批量静默告警事件")
+    @PostMapping("/batch-silence")
+    public ApiResponse<Map<String, Integer>> batchSilence(@RequestBody @Valid BatchSilenceRequest request) {
+        int count = alertEventService.batchSilence(request.getIds(), request.getReason(),
+                request.getSilencedUntil(), request.getNote());
+        int skipped = request.getIds().size() - count;
+        return ApiResponse.success(Map.of("count", count, "skipped", skipped));
+    }
+
+    @Operation(summary = "告警汇总统计", description = "告警中心页顶部汇总卡数据（规格 2.3）：待处理 / 今日已触发 / 已诊断 / 平均诊断耗时")
+    @GetMapping("/summary")
+    public ApiResponse<AlertSummaryResponse> summary() {
+        long openCount = alertEventMapper.selectCount(new LambdaQueryWrapper<AlertEventEntity>()
+                .in(AlertEventEntity::getStatus,
+                        AlertEventStatus.FIRING.name(), AlertEventStatus.ACKNOWLEDGED.name()));
+        long firingCount = alertEventMapper.selectCount(new LambdaQueryWrapper<AlertEventEntity>()
+                .eq(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name()));
+        LocalDate today = LocalDate.now();
+        long todayCount = alertEventMapper.selectCount(new LambdaQueryWrapper<AlertEventEntity>()
+                .ge(AlertEventEntity::getFiredAt, today.atStartOfDay()));
+        long diagnosedCount = diagnosisRecordMapper.countDistinctSuccessEvents();
+        Long avgDiagnoseMs = diagnosisRecordMapper.avgDiagnoseMs();
+
+        AlertSummaryResponse resp = AlertSummaryResponse.builder()
+                .openCount(openCount)
+                .firingCount(firingCount)
+                .todayCount(todayCount)
+                .diagnosedCount(diagnosedCount)
+                .avgDiagnoseMs(avgDiagnoseMs)
+                .build();
+        return ApiResponse.success(resp);
     }
 
     @Operation(summary = "手动恢复告警", description = "任意非 RESOLVED → RESOLVED，可带恢复备注（规格 2.4）。需 ADMIN / OPERATOR")

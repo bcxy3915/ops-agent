@@ -12,6 +12,7 @@ import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.oncall.service.OncallMemberService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +56,8 @@ class AlertEscalationServiceTest {
     private AlertEventService eventService;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private OncallMemberService oncallMemberService;
 
     @InjectMocks
     private AlertEscalationService service;
