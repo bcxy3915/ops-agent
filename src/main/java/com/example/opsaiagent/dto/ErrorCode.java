@@ -29,7 +29,11 @@ public enum ErrorCode {
     KNOWLEDGE_RELOAD_FAILED(1020, "知识库重载失败"),
     KNOWLEDGE_CONFLICT_NOT_FOUND(1021, "知识冲突记录不存在"),
     KNOWLEDGE_CONFLICT_INVALID(1022, "知识冲突裁定参数不合法"),
-    KNOWLEDGE_VERSION_NOT_FOUND(1023, "知识文档版本不存在");
+    KNOWLEDGE_VERSION_NOT_FOUND(1023, "知识文档版本不存在"),
+    USER_NOT_FOUND(1024, "用户不存在"),
+    USER_OPERATION_FORBIDDEN(1025, "禁止对该用户执行该操作"),
+    ALERT_EVENT_INVALID(1026, "告警事件操作非法"),
+    MAINTENANCE_WINDOW_NOT_FOUND(1027, "维护窗口不存在");
 
     private final int code;
     private final String message;

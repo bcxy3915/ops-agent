@@ -6,6 +6,7 @@ import com.example.opsaiagent.dto.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
 import com.example.opsaiagent.security.dto.UserResponse;
+import com.example.opsaiagent.security.dto.UserUpdateRequest;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
 import com.example.opsaiagent.security.service.OpsUserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,7 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@Tag(name = "用户管理", description = "用户查询（仅 ADMIN）")
+@Tag(name = "用户管理", description = "用户查询、创建、更新、删除（仅 ADMIN）")
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
@@ -42,7 +43,7 @@ public class UserController {
     public ApiResponse<UserResponse> get(@PathVariable String id) {
         OpsUserEntity user = userService.findById(id)
                 .orElseThrow(() -> new BusinessException(
-                        ErrorCode.SERVICE_NOT_FOUND, "用户不存在: " + id));
+                        ErrorCode.USER_NOT_FOUND, "用户不存在: " + id));
         userService.decryptSensitiveFields(user);
         return ApiResponse.success(toResponse(user));
     }
@@ -56,9 +57,30 @@ public class UserController {
         return ApiResponse.success(toResponse(user));
     }
 
+    @Operation(summary = "更新用户", description = "修改角色/启停/密码/手机/邮箱。需要 ADMIN 角色")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(operation = "UPDATE_USER", description = "更新用户")
+    @PutMapping("/{id}")
+    public ApiResponse<UserResponse> update(@PathVariable String id,
+                                            @Valid @RequestBody UserUpdateRequest request) {
+        OpsUserEntity user = userService.update(id, request);
+        userService.decryptSensitiveFields(user);
+        return ApiResponse.success(toResponse(user));
+    }
+
+    @Operation(summary = "删除用户", description = "不能删除自己/内置 admin；系统至少保留一个 ADMIN。需要 ADMIN 角色")
+    @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(operation = "DELETE_USER", description = "删除用户")
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> delete(@PathVariable String id) {
+        userService.delete(id);
+        return ApiResponse.success(null);
+    }
+
     /**
      * Entity → Response DTO
-     * password/phone/email 由 UserResponse 的 @Sensitive 注解自动脱敏，
+     * password/phone/email 在 UserResponse 中被 @Sensitive 注解自动脱敏
+     *
      * @param entity 用户实体
      * @return 用户响应DTO
      */
@@ -66,6 +88,7 @@ public class UserController {
         return UserResponse.builder()
                 .id(entity.getId())
                 .username(entity.getUsername())
+                .displayName(entity.getDisplayName())
                 .password(entity.getPassword())    // 会被 SensitiveSerializer 脱敏
                 .phone(entity.getPhone())          // 会被脱敏
                 .email(entity.getEmail())          // 会被脱敏

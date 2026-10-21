@@ -196,7 +196,7 @@ public class OpsAgentService {
         // 4.拼接 System Prompt
         String systemPrompt = new PromptTemplate(SYSTEM_PROMPT).render(Map.of("context", context));
 
-        // 5.流式调用：citations 事件 + token 事件 + [DONE]
+        // 5.流式调用：token 事件（答案先出）→ citations 事件（知识来源最后附上）→ [DONE]
         StringBuilder answerBuffer = new StringBuilder();
         Flux<ServerSentEvent<String>> citationsEvent = Flux.just(
                 ServerSentEvent.builder("").event("citations").data(citationsJson).build());
@@ -212,7 +212,8 @@ public class OpsAgentService {
         Flux<ServerSentEvent<String>> doneEvent = Flux.just(
                 ServerSentEvent.builder("[DONE]").build());
 
-        return Flux.concat(citationsEvent, tokenEvents, doneEvent)
+        // 答案流式输出完成后，再发送 citations（知识来源），最后 [DONE]
+        return Flux.concat(tokenEvents, citationsEvent, doneEvent)
                 .doFinally(signal -> {
                     // 无论完成、出错、取消，都保存
                     String answer = answerBuffer.toString();

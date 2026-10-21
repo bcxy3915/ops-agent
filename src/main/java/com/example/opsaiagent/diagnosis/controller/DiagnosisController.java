@@ -75,6 +75,7 @@ public class DiagnosisController {
     private DiagnosisRecordResponse toResponse(DiagnosisRecordEntity entity) {
         return DiagnosisRecordResponse.from(entity, new DiagnosisRecordResponse.DiagnosisServiceView(
                 diagnosisService.parseEvidence(entity.getEvidence()),
-                diagnosisService.parseSuggestions(entity.getSuggestions())));
+                diagnosisService.parseSuggestions(entity.getSuggestions()),
+                diagnosisService.parseReferences(entity.getReferencesJson())));
     }
 }

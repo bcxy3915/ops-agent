@@ -5,6 +5,8 @@ import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
 import com.example.opsaiagent.dto.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
@@ -51,6 +53,12 @@ class DiagnosisServiceTest {
     @Mock
     private HybridRetriever hybridRetriever;
 
+    @Mock
+    private KnowledgeDocumentMapper documentMapper;
+
+    @Mock
+    private KnowledgeCaseMapper caseMapper;
+
     @Spy
     private DiagnosisPromptTemplate promptTemplate = new DiagnosisPromptTemplate();
 
@@ -63,7 +71,7 @@ class DiagnosisServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient, objectMapper, hybridRetriever);
+        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient, objectMapper, hybridRetriever, documentMapper, caseMapper);
         snapshot = new FailureSnapshotEntity();
         snapshot.setId(100L);
         snapshot.setAlertEventId(200L);

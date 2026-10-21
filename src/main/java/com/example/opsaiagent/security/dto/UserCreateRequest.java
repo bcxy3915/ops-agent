@@ -17,6 +17,10 @@ public class UserCreateRequest {
     @Size(min = 2, max = 64, message = "长度 2-64 位")
     private String username;
 
+    @Schema(description = "显示名称", example = "张三")
+    @Size(max = 50, message = "显示名称最多 50 字")
+    private String displayName;
+
     @Schema(description = "密码（明文）", example = "123456", requiredMode = Schema.RequiredMode.REQUIRED)
     @NotBlank(message = "密码不能为空")
     @Size(min = 6, max = 64, message = "密码长度 6-64 位")

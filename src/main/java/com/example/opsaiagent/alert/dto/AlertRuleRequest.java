@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 告警规则创建 / 更新请求
  */
@@ -38,4 +40,16 @@ public class AlertRuleRequest {
     private Integer silenceSeconds = 0;
 
     private Boolean enabled = true;
+
+    /** 升级策略：是否启用（规格 4.1，默认开启） */
+    private Boolean escalationEnabled = false;
+
+    /** 升级间隔（秒），兼容旧版默认 300（5 分钟） */
+    private Integer escalationIntervalSeconds = 300;
+
+    /** 最大升级级别，兼容旧版默认 2 */
+    private Integer escalationMaxLevel = 2;
+
+    /** 升级路径多级（规格 4.1：Level N · after · triggerOn · toRole · toUsers） */
+    private List<AlertRuleLevelDto> escalationLevels;
 }

@@ -47,13 +47,19 @@ class ChatControllerTest {
     @Test
     @DisplayName("重载知识库：调用 DocumentLoader 并返回 success 状态")
     void reloadDocument() {
-        when(documentLoader.reload()).thenReturn(Map.of(
-                "status", "success", "loaded", 3, "targets", 3, "message", "文档加载完成"));
+        // 注意：reloadDocument 会对结果 Map 追加 indexRebuilt，必须返回可变 Map
+        Map<String, Object> reloadResult = new java.util.HashMap<>();
+        reloadResult.put("status", "success");
+        reloadResult.put("loaded", 3);
+        reloadResult.put("targets", 3);
+        reloadResult.put("message", "文档加载完成");
+        when(documentLoader.reload()).thenReturn(reloadResult);
 
         Map<String, Object> result = controller.reloadDocument();
 
         assertThat(result).containsEntry("status", "success");
         assertThat(result).containsEntry("loaded", 3);
+        assertThat(result).containsEntry("indexRebuilt", true);
     }
 
     // ==================== ask ====================

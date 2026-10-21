@@ -76,6 +76,14 @@ public class DiagnosisRecordEntity {
     @TableField("error_message")
     private String errorMessage;
 
+    /** 诊断耗时（毫秒，供首页 avgDiagnoseMs 统计，P1） */
+    @TableField("duration_ms")
+    private Long durationMs;
+
+    /** 引用来源（JSON 数组，P1 溯源：参考知识/历史案例，字段见 DiagnosisReferenceResponse） */
+    @TableField("references_json")
+    private String referencesJson;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

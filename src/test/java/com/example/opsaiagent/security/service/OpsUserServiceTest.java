@@ -13,6 +13,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.example.opsaiagent.security.dto.UserUpdateRequest;
+import com.example.opsaiagent.util.SecurityUtils;
+import org.mockito.MockedStatic;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.List;
@@ -23,6 +26,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 
 /**
  * OpsUserService 单元测试
@@ -200,6 +205,196 @@ class OpsUserServiceTest {
 
         assertThat(u.getPhone()).isNull();
         assertThat(u.getEmail()).isNull();
+    }
+
+    // ==================== displayName / update（P0 规格 5.2） ====================
+
+    @Test
+    @DisplayName("create：携带 displayName 创建")
+    void create_withDisplayName() {
+        when(userMapper.exists(any())).thenReturn(false);
+        when(passwordEncoder.encode("admin123")).thenReturn("bcrypt-hash");
+        UserCreateRequest req = createRequest("admin");
+        req.setDisplayName("管理员");
+
+        OpsUserEntity created = userService.create(req);
+
+        assertThat(created.getDisplayName()).isEqualTo("管理员");
+    }
+
+    @Test
+    @DisplayName("update：更新 displayName/role/phone/email 并重加密敏感字段")
+    void update_fields() {
+        OpsUserEntity existing = user("admin");
+        existing.setPhoneEnc("ENC-OLD");
+        existing.setEmailEnc("ENC-OLD-EMAIL");
+        when(userMapper.selectById("u-admin")).thenReturn(existing);
+        when(aesGcmUtil.decrypt("ENC-OLD")).thenReturn("13812345678");
+        when(aesGcmUtil.decrypt("ENC-OLD-EMAIL")).thenReturn("admin@example.com");
+        when(aesGcmUtil.encrypt("13900000000")).thenReturn("ENC-NEW");
+        when(aesGcmUtil.encrypt("new@example.com")).thenReturn("ENC-NEW-EMAIL");
+        when(hashUtil.sha256("13900000000")).thenReturn("HASH-NEW");
+        when(hashUtil.sha256("new@example.com")).thenReturn("HASH-NEW-EMAIL");
+
+        UserUpdateRequest req = new UserUpdateRequest();
+        req.setDisplayName("新名字");
+        req.setRole("ADMIN");
+        req.setPhone("13900000000");
+        req.setEmail("new@example.com");
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            OpsUserEntity updated = userService.update("u-admin", req);
+
+            assertThat(updated.getDisplayName()).isEqualTo("新名字");
+            assertThat(updated.getRole()).isEqualTo("ADMIN");
+            assertThat(updated.getPhoneEnc()).isEqualTo("ENC-NEW");
+            assertThat(updated.getEmailEnc()).isEqualTo("ENC-NEW-EMAIL");
+            assertThat(updated.getPhoneHash()).isEqualTo("HASH-NEW");
+            assertThat(updated.getEmailHash()).isEqualTo("HASH-NEW-EMAIL");
+            verify(userMapper).updateById(updated);
+        }
+    }
+
+    @Test
+    @DisplayName("update：不能禁用当前登录账号")
+    void update_cannotDisableSelf() {
+        OpsUserEntity existing = user("admin");
+        when(userMapper.selectById("u-admin")).thenReturn(existing);
+
+        UserUpdateRequest req = new UserUpdateRequest();
+        req.setEnabled(false);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            assertThatThrownBy(() -> userService.update("u-admin", req))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("errorCode")
+                    .isEqualTo(ErrorCode.USER_OPERATION_FORBIDDEN);
+        }
+    }
+
+    @Test
+    @DisplayName("update：更新密码时重新 BCrypt 编码")
+    void update_passwordReencoded() {
+        OpsUserEntity existing = user("operator");
+        existing.setPassword("old-hash");
+        when(userMapper.selectById("u-operator")).thenReturn(existing);
+        when(passwordEncoder.encode("newpass123")).thenReturn("new-hash");
+
+        UserUpdateRequest req = new UserUpdateRequest();
+        req.setPassword("newpass123");
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            OpsUserEntity updated = userService.update("u-operator", req);
+
+            assertThat(updated.getPassword()).isEqualTo("new-hash");
+        }
+    }
+
+    @Test
+    @DisplayName("update：用户不存在抛 USER_NOT_FOUND")
+    void update_notFound() {
+        when(userMapper.selectById("u-missing")).thenReturn(null);
+
+        UserUpdateRequest req = new UserUpdateRequest();
+        assertThatThrownBy(() -> userService.update("u-missing", req))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.USER_NOT_FOUND);
+    }
+
+    // ==================== delete（P0 规格 5.3 防护） ====================
+
+    @Test
+    @DisplayName("delete：用户不存在抛 USER_NOT_FOUND")
+    void delete_notFound() {
+        when(userMapper.selectById("u-missing")).thenReturn(null);
+
+        assertThatThrownBy(() -> userService.delete("u-missing"))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.USER_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("delete：不能删除当前登录账号")
+    void delete_cannotDeleteSelf() {
+        OpsUserEntity existing = user("admin");
+        when(userMapper.selectById("u-admin")).thenReturn(existing);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            assertThatThrownBy(() -> userService.delete("u-admin"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("errorCode")
+                    .isEqualTo(ErrorCode.USER_OPERATION_FORBIDDEN);
+        }
+    }
+
+    @Test
+    @DisplayName("delete：内置 admin 账号不可删除")
+    void delete_cannotDeleteBuiltinAdmin() {
+        OpsUserEntity existing = user("admin");
+        existing.setRole("ADMIN");
+        when(userMapper.selectById("u-admin")).thenReturn(existing);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("root");
+
+            assertThatThrownBy(() -> userService.delete("u-admin"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("errorCode")
+                    .isEqualTo(ErrorCode.USER_OPERATION_FORBIDDEN);
+        }
+    }
+
+    @Test
+    @DisplayName("delete：系统至少保留一个 ADMIN，删除最后一个 ADMIN 抛错")
+    void delete_lastAdminThrows() {
+        OpsUserEntity existing = user("opsadmin");
+        existing.setRole("ADMIN");
+        when(userMapper.selectById("u-opsadmin")).thenReturn(existing);
+        when(userMapper.selectCount(any())).thenReturn(1L);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("root");
+
+            assertThatThrownBy(() -> userService.delete("u-opsadmin"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("errorCode")
+                    .isEqualTo(ErrorCode.USER_OPERATION_FORBIDDEN);
+        }
+    }
+
+    @Test
+    @DisplayName("delete：非最后 ADMIN 可正常删除")
+    void delete_success() {
+        OpsUserEntity existing = user("opsadmin");
+        existing.setRole("ADMIN");
+        when(userMapper.selectById("u-opsadmin")).thenReturn(existing);
+        when(userMapper.selectCount(any())).thenReturn(2L);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("root");
+
+            userService.delete("u-opsadmin");
+
+            verify(userMapper).deleteById("u-opsadmin");
+        }
+    }
+
+    @Test
+    @DisplayName("delete：非 ADMIN 用户无需检查 ADMIN 数量")
+    void delete_operatorSkipsAdminCount() {
+        OpsUserEntity existing = user("operator");
+        when(userMapper.selectById("u-operator")).thenReturn(existing);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            userService.delete("u-operator");
+
+            verify(userMapper, never()).selectCount(any());
+            verify(userMapper).deleteById("u-operator");
+        }
     }
 
     private UserCreateRequest createRequest(String username) {

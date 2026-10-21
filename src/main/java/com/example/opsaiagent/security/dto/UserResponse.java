@@ -23,6 +23,9 @@ public class UserResponse {
     @Schema(description = "用户名", example = "admin")
     private String username;
 
+    @Schema(description = "显示名称", example = "张三")
+    private String displayName;
+
     @Sensitive(value = SensitiveType.PASSWORD)
     @Schema(description = "密码（脱敏）", example = "******")
     private String password;

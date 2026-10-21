@@ -6,13 +6,16 @@ import com.example.opsaiagent.crypto.util.HashUtil;
 import com.example.opsaiagent.dto.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
+import com.example.opsaiagent.security.dto.UserUpdateRequest;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
 import com.example.opsaiagent.security.mapper.OpsUserMapper;
+import com.example.opsaiagent.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -70,7 +73,7 @@ public class OpsUserService {
 
         wrapper.orderByDesc(OpsUserEntity::getCreatedAt);
         List<OpsUserEntity> list = userMapper.selectList(wrapper);
-        // ★ 解密
+        // 逐条解密
         return list.stream().peek(this::decryptSensitiveFields).toList();
     }
 
@@ -87,7 +90,8 @@ public class OpsUserService {
         // 2. 构造实体
         OpsUserEntity user = new OpsUserEntity();
         user.setUsername(request.getUsername());
-        // ★ BCrypt 加密密码（存储哈希值，不是明文）
+        user.setDisplayName(request.getDisplayName());
+        // 3. BCrypt 加密密码（存储哈希值，不是明文）
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(request.getRole());
         user.setEnabled(true);
@@ -96,7 +100,7 @@ public class OpsUserService {
         // 加密敏感字段（如手机号、邮箱）
         encryptSensitiveFields(user);
 
-        // 3. 插入
+        // 4. 插入
         userMapper.insert(user);
         log.info("创建用户成功: username={}, role={}", user.getUsername(), user.getRole());
 
@@ -145,5 +149,76 @@ public class OpsUserService {
         if (entity.getEmailEnc() != null) {
             entity.setEmail(aesGcmUtil.decrypt(entity.getEmailEnc()));
         }
+    }
+
+    /**
+     * 更新用户（只更新非空字段；phone/email 传空串表示清除）
+     * 防护：不能禁用当前登录账号
+     */
+    public OpsUserEntity update(String id, UserUpdateRequest request) {
+        OpsUserEntity user = findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND, "用户不存在: " + id));
+        String currentUsername = SecurityUtils.getCurrentUsername();
+
+        if (request.getDisplayName() != null) {
+            user.setDisplayName(request.getDisplayName());
+        }
+        if (request.getRole() != null) {
+            user.setRole(request.getRole());
+        }
+        if (request.getEnabled() != null) {
+            if (Boolean.FALSE.equals(request.getEnabled()) && user.getUsername().equals(currentUsername)) {
+                throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能禁用当前登录账号");
+            }
+            user.setEnabled(request.getEnabled());
+        }
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
+        // 敏感字段：先解密当前明文再按请求更新
+        decryptSensitiveFields(user);
+        if (request.getPhone() != null) {
+            user.setPhone(request.getPhone());
+        }
+        if (request.getEmail() != null) {
+            user.setEmail(request.getEmail());
+        }
+        // 重新加密并刷新 enc/hash（updateById 只更新非 null 字段，必须先清空旧的）
+        user.setPhoneEnc(null);
+        user.setPhoneHash(null);
+        user.setEmailEnc(null);
+        user.setEmailHash(null);
+        encryptSensitiveFields(user);
+
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        log.info("更新用户成功: id={}, username={}", user.getId(), user.getUsername());
+        return user;
+    }
+
+    /**
+     * 删除用户
+     * 防护：不能删除自己、内置 admin；系统至少保留一个 ADMIN
+     */
+    public void delete(String id) {
+        OpsUserEntity user = findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND, "用户不存在: " + id));
+        String currentUsername = SecurityUtils.getCurrentUsername();
+        if (user.getUsername().equals(currentUsername)) {
+            throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能删除当前登录账号");
+        }
+        if ("admin".equals(user.getUsername())) {
+            throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "内置 admin 账号不可删除");
+        }
+        if ("ADMIN".equals(user.getRole())) {
+            Long adminCount = userMapper.selectCount(
+                    new LambdaQueryWrapper<OpsUserEntity>().eq(OpsUserEntity::getRole, "ADMIN"));
+            if (adminCount != null && adminCount <= 1) {
+                throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "系统至少保留一个 ADMIN 账号");
+            }
+        }
+        userMapper.deleteById(id);
+        log.info("删除用户成功: id={}, username={}", id, user.getUsername());
     }
 }

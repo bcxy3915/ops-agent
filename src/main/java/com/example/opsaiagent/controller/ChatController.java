@@ -43,7 +43,12 @@ public class ChatController {
     @AuditLog(operation = "RELOAD_KNOWLEDGE", description = "重建知识库索引")
     @PostMapping("/knowledge/reload")
     public Map<String, Object> reloadDocument() {
-        return documentLoader.reload();
+        Map<String, Object> result = documentLoader.reload();
+        // 重建 BM25 内存索引（从 vector_store 全量构建，纳入 upload:/case: 文档与最新向量），
+        // 使"重建索引"真正覆盖关键词检索，避免上传文档 publish 后长期检索不到
+        keywordRetriever.rebuild();
+        result.put("indexRebuilt", true);
+        return result;
     }
 
     /**
