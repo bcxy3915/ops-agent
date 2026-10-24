@@ -27,9 +27,21 @@ public class OpsUserEntity {
     private String password;
 
     /**
-     * 角色：ADMIN / OPERATOR / VIEWER
+     * 角色：ADMIN / OPERATOR / VIEWER（历史字段，新权限模型以 ops_user_role 为准）
      */
     private String role;
+
+    /**
+     * 所属租户 ID；平台管理员可为 0
+     */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /**
+     * 所属部门 ID；平台管理员可为空
+     */
+    @TableField("dept_id")
+    private Long deptId;
 
     /**
      * 是否启用

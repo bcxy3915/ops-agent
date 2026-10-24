@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * 阿里云百炼 Reranker 实现
  * 模型：gte-rerank-v2
- * <p>
+ *
  * 网络调用经过 ResilienceSupport 保护：超时（RestClientFactory）+ 重试 + 熔断。
  * 调用失败时降级为不重排（按原顺序截断）。
  */
