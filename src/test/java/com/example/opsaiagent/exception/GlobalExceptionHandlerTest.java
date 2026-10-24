@@ -1,7 +1,7 @@
 package com.example.opsaiagent.exception;
 
-import com.example.opsaiagent.dto.ApiResponse;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.api.ApiResponse;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.ratelimit.exception.RateLimitExceededException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

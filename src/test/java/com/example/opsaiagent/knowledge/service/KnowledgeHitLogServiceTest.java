@@ -1,5 +1,7 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.common.api.PageResult;
+import com.example.opsaiagent.knowledge.dto.KnowledgeHitLogResponse;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeHitLogEntity;
@@ -169,7 +171,7 @@ class KnowledgeHitLogServiceTest {
         page.setRecords(List.of(h1, h2));
         when(hitLogMapper.selectPage(any(), any())).thenReturn(page);
 
-        com.example.opsaiagent.dto.PageResult<com.example.opsaiagent.knowledge.dto.KnowledgeHitLogResponse> r =
+        PageResult<KnowledgeHitLogResponse> r =
                 service.listByDocument(9L, 1, 10);
 
         assertThat(r.getTotal()).isEqualTo(2);

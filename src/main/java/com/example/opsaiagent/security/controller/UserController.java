@@ -1,8 +1,8 @@
 package com.example.opsaiagent.security.controller;
 
 import com.example.opsaiagent.audit.annotation.AuditLog;
-import com.example.opsaiagent.dto.ApiResponse;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.api.ApiResponse;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
 import com.example.opsaiagent.security.dto.UserResponse;

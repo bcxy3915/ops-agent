@@ -1,10 +1,11 @@
 package com.example.opsaiagent.controller;
 
+import com.example.opsaiagent.chat.controller.ChatController;
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
-import com.example.opsaiagent.loader.DocumentLoader;
+import com.example.opsaiagent.knowledge.loader.DocumentLoader;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
-import com.example.opsaiagent.service.OpsAgentService;
+import com.example.opsaiagent.chat.service.OpsAgentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

@@ -1,9 +1,7 @@
 package com.example.opsaiagent.diagnosis.controller;
 
-import com.example.opsaiagent.diagnosis.dto.DiagnosisRecordResponse;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.service.DiagnosisService;
-import com.example.opsaiagent.dto.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

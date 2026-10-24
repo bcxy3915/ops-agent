@@ -1,13 +1,14 @@
 package com.example.opsaiagent.controller;
 
-import com.example.opsaiagent.dto.ApiResponse;
-import com.example.opsaiagent.dto.ServiceRegisterRequest;
-import com.example.opsaiagent.dto.ServiceResponse;
-import com.example.opsaiagent.dto.ServiceUpdateRequest;
-import com.example.opsaiagent.entity.OpsServiceEntity;
+import com.example.opsaiagent.common.api.ApiResponse;
+import com.example.opsaiagent.ops.controller.ServiceController;
+import com.example.opsaiagent.ops.dto.ServiceRegisterRequest;
+import com.example.opsaiagent.ops.dto.ServiceResponse;
+import com.example.opsaiagent.ops.dto.ServiceUpdateRequest;
+import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.exception.BusinessException;
-import com.example.opsaiagent.service.OpsServiceManager;
-import com.example.opsaiagent.service.ServiceHealthChecker;
+import com.example.opsaiagent.ops.service.OpsServiceManager;
+import com.example.opsaiagent.ops.service.ServiceHealthChecker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

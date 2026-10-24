@@ -1,7 +1,7 @@
 package com.example.opsaiagent.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.opsaiagent.entity.OpsServiceEntity;
+import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCoverageResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHealthResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHealthResponse.KnowledgeHealthItem;
@@ -15,7 +15,7 @@ import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeConflictMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeHitLogMapper;
-import com.example.opsaiagent.mapper.OpsServiceMapper;
+import com.example.opsaiagent.ops.mapper.OpsServiceMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

@@ -1,6 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCoverageResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHealthResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeStatsResponse;

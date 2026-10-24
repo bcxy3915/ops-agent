@@ -3,7 +3,7 @@ package com.example.opsaiagent.alert.controller;
 import com.example.opsaiagent.alert.dto.AlertEventResponse;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.alert.service.AlertEventService;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

@@ -1,7 +1,7 @@
 package com.example.opsaiagent.notification.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotifierRegistry;

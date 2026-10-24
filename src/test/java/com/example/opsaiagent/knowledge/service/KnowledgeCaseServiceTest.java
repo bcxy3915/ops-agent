@@ -6,7 +6,7 @@ import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
-import com.example.opsaiagent.dto.PageResult;
+import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.CaseReviseRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseDetailResponse;
