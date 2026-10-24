@@ -5,7 +5,7 @@ import com.example.opsaiagent.alert.dto.AlertRuleResponse;
 import com.example.opsaiagent.alert.entity.AlertRuleEntity;
 import com.example.opsaiagent.alert.service.AlertRuleService;
 import com.example.opsaiagent.audit.annotation.AuditLog;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;

@@ -1,7 +1,7 @@
 package com.example.opsaiagent.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeVersionResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;

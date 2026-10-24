@@ -1,7 +1,7 @@
 package com.example.opsaiagent.notification.controller;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationRecordResponse;
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;

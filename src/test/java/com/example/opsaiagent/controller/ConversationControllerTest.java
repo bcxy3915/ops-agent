@@ -1,10 +1,11 @@
 package com.example.opsaiagent.controller;
 
+import com.example.opsaiagent.chat.controller.ConversationController;
 import com.example.opsaiagent.chat.dto.ConversationResponse;
 import com.example.opsaiagent.chat.dto.MessageResponse;
 import com.example.opsaiagent.chat.dto.RenameTitleRequest;
 import com.example.opsaiagent.chat.service.ConversationService;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

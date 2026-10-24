@@ -1,13 +1,11 @@
 package com.example.opsaiagent.diagnosis.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.opsaiagent.alert.entity.AlertEventEntity;
-import com.example.opsaiagent.diagnosis.dto.DiagnosisRecordResponse;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisReferenceResponse;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.entity.KnowledgeCaseEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
@@ -26,7 +24,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;

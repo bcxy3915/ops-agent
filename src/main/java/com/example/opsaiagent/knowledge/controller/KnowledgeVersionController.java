@@ -1,7 +1,7 @@
 package com.example.opsaiagent.knowledge.controller;
 
 import com.example.opsaiagent.audit.annotation.AuditLog;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeVersionResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeDocumentService;

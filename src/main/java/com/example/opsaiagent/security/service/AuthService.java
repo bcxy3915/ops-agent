@@ -1,6 +1,6 @@
 package com.example.opsaiagent.security.service;
 
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.rbac.dto.UserAuthorities;
 import com.example.opsaiagent.rbac.entity.UserIdentityEntity;

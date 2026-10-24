@@ -1,7 +1,9 @@
 package com.example.opsaiagent.service;
 
-import com.example.opsaiagent.entity.OpsServiceEntity;
+import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.ops.service.OpsServiceManager;
+import com.example.opsaiagent.ops.service.ServiceHealthChecker;
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
 import org.junit.jupiter.api.BeforeEach;

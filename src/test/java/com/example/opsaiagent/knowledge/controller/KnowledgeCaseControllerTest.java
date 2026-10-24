@@ -1,6 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
-import com.example.opsaiagent.dto.PageResult;
+import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.CaseFlowStep;
 import com.example.opsaiagent.knowledge.dto.CaseReviseRequest;
@@ -21,7 +21,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;

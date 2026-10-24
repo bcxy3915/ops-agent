@@ -8,7 +8,7 @@ import com.example.opsaiagent.alert.entity.AlertRuleEntity;
 import com.example.opsaiagent.alert.entity.AlertRuleEscalationLevelEntity;
 import com.example.opsaiagent.alert.mapper.AlertRuleEscalationLevelMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;

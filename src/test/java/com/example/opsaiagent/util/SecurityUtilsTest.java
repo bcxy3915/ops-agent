@@ -1,8 +1,6 @@
 package com.example.opsaiagent.util;
 
-import com.example.opsaiagent.rbac.context.DeptContext;
-import com.example.opsaiagent.rbac.context.TenantContext;
-import com.example.opsaiagent.rbac.context.UserContext;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

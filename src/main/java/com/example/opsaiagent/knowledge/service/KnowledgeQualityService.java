@@ -1,7 +1,7 @@
 package com.example.opsaiagent.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.ConflictResolveRequest;
 import com.example.opsaiagent.knowledge.dto.ConflictResolveResponse;
@@ -17,7 +17,7 @@ import com.example.opsaiagent.knowledge.mapper.KnowledgeConflictMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.sensitive.util.OpsSensitiveScanner;
-import com.example.opsaiagent.util.SecurityUtils;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;

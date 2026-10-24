@@ -3,10 +3,9 @@ package com.example.opsaiagent.audit.aspect;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.service.AuditLogService;
-import com.example.opsaiagent.sensitive.SensitiveType;
 import com.example.opsaiagent.sensitive.util.SensitiveUtil;
-import com.example.opsaiagent.util.IpUtils;
-import com.example.opsaiagent.util.SecurityUtils;
+import com.example.opsaiagent.common.util.IpUtils;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -25,7 +24,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
-import java.util.Arrays;
 
 /**
  * 审计日志切面

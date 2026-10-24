@@ -2,7 +2,8 @@ package com.example.opsaiagent.config;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import com.example.opsaiagent.entity.OpsServiceEntity;
+import com.example.opsaiagent.common.config.MybatisFillHandler;
+import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;

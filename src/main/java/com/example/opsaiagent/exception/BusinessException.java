@@ -1,6 +1,6 @@
 package com.example.opsaiagent.exception;
 
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import lombok.Getter;
 
 @Getter

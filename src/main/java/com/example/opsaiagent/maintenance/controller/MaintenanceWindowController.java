@@ -1,7 +1,7 @@
 package com.example.opsaiagent.maintenance.controller;
 
 import com.example.opsaiagent.audit.annotation.AuditLog;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.maintenance.dto.MaintenanceWindowCreateRequest;
 import com.example.opsaiagent.maintenance.dto.MaintenanceWindowResponse;
 import com.example.opsaiagent.maintenance.service.MaintenanceWindowService;
@@ -13,7 +13,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 维护窗口接口（P1 规格 5）
