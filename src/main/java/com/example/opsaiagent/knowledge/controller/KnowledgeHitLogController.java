@@ -1,7 +1,7 @@
 package com.example.opsaiagent.knowledge.controller;
 
-import com.example.opsaiagent.dto.ApiResponse;
-import com.example.opsaiagent.dto.PageResult;
+import com.example.opsaiagent.common.api.ApiResponse;
+import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseReferenceResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHitLogResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;

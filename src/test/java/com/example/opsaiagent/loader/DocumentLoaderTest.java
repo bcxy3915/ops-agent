@@ -1,5 +1,6 @@
 package com.example.opsaiagent.loader;
 
+import com.example.opsaiagent.knowledge.loader.DocumentLoader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,7 +16,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;

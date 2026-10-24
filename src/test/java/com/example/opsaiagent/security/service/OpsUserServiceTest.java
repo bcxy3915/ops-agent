@@ -1,8 +1,8 @@
-package com.example.opsaiagent.security.service;
+﻿package com.example.opsaiagent.security.service;
 
 import com.example.opsaiagent.crypto.util.AesGcmUtil;
 import com.example.opsaiagent.crypto.util.HashUtil;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
@@ -14,7 +14,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import com.example.opsaiagent.security.dto.UserUpdateRequest;
-import com.example.opsaiagent.util.SecurityUtils;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import org.mockito.MockedStatic;
 import org.springframework.security.crypto.password.PasswordEncoder;
 

@@ -1,6 +1,6 @@
 package com.example.opsaiagent.notification;
 
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import org.springframework.stereotype.Component;
 

@@ -1,6 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
-import com.example.opsaiagent.dto.PageResult;
+import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
@@ -27,8 +27,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;

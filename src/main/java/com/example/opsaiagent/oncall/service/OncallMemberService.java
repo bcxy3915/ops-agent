@@ -1,13 +1,13 @@
 package com.example.opsaiagent.oncall.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.oncall.dto.OncallMemberCreateRequest;
 import com.example.opsaiagent.oncall.dto.OncallMemberResponse;
 import com.example.opsaiagent.oncall.entity.OncallMemberEntity;
 import com.example.opsaiagent.oncall.mapper.OncallMemberMapper;
-import com.example.opsaiagent.util.SecurityUtils;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

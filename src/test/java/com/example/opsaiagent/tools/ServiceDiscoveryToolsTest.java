@@ -1,7 +1,7 @@
 package com.example.opsaiagent.tools;
 
-import com.example.opsaiagent.entity.OpsServiceEntity;
-import com.example.opsaiagent.service.OpsServiceManager;
+import com.example.opsaiagent.ops.entity.OpsServiceEntity;
+import com.example.opsaiagent.ops.service.OpsServiceManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

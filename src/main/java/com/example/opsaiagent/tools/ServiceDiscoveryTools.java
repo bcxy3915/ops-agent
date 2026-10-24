@@ -1,7 +1,7 @@
 package com.example.opsaiagent.tools;
 
-import com.example.opsaiagent.entity.OpsServiceEntity;
-import com.example.opsaiagent.service.OpsServiceManager;
+import com.example.opsaiagent.ops.entity.OpsServiceEntity;
+import com.example.opsaiagent.ops.service.OpsServiceManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.annotation.Tool;

@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.audit.dto.AuditLogResponse;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.mapper.AuditLogMapper;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

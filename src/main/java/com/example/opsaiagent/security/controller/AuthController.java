@@ -1,7 +1,7 @@
 package com.example.opsaiagent.security.controller;
 
 import com.example.opsaiagent.audit.annotation.AuditLog;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import com.example.opsaiagent.security.dto.LoginRequest;
 import com.example.opsaiagent.security.dto.LoginResponse;

@@ -1,6 +1,6 @@
 package com.example.opsaiagent.notification.controller;
 
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationChannelRequest;
 import com.example.opsaiagent.notification.dto.NotificationChannelResponse;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
@@ -18,7 +18,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;

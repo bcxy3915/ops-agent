@@ -2,8 +2,8 @@ package com.example.opsaiagent.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.example.opsaiagent.dto.ErrorCode;
-import com.example.opsaiagent.dto.PageResult;
+import com.example.opsaiagent.common.error.ErrorCode;
+import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeChunkResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
@@ -14,7 +14,7 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
-import com.example.opsaiagent.util.SecurityUtils;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +35,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;

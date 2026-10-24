@@ -3,7 +3,7 @@ package com.example.opsaiagent.diagnosis.service;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
-import com.example.opsaiagent.dto.ErrorCode;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
@@ -30,7 +30,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 

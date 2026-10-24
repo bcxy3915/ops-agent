@@ -1,7 +1,8 @@
 package com.example.opsaiagent.controller;
 
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.metrics.controller.MetricSampleController;
 import com.example.opsaiagent.metrics.dto.MetricHistoryResponse;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;

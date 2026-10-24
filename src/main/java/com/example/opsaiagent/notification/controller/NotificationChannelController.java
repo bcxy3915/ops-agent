@@ -1,7 +1,7 @@
 package com.example.opsaiagent.notification.controller;
 
 import com.example.opsaiagent.audit.annotation.AuditLog;
-import com.example.opsaiagent.dto.ApiResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationChannelRequest;
 import com.example.opsaiagent.notification.dto.NotificationChannelResponse;
 import com.example.opsaiagent.notification.dto.NotificationRecordResponse;
