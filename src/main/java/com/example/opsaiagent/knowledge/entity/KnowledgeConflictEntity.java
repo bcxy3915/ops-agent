@@ -23,6 +23,14 @@ public class KnowledgeConflictEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 所属租户 ID */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 ID */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 引发冲突的文档（新上传/新编写） */
     @TableField("doc_id")
     private Long docId;

@@ -10,6 +10,12 @@ public class KnowledgeHitLogResponse {
     /** 流水 ID */
     private Long id;
 
+    /** 所属租户 ID */
+    private String tenantId;
+
+    /** 归属部门 ID */
+    private Long deptId;
+
     /** 命中的知识文档 ID */
     private Long docId;
 
@@ -31,6 +37,22 @@ public class KnowledgeHitLogResponse {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public Long getDeptId() {
+        return deptId;
+    }
+
+    public void setDeptId(Long deptId) {
+        this.deptId = deptId;
     }
 
     public Long getDocId() {

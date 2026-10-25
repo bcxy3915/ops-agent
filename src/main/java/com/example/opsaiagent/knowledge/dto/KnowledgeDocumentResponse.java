@@ -23,6 +23,14 @@ public class KnowledgeDocumentResponse {
     private String docType;
     private String layer;
     private String trustStatus;
+    private String tenantId;
+    private Long deptId;
+    private String visibility;
+    private String reviewStatus;
+    private String reviewLevel;
+    private String reviewedBy;
+    private LocalDateTime reviewedAt;
+    private String reviewNote;
     private Integer version;
     private String owner;
     private List<String> serviceIds;

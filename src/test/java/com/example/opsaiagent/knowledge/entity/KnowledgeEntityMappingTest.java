@@ -52,6 +52,14 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("docType", "doc_type")
                 .containsEntry("layer", "layer")
                 .containsEntry("trustStatus", "trust_status")
+                .containsEntry("tenantId", "tenant_id")
+                .containsEntry("deptId", "dept_id")
+                .containsEntry("visibility", "visibility")
+                .containsEntry("reviewStatus", "review_status")
+                .containsEntry("reviewLevel", "review_level")
+                .containsEntry("reviewedBy", "reviewed_by")
+                .containsEntry("reviewedAt", "reviewed_at")
+                .containsEntry("reviewNote", "review_note")
                 .containsEntry("version", "version")
                 .containsEntry("owner", "owner")
                 .containsEntry("serviceIds", "service_ids")
@@ -68,7 +76,7 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("conflictStatus", "conflict_status")
                 .containsEntry("createdAt", "created_at")
                 .containsEntry("updatedAt", "updated_at");
-        assertThat(map).hasSize(20);
+        assertThat(map).hasSize(28);
     }
 
     @Test
@@ -99,12 +107,14 @@ class KnowledgeEntityMappingTest {
     void chunk_columns() {
         Map<String, String> map = columnByProperty(tableInfo(KnowledgeChunkEntity.class));
         assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("tenantId", "tenant_id")
+                .containsEntry("deptId", "dept_id")
                 .containsEntry("ordinal", "ordinal")
                 .containsEntry("content", "content")
                 .containsEntry("section", "section")
                 .containsEntry("vectorId", "vector_id")
                 .containsEntry("createdAt", "created_at");
-        assertThat(map).hasSize(6);
+        assertThat(map).hasSize(8);
     }
 
     // ==================== knowledge_case ====================
@@ -123,6 +133,9 @@ class KnowledgeEntityMappingTest {
     void case_columns() {
         Map<String, String> map = columnByProperty(tableInfo(KnowledgeCaseEntity.class));
         assertThat(map).containsEntry("sourceAlertId", "source_alert_id")
+                .containsEntry("tenantId", "tenant_id")
+                .containsEntry("deptId", "dept_id")
+                .containsEntry("visibility", "visibility")
                 .containsEntry("diagnosisRecordId", "diagnosis_record_id")
                 .containsEntry("service", "service")
                 .containsEntry("title", "title")
@@ -140,7 +153,7 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("citedCount", "cited_count")
                 .containsEntry("createdAt", "created_at")
                 .containsEntry("updatedAt", "updated_at");
-        assertThat(map).hasSize(18);
+        assertThat(map).hasSize(21);
     }
 
     // ==================== 状态常量约定 ====================
@@ -172,11 +185,13 @@ class KnowledgeEntityMappingTest {
     void hitLog_columns() {
         Map<String, String> map = columnByProperty(tableInfo(KnowledgeHitLogEntity.class));
         assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("tenantId", "tenant_id")
+                .containsEntry("deptId", "dept_id")
                 .containsEntry("query", "query")
                 .containsEntry("hitSource", "hit_source")
                 .containsEntry("channel", "channel")
                 .containsEntry("createdAt", "created_at");
-        assertThat(map).hasSize(5);
+        assertThat(map).hasSize(7);
     }
 
     // ==================== knowledge_conflict（P1） ====================
@@ -195,6 +210,8 @@ class KnowledgeEntityMappingTest {
     void conflict_columns() {
         Map<String, String> map = columnByProperty(tableInfo(KnowledgeConflictEntity.class));
         assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("tenantId", "tenant_id")
+                .containsEntry("deptId", "dept_id")
                 .containsEntry("matchedDocId", "matched_doc_id")
                 .containsEntry("conflictType", "conflict_type")
                 .containsEntry("similarity", "similarity")
@@ -203,7 +220,7 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("resolvedBy", "resolved_by")
                 .containsEntry("createdAt", "created_at")
                 .containsEntry("resolvedAt", "resolved_at");
-        assertThat(map).hasSize(9);
+        assertThat(map).hasSize(11);
     }
 
     // ==================== knowledge_document_version（P2） ====================
@@ -222,11 +239,13 @@ class KnowledgeEntityMappingTest {
     void version_columns() {
         Map<String, String> map = columnByProperty(tableInfo(KnowledgeDocumentVersionEntity.class));
         assertThat(map).containsEntry("docId", "doc_id")
+                .containsEntry("tenantId", "tenant_id")
+                .containsEntry("deptId", "dept_id")
                 .containsEntry("version", "version")
                 .containsEntry("contentSnapshot", "content_snapshot")
                 .containsEntry("changedBy", "changed_by")
                 .containsEntry("changeReason", "change_reason")
                 .containsEntry("createdAt", "created_at");
-        assertThat(map).hasSize(6);
+        assertThat(map).hasSize(8);
     }
 }

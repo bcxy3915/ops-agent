@@ -352,6 +352,9 @@ public class KnowledgeCaseService {
     private KnowledgeCaseSummaryResponse toSummary(KnowledgeCaseEntity entity) {
         return KnowledgeCaseSummaryResponse.builder()
                 .id(entity.getId())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
+                .visibility(entity.getVisibility())
                 .sourceAlertId(entity.getSourceAlertId())
                 .diagnosisRecordId(entity.getDiagnosisRecordId())
                 .service(entity.getService())
@@ -375,6 +378,9 @@ public class KnowledgeCaseService {
                                                  FailureSnapshotEntity snapshot) {
         return KnowledgeCaseDetailResponse.builder()
                 .id(entity.getId())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
+                .visibility(entity.getVisibility())
                 .sourceAlertId(entity.getSourceAlertId())
                 .diagnosisRecordId(entity.getDiagnosisRecordId())
                 .service(entity.getService())

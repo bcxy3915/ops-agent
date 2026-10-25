@@ -73,6 +73,7 @@ public class DbServiceRegistry implements ServiceRegistry {
     private ServiceInfo toServiceInfo(OpsServiceEntity entity) {
         ServiceInfo info = new ServiceInfo();
         info.setName(entity.getName());
+        info.setTenantId(entity.getTenantId());
         info.setBaseUrl(entity.getBaseUrl());
         info.setHealthPath(entity.getHealthPath());
         info.setMetricsPath(entity.getMetricsPath());

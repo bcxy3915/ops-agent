@@ -78,6 +78,14 @@ class KnowledgeDocumentServiceTest {
         e.setDocType("MARKDOWN");
         e.setLayer(layer);
         e.setTrustStatus(status);
+        e.setTenantId("t1");
+        e.setDeptId(5L);
+        e.setVisibility("DEPT");
+        e.setReviewStatus("APPROVED");
+        e.setReviewLevel("DEPT");
+        e.setReviewedBy("admin");
+        e.setReviewedAt(LocalDateTime.now());
+        e.setReviewNote("通过");
         e.setVersion(1);
         e.setOwner("ops");
         e.setServiceIds("[\"svc-a\"]");
@@ -161,6 +169,8 @@ class KnowledgeDocumentServiceTest {
         KnowledgeChunkEntity chunk = new KnowledgeChunkEntity();
         chunk.setId(10L);
         chunk.setDocId(1L);
+        chunk.setTenantId("t1");
+        chunk.setDeptId(5L);
         chunk.setOrdinal(1);
         chunk.setContent("内容块");
         chunk.setSection("S1");
@@ -169,7 +179,16 @@ class KnowledgeDocumentServiceTest {
         KnowledgeDocumentResponse r = service.getById(1L);
 
         assertThat(r.getId()).isEqualTo(1L);
+        assertThat(r.getTenantId()).isEqualTo("t1");
+        assertThat(r.getDeptId()).isEqualTo(5L);
+        assertThat(r.getVisibility()).isEqualTo("DEPT");
+        assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+        assertThat(r.getReviewLevel()).isEqualTo("DEPT");
+        assertThat(r.getReviewedBy()).isEqualTo("admin");
+        assertThat(r.getReviewNote()).isEqualTo("通过");
         assertThat(r.getChunks()).hasSize(1);
+        assertThat(r.getChunks().get(0).getTenantId()).isEqualTo("t1");
+        assertThat(r.getChunks().get(0).getDeptId()).isEqualTo(5L);
         assertThat(r.getChunks().get(0).getSection()).isEqualTo("S1");
     }
 

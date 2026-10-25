@@ -33,6 +33,38 @@ public class KnowledgeDocumentEntity {
     @TableField("layer")
     private String layer;
 
+    /** 所属租户；0 表示平台公共知识 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门；PUBLIC / 平台知识可为空 */
+    @TableField("dept_id")
+    private Long deptId;
+
+    /** 可见性：PERSONAL / DEPT / TENANT / PUBLIC */
+    @TableField("visibility")
+    private String visibility;
+
+    /** 审核状态：DRAFT / PENDING_DEPT / PENDING_TENANT / APPROVED / REJECTED */
+    @TableField("review_status")
+    private String reviewStatus;
+
+    /** 当前审核层级：NONE / DEPT / TENANT */
+    @TableField("review_level")
+    private String reviewLevel;
+
+    /** 最近审核人 */
+    @TableField("reviewed_by")
+    private String reviewedBy;
+
+    /** 最近审核时间 */
+    @TableField("reviewed_at")
+    private LocalDateTime reviewedAt;
+
+    /** 审核意见 / 驳回原因 */
+    @TableField("review_note")
+    private String reviewNote;
+
     /** 信任状态：VERIFIED / PENDING / AI_DRAFT / EXPIRED */
     @TableField("trust_status")
     private String trustStatus;

@@ -26,6 +26,14 @@ public class KnowledgeHitLogEntity {
     @TableField("doc_id")
     private Long docId;
 
+    /** 所属租户 ID */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 ID */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 触发检索的问题 */
     @TableField("query")
     private String query;

@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.longThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,7 +53,7 @@ class MetricSampleControllerTest {
     @DisplayName("query：默认返回 5 个指标的时序")
     void query_allMetrics() {
         when(serviceRegistry.getByName("svc-a")).thenReturn(svc("svc-a"));
-        when(metricSampleStore.query(eq("svc-a"), eq("cpu"), anyLong(), anyLong()))
+        when(metricSampleStore.query(isNull(), eq("svc-a"), eq("cpu"), anyLong(), anyLong()))
                 .thenReturn(List.of(new MetricPoint(1000, 0.5)));
 
         ApiResponse<MetricHistoryResponse> result = controller.query("svc-a", null, "1h");
@@ -67,7 +68,7 @@ class MetricSampleControllerTest {
     @DisplayName("query：指定单指标只返回该指标")
     void query_singleMetric() {
         when(serviceRegistry.getByName("svc-a")).thenReturn(svc("svc-a"));
-        when(metricSampleStore.query(eq("svc-a"), eq("cpu"), anyLong(), anyLong()))
+        when(metricSampleStore.query(isNull(), eq("svc-a"), eq("cpu"), anyLong(), anyLong()))
                 .thenReturn(List.of(new MetricPoint(1000, 0.5)));
 
         ApiResponse<MetricHistoryResponse> result = controller.query("svc-a", "cpu", "1h");
@@ -92,7 +93,7 @@ class MetricSampleControllerTest {
         controller.query("svc-a", "cpu", "5m");
 
         long now = System.currentTimeMillis();
-        verify(metricSampleStore).query(eq("svc-a"), eq("cpu"),
+        verify(metricSampleStore).query(isNull(), eq("svc-a"), eq("cpu"),
                 longThat(start -> start >= now - 5 * 60 * 1000L - 10_000 && start <= now - 5 * 60 * 1000L + 10_000),
                 longThat(end -> end >= now - 10_000 && end <= now + 10_000));
     }

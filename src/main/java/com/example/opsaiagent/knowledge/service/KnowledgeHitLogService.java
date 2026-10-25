@@ -199,6 +199,8 @@ public class KnowledgeHitLogService {
     private KnowledgeHitLogResponse toResponse(KnowledgeHitLogEntity entity) {
         KnowledgeHitLogResponse response = new KnowledgeHitLogResponse();
         response.setId(entity.getId());
+        response.setTenantId(entity.getTenantId());
+        response.setDeptId(entity.getDeptId());
         response.setDocId(entity.getDocId());
         response.setQuery(entity.getQuery());
         response.setHitSource(entity.getHitSource());

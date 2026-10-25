@@ -113,6 +113,8 @@ public class KnowledgeVersionService {
     private KnowledgeVersionResponse toResponse(KnowledgeDocumentVersionEntity entity) {
         KnowledgeVersionResponse response = new KnowledgeVersionResponse();
         response.setId(entity.getId());
+        response.setTenantId(entity.getTenantId());
+        response.setDeptId(entity.getDeptId());
         response.setVersion(entity.getVersion());
         response.setContentSnapshot(entity.getContentSnapshot());
         response.setChangedBy(entity.getChangedBy());

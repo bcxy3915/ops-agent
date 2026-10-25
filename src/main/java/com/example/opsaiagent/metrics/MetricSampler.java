@@ -148,7 +148,7 @@ public class MetricSampler {
         points.put("threadCount", (double) threadCount);
         points.put("gcPause", gcPause);
         points.put("hikariActive", (double) hikariActiveVal);
-        metricSampleStore.saveBatch(name, now, points);
+        metricSampleStore.saveBatch(service.getTenantId(), name, now, points);
 
         // 4. 存储时序点
         appendPoint(name, "cpu", now, cpu);

@@ -7,6 +7,7 @@ import com.example.opsaiagent.metrics.mapper.MetricSampleMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -53,6 +54,17 @@ class MetricSampleStoreTest {
     }
 
     @Test
+    @DisplayName("save：写入租户 ID")
+    void save_withTenant() {
+        store.save("t1", "svc-a", "cpu", System.currentTimeMillis(), 0.42);
+
+        ArgumentCaptor<MetricSampleEntity> captor =
+                ArgumentCaptor.forClass(MetricSampleEntity.class);
+        verify(mapper).insert(captor.capture());
+        assertThat(captor.getValue().getTenantId()).isEqualTo("t1");
+    }
+
+    @Test
     @DisplayName("save：落库失败不抛出")
     void save_swallowsInsertError() {
         doThrow(new RuntimeException("db down")).when(mapper).insert(any(MetricSampleEntity.class));
@@ -95,6 +107,20 @@ class MetricSampleStoreTest {
         assertThat(points.get(0).getTimestamp()).isEqualTo(toMs(t1));
         assertThat(points.get(0).getValue()).isEqualTo(0.3);
         assertThat(points.get(1).getValue()).isEqualTo(0.4);
+    }
+
+    @Test
+    @DisplayName("query：按租户过滤")
+    void query_withTenant() {
+        LocalDateTime t = LocalDateTime.now();
+        when(mapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(entity(1L, "svc-a", "cpu", 0.3, t)));
+
+        List<MetricPoint> points = store.query("t1", "svc-a", "cpu",
+                toMs(t) - 1000, toMs(t) + 1000);
+
+        assertThat(points).hasSize(1);
+        verify(mapper).selectList(any(Wrapper.class));
     }
 
     @Test

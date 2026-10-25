@@ -26,6 +26,11 @@ public class MetricSampleEntity {
     private String service;
 
     /**
+     * 所属租户 ID
+     */
+    private String tenantId;
+
+    /**
      * 指标名
      */
     private String metric;
