@@ -599,8 +599,54 @@ BEGIN
 END $$;
 
 -- ============================================================
--- 五、NOT NULL / DEFAULT 收口
+-- 四补、向量检索 metadata 回填（owner / reviewStatus）
 -- ============================================================
+DO $$
+DECLARE
+    metadata_type TEXT;
+BEGIN
+    SELECT format_type(a.atttypid, a.atttypmod)
+    INTO metadata_type
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    WHERE c.relname = 'vector_store' AND a.attname = 'metadata';
+
+    IF metadata_type = 'jsonb' THEN
+        -- 上传文档：补齐作者与审核状态，供 PERSONAL / DEPT / TENANT 检索过滤
+        UPDATE vector_store v
+        SET metadata = COALESCE(v.metadata, '{}'::jsonb) || jsonb_build_object(
+            'owner',        COALESCE(d.owner, ''),
+            'reviewStatus', COALESCE(d.review_status, 'APPROVED')
+        )
+        FROM knowledge_document d
+        WHERE v.metadata->>'source' = 'upload:' || d.id
+          AND (v.metadata->>'owner') IS NULL;
+
+        -- 内置 / 案例 / 孤儿向量：统一补平台/系统默认值
+        UPDATE vector_store
+        SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+            'owner',        'system',
+            'reviewStatus', 'APPROVED'
+        )
+        WHERE metadata->>'owner' IS NULL;
+    ELSE
+        UPDATE vector_store v
+        SET metadata = (COALESCE(v.metadata::jsonb, '{}'::jsonb) || jsonb_build_object(
+            'owner',        COALESCE(d.owner, ''),
+            'reviewStatus', COALESCE(d.review_status, 'APPROVED')
+        ))::json
+        FROM knowledge_document d
+        WHERE v.metadata->>'source' = 'upload:' || d.id
+          AND (v.metadata->>'owner') IS NULL;
+
+        UPDATE vector_store
+        SET metadata = (COALESCE(metadata::jsonb, '{}'::jsonb) || jsonb_build_object(
+            'owner',        'system',
+            'reviewStatus', 'APPROVED'
+        ))::json
+        WHERE metadata->>'owner' IS NULL;
+    END IF;
+END $$;
 
 -- 兜底：兼容“列已存在但可空”的重复执行场景，确保 NOT NULL 不会失败
 DO $$

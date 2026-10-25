@@ -312,6 +312,15 @@ public class DocumentLoader {
             for (int i = 0; i < chunks.size(); i += batchSize) {
                 int end = Math.min(i + batchSize, chunks.size());
                 List<Document> batch = chunks.subList(i, end);
+                for (Document doc : batch) {
+                    // 内置知识统一归属平台公共知识，供检索范围过滤使用
+                    doc.getMetadata().putIfAbsent("tenantId", "0");
+                    doc.getMetadata().putIfAbsent("deptId", "");
+                    doc.getMetadata().putIfAbsent("visibility", "PUBLIC");
+                    doc.getMetadata().putIfAbsent("reviewStatus", "APPROVED");
+                    doc.getMetadata().putIfAbsent("owner", "system");
+                    doc.getMetadata().putIfAbsent("layer", "BUILTIN");
+                }
                 vectorStore.add(batch);
                 indexed += batch.size();
                 log.info("向量入库批次: {}-{}, 共 {} 条", i + 1, end, chunks.size());

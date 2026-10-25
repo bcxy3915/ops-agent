@@ -22,6 +22,16 @@ public interface KeywordRetriever {
     List<Document> search(String query, int topK);
 
     /**
+     * 按数据范围进行关键词检索。
+     *
+     * @param query 查询文本
+     * @param topK  返回条数
+     * @param scope 检索范围
+     * @return 按相关度降序排列的文档
+     */
+    List<Document> search(String query, int topK, RetrievalScope scope);
+
+    /**
      * 重建索引
      */
     void rebuild();

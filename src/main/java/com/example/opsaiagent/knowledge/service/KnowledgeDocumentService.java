@@ -813,6 +813,8 @@ public class KnowledgeDocumentService {
         String deptId = entity.getDeptId() == null ? "" : String.valueOf(entity.getDeptId());
         String visibility = entity.getVisibility() == null ? VISIBILITY_PERSONAL : entity.getVisibility();
         String trustStatus = entity.getTrustStatus() == null ? "" : entity.getTrustStatus();
+        String owner = entity.getOwner() == null ? "" : entity.getOwner();
+        String reviewStatus = entity.getReviewStatus() == null ? "" : entity.getReviewStatus();
         int ordinal = 1;
         for (Document chunk : chunks) {
             KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
@@ -825,19 +827,20 @@ public class KnowledgeDocumentService {
             chunkMapper.insert(chunkEntity);
             chunkEntities.add(chunkEntity);
 
-            Document vectorDoc = new Document(chunk.getText(),
-                    java.util.Map.of(
-                            "source", UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId(),
-                            "docId", String.valueOf(entity.getId()),
-                            "title", entity.getTitle() == null ? "" : entity.getTitle(),
-                            "layer", entity.getLayer(),
-                            "trustStatus", trustStatus,
-                            "tenantId", tenantId,
-                            "deptId", deptId,
-                            "visibility", visibility,
-                            "ordinal", String.valueOf(ordinal),
-                            "chunkId", String.valueOf(chunkEntity.getId())
-                    ));
+            java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+            metadata.put("source", UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId());
+            metadata.put("docId", String.valueOf(entity.getId()));
+            metadata.put("title", entity.getTitle() == null ? "" : entity.getTitle());
+            metadata.put("layer", entity.getLayer() == null ? "" : entity.getLayer());
+            metadata.put("trustStatus", trustStatus);
+            metadata.put("tenantId", tenantId);
+            metadata.put("deptId", deptId);
+            metadata.put("visibility", visibility);
+            metadata.put("reviewStatus", reviewStatus);
+            metadata.put("owner", owner);
+            metadata.put("ordinal", String.valueOf(ordinal));
+            metadata.put("chunkId", String.valueOf(chunkEntity.getId()));
+            Document vectorDoc = new Document(chunk.getText(), metadata);
             vectorDocs.add(vectorDoc);
             ordinal++;
         }

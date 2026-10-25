@@ -1,7 +1,8 @@
 package com.example.opsaiagent.retrieval.bm25;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.example.opsaiagent.retrieval.KeywordRetriever;
+import com.example.opsaiagent.rbac.service.DataScope;
+import com.example.opsaiagent.retrieval.RetrievalScope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,6 +15,7 @@ import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -34,6 +36,9 @@ class InMemoryBm25RetrieverTest {
 
     @Mock
     private ObjectMapper objectMapper;
+
+    @Mock
+    private DataScope dataScope;
 
     @InjectMocks
     private InMemoryBm25Retriever retriever;
@@ -64,6 +69,34 @@ class InMemoryBm25RetrieverTest {
 
         // 索引为空，检索返回空列表
         assertThat(retriever.search("智能", 5)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("search：按租户/部门/个人范围过滤")
+    void search_filtersByScope() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of(
+                new Document("1", "智能运维公开知识",
+                        Map.of("source", "public.md", "visibility", "PUBLIC")),
+                new Document("2", "智能运维企业知识",
+                        Map.of("source", "tenant.md", "visibility", "TENANT",
+                                "tenantId", "t1", "reviewStatus", "APPROVED")),
+                new Document("3", "智能运维部门知识",
+                        Map.of("source", "dept.md", "visibility", "DEPT",
+                                "tenantId", "t1", "deptId", "5", "reviewStatus", "APPROVED")),
+                new Document("4", "智能运维个人知识",
+                        Map.of("source", "personal.md", "visibility", "PERSONAL",
+                                "tenantId", "t1", "owner", "u1")),
+                new Document("5", "智能运维其他租户知识",
+                        Map.of("source", "other.md", "visibility", "TENANT",
+                                "tenantId", "t2", "reviewStatus", "APPROVED"))
+        ));
+        retriever.rebuild();
+
+        List<Document> result = retriever.search("智能运维", 10,
+                new RetrievalScope("t1", Set.of(5L), "u1"));
+
+        assertThat(result).extracting(Document::getId)
+                .containsExactlyInAnyOrder("1", "2", "3", "4");
     }
 
     @Test
