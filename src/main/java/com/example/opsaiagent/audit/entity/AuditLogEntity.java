@@ -16,6 +16,12 @@ public class AuditLogEntity {
 
     private String username;
 
+    /** 所属租户 */
+    private String tenantId;
+
+    /** 操作人所属部门 */
+    private Long deptId;
+
     private String operation;
 
     private String target;

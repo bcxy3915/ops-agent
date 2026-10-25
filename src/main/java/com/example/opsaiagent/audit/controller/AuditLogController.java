@@ -7,6 +7,7 @@ import com.example.opsaiagent.audit.dto.AuditLogResponse;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.mapper.AuditLogMapper;
+import com.example.opsaiagent.audit.service.AuditQueryScope;
 import com.example.opsaiagent.common.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -19,12 +20,13 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/audit")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('audit:read')")
 public class AuditLogController {
 
     private final AuditLogMapper auditLogMapper;
+    private final AuditQueryScope auditQueryScope;
 
-    @Operation(summary = "查询审计日志", description = "返回操作中文名（operationName），仅 ADMIN 可访问")
-    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "查询审计日志", description = "返回操作中文名（operationName），需 audit:read")
     @GetMapping
     public ApiResponse<IPage<AuditLogResponse>> list(            @Parameter(description = "用户名") @RequestParam(required = false) String username,
             @Parameter(description = "操作类型") @RequestParam(required = false) String operation,
@@ -32,7 +34,7 @@ public class AuditLogController {
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") int size) {
 
-        LambdaQueryWrapper<AuditLogEntity> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<AuditLogEntity> wrapper = auditQueryScope.current().logs();
         if (username != null) wrapper.eq(AuditLogEntity::getUsername, username);
         if (operation != null) wrapper.eq(AuditLogEntity::getOperation, operation);
         if (result != null) wrapper.eq(AuditLogEntity::getResult, result);
@@ -50,6 +52,8 @@ public class AuditLogController {
         return AuditLogResponse.builder()
                 .id(e.getId())
                 .username(e.getUsername())
+                .tenantId(e.getTenantId())
+                .deptId(e.getDeptId())
                 .operation(e.getOperation())
                 .operationName(AuditOperation.labelOf(e.getOperation()))
                 .target(e.getTarget())

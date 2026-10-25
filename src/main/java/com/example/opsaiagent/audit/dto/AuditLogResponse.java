@@ -20,6 +20,10 @@ public class AuditLogResponse {
 
     private String username;
 
+    private String tenantId;
+
+    private Long deptId;
+
     /** 操作编码，如 UPLOAD_KNOWLEDGE */
     private String operation;
 
