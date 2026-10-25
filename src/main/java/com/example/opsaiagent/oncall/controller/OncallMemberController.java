@@ -24,6 +24,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/oncall/members")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('oncall:manage')")
 public class OncallMemberController {
 
     private final OncallMemberService oncallService;
@@ -35,16 +36,14 @@ public class OncallMemberController {
         return ApiResponse.success(oncallService.list(dutyRole));
     }
 
-    @Operation(summary = "添加值班人", description = "同用户+角色幂等。需 ADMIN / OPERATOR")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @Operation(summary = "添加值班人", description = "同用户+角色幂等。需 oncall:manage")
     @AuditLog(operation = "ADD_ONCALL_MEMBER", description = "添加值班人")
     @PostMapping
     public ApiResponse<OncallMemberResponse> add(@Valid @RequestBody OncallMemberCreateRequest request) {
         return ApiResponse.success(oncallService.add(request));
     }
 
-    @Operation(summary = "移除值班人", description = "需 ADMIN / OPERATOR")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @Operation(summary = "移除值班人", description = "需 oncall:manage")
     @AuditLog(operation = "REMOVE_ONCALL_MEMBER", description = "移除值班人")
     @DeleteMapping("/{id}")
     public ApiResponse<Map<String, String>> remove(@PathVariable Long id) {

@@ -11,6 +11,7 @@ import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,15 +35,19 @@ public class OncallMemberService {
      * 添加值班人；同 user + role 幂等。
      */
     public OncallMemberResponse add(OncallMemberCreateRequest request) {
+        String tenantId = currentTenantId();
         Long exists = memberMapper.selectCount(new LambdaQueryWrapper<OncallMemberEntity>()
                 .eq(OncallMemberEntity::getUserId, request.getUserId())
-                .eq(OncallMemberEntity::getDutyRole, request.getDutyRole()));
+                .eq(OncallMemberEntity::getDutyRole, request.getDutyRole())
+                .eq(OncallMemberEntity::getTenantId, tenantId));
         if (exists != null && exists > 0) {
             throw new BusinessException(ErrorCode.USER_ALREADY_EXISTS,
                     "该用户已是" + request.getDutyRole() + "值班人");
         }
         OncallMemberEntity entity = new OncallMemberEntity();
         entity.setUserId(request.getUserId());
+        entity.setTenantId(tenantId);
+        entity.setDeptId(SecurityUtils.getCurrentDeptId());
         entity.setDutyRole(request.getDutyRole());
         entity.setAddedBy(SecurityUtils.getCurrentUsername());
         entity.setAddedAt(LocalDateTime.now());
@@ -57,6 +62,10 @@ public class OncallMemberService {
         LambdaQueryWrapper<OncallMemberEntity> wrapper = new LambdaQueryWrapper<OncallMemberEntity>()
                 .orderByAsc(OncallMemberEntity::getDutyRole)
                 .orderByAsc(OncallMemberEntity::getId);
+        String tenantId = currentTenantId();
+        if (StringUtils.hasText(tenantId)) {
+            wrapper.eq(OncallMemberEntity::getTenantId, tenantId);
+        }
         if (dutyRole != null && !dutyRole.isBlank()) {
             wrapper.eq(OncallMemberEntity::getDutyRole, dutyRole);
         }
@@ -67,9 +76,11 @@ public class OncallMemberService {
      * 移除值班人
      */
     public void remove(Long id) {
-        if (memberMapper.deleteById(id) == 0) {
+        OncallMemberEntity entity = memberMapper.selectById(id);
+        if (entity == null || !canAccess(entity)) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND, "值班人不存在: " + id);
         }
+        memberMapper.deleteById(id);
     }
 
     /**
@@ -82,6 +93,19 @@ public class OncallMemberService {
      * @return 收件人 user_id 列表（Long）
      */
     public List<Long> resolveRecipients(String toUsers, String toRole, Integer levelNo) {
+        return resolveRecipients(currentTenantId(), toUsers, toRole, levelNo);
+    }
+
+    /**
+     * 按租户解析通知收件人。
+     *
+     * @param tenantId 租户 ID
+     * @param toUsers  规则显式指定用户
+     * @param toRole   目标角色
+     * @param levelNo  升级级别
+     * @return 收件人用户 ID 列表
+     */
+    public List<Long> resolveRecipients(String tenantId, String toUsers, String toRole, Integer levelNo) {
         if (toUsers != null && !toUsers.isBlank()) {
             // 规则显式 toUsers 优先：逗号分隔的用户 ID 列表
             return java.util.Arrays.stream(toUsers.split(","))
@@ -101,8 +125,12 @@ public class OncallMemberService {
         if (role == null) {
             return List.of();
         }
-        return memberMapper.selectList(new LambdaQueryWrapper<OncallMemberEntity>()
-                        .eq(OncallMemberEntity::getDutyRole, role))
+        LambdaQueryWrapper<OncallMemberEntity> qw = new LambdaQueryWrapper<OncallMemberEntity>()
+                .eq(OncallMemberEntity::getDutyRole, role);
+        if (StringUtils.hasText(tenantId)) {
+            qw.eq(OncallMemberEntity::getTenantId, tenantId);
+        }
+        return memberMapper.selectList(qw)
                 .stream().map(OncallMemberEntity::getUserId).toList();
     }
 
@@ -127,10 +155,24 @@ public class OncallMemberService {
         return ROLE_PRIMARY;
     }
 
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return StringUtils.hasText(tenantId) ? tenantId : "t-default";
+    }
+
+    private boolean canAccess(OncallMemberEntity entity) {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return !StringUtils.hasText(tenantId)
+                || tenantId.equals(entity.getTenantId())
+                || "0".equals(tenantId);
+    }
+
     private OncallMemberResponse toResponse(OncallMemberEntity entity) {
         return OncallMemberResponse.builder()
                 .id(entity.getId())
                 .userId(entity.getUserId())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
                 .dutyRole(entity.getDutyRole())
                 .addedBy(entity.getAddedBy())
                 .addedAt(entity.getAddedAt())

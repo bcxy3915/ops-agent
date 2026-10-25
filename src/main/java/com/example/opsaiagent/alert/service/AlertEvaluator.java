@@ -160,7 +160,10 @@ public class AlertEvaluator {
                 return;
             }
             // 维护窗口：命中但服务处于维护窗口 → 以维护静默落库，不通知不升级（P1 规格 5）
-            if (maintenanceWindowService.isServiceInWindow(service, LocalDateTime.now())) {
+            boolean inMaintenance = rule.getTenantId() == null
+                    ? maintenanceWindowService.isServiceInWindow(service, LocalDateTime.now())
+                    : maintenanceWindowService.isServiceInWindow(rule.getTenantId(), service, LocalDateTime.now());
+            if (inMaintenance) {
                 recordMaintenanceSuppressed(rule, value, nowMs);
                 return;
             }

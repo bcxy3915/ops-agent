@@ -87,6 +87,9 @@ class OncallMemberServiceTest {
     @Test
     @DisplayName("移除：正常删除")
     void remove_deletes() {
+        OncallMemberEntity entity = member(3L, 1003L, "PRIMARY");
+        entity.setTenantId("t-default");
+        when(memberMapper.selectById(3L)).thenReturn(entity);
         when(memberMapper.deleteById(3L)).thenReturn(1);
         service.remove(3L);
         verify(memberMapper).deleteById(3L);
@@ -95,7 +98,7 @@ class OncallMemberServiceTest {
     @Test
     @DisplayName("移除：不存在抛异常")
     void remove_notFoundThrows() {
-        when(memberMapper.deleteById(99L)).thenReturn(0);
+        when(memberMapper.selectById(99L)).thenReturn(null);
         assertThatThrownBy(() -> service.remove(99L))
                 .isInstanceOf(BusinessException.class);
     }

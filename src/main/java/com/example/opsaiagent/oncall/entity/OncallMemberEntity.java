@@ -24,6 +24,14 @@ public class OncallMemberEntity {
     @TableField("user_id")
     private Long userId;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 值班角色：PRIMARY（主值班）/ BACKUP（备值班） */
     @TableField("duty_role")
     private String dutyRole;

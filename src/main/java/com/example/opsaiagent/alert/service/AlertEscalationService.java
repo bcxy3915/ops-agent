@@ -145,8 +145,11 @@ public class AlertEscalationService {
         escalationMapper.insert(record);
 
         // P1 值班联动：规则显式 toUsers 优先，否则按级别取值班人（L1→备值班、L2→ADMIN）
-        List<Long> recipients = oncallMemberService.resolveRecipients(
-                level.getToUsers(), level.getToRole(), level.getLevelNo());
+        List<Long> recipients = event.getTenantId() == null
+                ? oncallMemberService.resolveRecipients(
+                        level.getToUsers(), level.getToRole(), level.getLevelNo())
+                : oncallMemberService.resolveRecipients(event.getTenantId(),
+                        level.getToUsers(), level.getToRole(), level.getLevelNo());
         String recipientDesc = recipients.isEmpty()
                 ? (level.getToUsers() != null && !level.getToUsers().isBlank()
                         ? level.getToUsers() : (level.getToRole() == null ? "角色兜底" : level.getToRole()))

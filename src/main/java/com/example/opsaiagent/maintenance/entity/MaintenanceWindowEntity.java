@@ -24,6 +24,14 @@ public class MaintenanceWindowEntity {
     @TableField("service")
     private String service;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 维护原因（与单条静默原因口径一致） */
     @TableField("reason")
     private String reason;
