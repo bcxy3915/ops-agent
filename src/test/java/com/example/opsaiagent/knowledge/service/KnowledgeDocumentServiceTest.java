@@ -8,11 +8,16 @@ import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
+import com.example.opsaiagent.rbac.entity.TenantEntity;
+import com.example.opsaiagent.rbac.service.DeptService;
+import com.example.opsaiagent.rbac.service.TenantService;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,6 +37,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,6 +68,10 @@ class KnowledgeDocumentServiceTest {
     private JdbcTemplate jdbcTemplate;
     @Mock
     private KnowledgeVersionService versionService;
+    @Mock
+    private TenantService tenantService;
+    @Mock
+    private DeptService deptService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private KnowledgeDocumentService service;
@@ -67,7 +79,7 @@ class KnowledgeDocumentServiceTest {
     @BeforeEach
     void setUp() {
         service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorStore, jdbcTemplate, objectMapper,
-                versionService);
+                versionService, tenantService, deptService);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 
@@ -376,11 +388,10 @@ class KnowledgeDocumentServiceTest {
     }
 
     @Test
-    @DisplayName("update：内容变更时重新分块向量化并重置为待审核")
+    @DisplayName("update：内容变更后下线旧向量并重置为草稿")
     void update_contentChanged() {
         when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "旧内容"));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
 
         KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
         req.setTitle("手册v2");
@@ -390,9 +401,12 @@ class KnowledgeDocumentServiceTest {
 
         assertThat(r.getVersion()).isEqualTo(2);
         assertThat(r.getTrustStatus()).isEqualTo("PENDING");
+        assertThat(r.getReviewStatus()).isEqualTo("DRAFT");
+        assertThat(r.getReviewLevel()).isEqualTo("NONE");
+        assertThat(r.getVisibility()).isEqualTo("PERSONAL");
         assertThat(r.getRawContent()).startsWith("全新内容");
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(vectorStore).add(anyList());
+        verify(vectorStore, never()).add(anyList());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
     }
 
@@ -558,7 +572,7 @@ class KnowledgeDocumentServiceTest {
     // ==================== P2-① 版本回滚 ====================
 
     @Test
-    @DisplayName("rollback：回滚到历史版本并重新分块入库")
+    @DisplayName("rollback：回滚到历史版本并重置为草稿")
     void rollback_success() {
         KnowledgeDocumentVersionEntity target = new KnowledgeDocumentVersionEntity();
         target.setId(5L);
@@ -568,17 +582,17 @@ class KnowledgeDocumentServiceTest {
         when(versionService.requireVersion(1L, 5L)).thenReturn(target);
         when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "当前内容"));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
 
         KnowledgeDocumentResponse r = service.rollback(1L, 5L);
 
         assertThat(r.getRawContent()).isEqualTo("历史版本内容");
         assertThat(r.getVersion()).isEqualTo(2);
         assertThat(r.getTrustStatus()).isEqualTo("PENDING");
+        assertThat(r.getReviewStatus()).isEqualTo("DRAFT");
         // 回滚前先备份当前内容为历史快照
         verify(versionService).recordSnapshot(eq(1L), eq("当前内容"), any(), eq("ROLLBACK_BACKUP"));
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(vectorStore).add(anyList());
+        verify(vectorStore, never()).add(anyList());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
     }
 
@@ -606,5 +620,204 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.rollback(99L, 5L))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    // ==================== P3-B10 审核流 ====================
+
+    @Test
+    @DisplayName("submit：DEPT_ONLY 模式进入待部门审核")
+    void submit_deptOnly() {
+        KnowledgeDocumentEntity doc = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        doc.setReviewStatus("DRAFT");
+        doc.setReviewLevel("NONE");
+        doc.setVisibility("PERSONAL");
+        doc.setOwner("ops");
+        doc.setTenantId("t1");
+        doc.setDeptId(5L);
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+        when(tenantService.findById("t1"))
+                .thenReturn(Optional.of(tenant("DEPT_ONLY", false)));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
+
+            KnowledgeDocumentResponse r = service.submitForReview(1L);
+
+            assertThat(r.getReviewStatus()).isEqualTo("PENDING_DEPT");
+            assertThat(r.getReviewLevel()).isEqualTo("DEPT");
+            assertThat(r.getVisibility()).isEqualTo("DEPT");
+            verify(vectorStore, never()).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("submit：NONE 模式自动通过并入库")
+    void submit_noneAutoApprove() {
+        KnowledgeDocumentEntity doc = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        doc.setReviewStatus("DRAFT");
+        doc.setReviewLevel("NONE");
+        doc.setVisibility("PERSONAL");
+        doc.setOwner("ops");
+        doc.setTenantId("t1");
+        doc.setDeptId(5L);
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+        when(tenantService.findById("t1"))
+                .thenReturn(Optional.of(tenant("NONE", false)));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
+
+            KnowledgeDocumentResponse r = service.submitForReview(1L);
+
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getReviewLevel()).isEqualTo("TENANT");
+            assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
+            verify(vectorStore).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("review：部门审核通过（DEPT_ONLY）并入库")
+    void review_deptApprove_deptOnly() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+        when(tenantService.findById("t1"))
+                .thenReturn(Optional.of(tenant("DEPT_ONLY", false)));
+        when(deptService.subtreeIds("t1", 5L)).thenReturn(List.of(5L));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+
+            KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", true));
+
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getReviewLevel()).isEqualTo("DEPT");
+            assertThat(r.getVisibility()).isEqualTo("DEPT");
+            assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
+            verify(vectorStore).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("review：部门审核通过后进入企业审核（DEPT_AND_TENANT）")
+    void review_deptApprove_twoLevel() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+        when(tenantService.findById("t1"))
+                .thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
+        when(deptService.subtreeIds("t1", 5L)).thenReturn(List.of(5L));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+
+            KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", true));
+
+            assertThat(r.getReviewStatus()).isEqualTo("PENDING_TENANT");
+            assertThat(r.getReviewLevel()).isEqualTo("TENANT");
+            verify(vectorStore, never()).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("review：企业审核通过并提升为企业可见")
+    void review_tenantApprove() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        doc.setReviewStatus("PENDING_TENANT");
+        doc.setReviewLevel("TENANT");
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+        when(tenantService.findById("t1"))
+                .thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+
+            KnowledgeDocumentResponse r = service.review(1L, reviewRequest("TENANT", true));
+
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getReviewLevel()).isEqualTo("TENANT");
+            assertThat(r.getVisibility()).isEqualTo("TENANT");
+            verify(vectorStore).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("review：驳回退回个人可见且不入库")
+    void review_reject() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+        when(tenantService.findById("t1"))
+                .thenReturn(Optional.of(tenant("DEPT_ONLY", false)));
+        when(deptService.subtreeIds("t1", 5L)).thenReturn(List.of(5L));
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+
+            KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", false));
+
+            assertThat(r.getReviewStatus()).isEqualTo("REJECTED");
+            assertThat(r.getReviewLevel()).isEqualTo("NONE");
+            assertThat(r.getVisibility()).isEqualTo("PERSONAL");
+            verify(vectorStore, never()).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("submit：非作者不能提交")
+    void submit_wrongOwner() {
+        KnowledgeDocumentEntity doc = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        doc.setReviewStatus("DRAFT");
+        doc.setOwner("ops");
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("other");
+
+            assertThatThrownBy(() -> service.submitForReview(1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        }
+    }
+
+    private KnowledgeDocumentEntity reviewDoc() {
+        KnowledgeDocumentEntity doc = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        doc.setReviewStatus("PENDING_DEPT");
+        doc.setReviewLevel("DEPT");
+        doc.setVisibility("DEPT");
+        doc.setOwner("ops");
+        doc.setTenantId("t1");
+        doc.setDeptId(5L);
+        return doc;
+    }
+
+    private TenantEntity tenant(String mode, boolean fourEyes) {
+        TenantEntity tenant = new TenantEntity();
+        tenant.setId("t1");
+        tenant.setKnowledgeReviewMode(mode);
+        tenant.setReviewFourEyes(fourEyes);
+        return tenant;
+    }
+
+    private KnowledgeReviewRequest reviewRequest(String level, boolean approved) {
+        KnowledgeReviewRequest request = new KnowledgeReviewRequest();
+        request.setLevel(level);
+        request.setApproved(approved);
+        request.setComment(approved ? "通过" : "内容不完善");
+        return request;
     }
 }
