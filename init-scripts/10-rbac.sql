@@ -648,6 +648,74 @@ BEGIN
     END IF;
 END $$;
 
+-- ============================================================
+-- 四补-2：案例/内置知识向量 metadata 最终一致性
+-- ============================================================
+DO $$
+DECLARE
+    metadata_type TEXT;
+BEGIN
+    SELECT format_type(a.atttypid, a.atttypmod)
+    INTO metadata_type
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    WHERE c.relname = 'vector_store' AND a.attname = 'metadata';
+
+    IF metadata_type = 'jsonb' THEN
+        -- 案例知识：从 knowledge_document（layer=CASE）继承租户/部门/可见性/审核/owner
+        UPDATE vector_store v
+        SET metadata = COALESCE(v.metadata, '{}'::jsonb) || jsonb_build_object(
+            'tenantId',     COALESCE(d.tenant_id, 't-default'),
+            'deptId',       COALESCE(d.dept_id::text, ''),
+            'visibility',   COALESCE(d.visibility, 'TENANT'),
+            'reviewStatus', COALESCE(d.review_status, 'APPROVED'),
+            'owner',        COALESCE(d.owner, 'system')
+        )
+        FROM knowledge_document d
+        WHERE v.metadata->>'source' = d.source
+          AND d.layer = 'CASE';
+
+        -- 内置知识：平台公共知识
+        UPDATE vector_store
+        SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+            'tenantId',     '0',
+            'deptId',       '',
+            'visibility',   'PUBLIC',
+            'reviewStatus', 'APPROVED',
+            'owner',        'system',
+            'layer',        'BUILTIN'
+        )
+        WHERE COALESCE(metadata->>'source', '') <> ''
+          AND COALESCE(metadata->>'source', '') NOT LIKE 'upload:%'
+          AND COALESCE(metadata->>'source', '') NOT LIKE 'case:%';
+    ELSE
+        UPDATE vector_store v
+        SET metadata = (COALESCE(v.metadata::jsonb, '{}'::jsonb) || jsonb_build_object(
+            'tenantId',     COALESCE(d.tenant_id, 't-default'),
+            'deptId',       COALESCE(d.dept_id::text, ''),
+            'visibility',   COALESCE(d.visibility, 'TENANT'),
+            'reviewStatus', COALESCE(d.review_status, 'APPROVED'),
+            'owner',        COALESCE(d.owner, 'system')
+        ))::json
+        FROM knowledge_document d
+        WHERE v.metadata->>'source' = d.source
+          AND d.layer = 'CASE';
+
+        UPDATE vector_store
+        SET metadata = (COALESCE(metadata::jsonb, '{}'::jsonb) || jsonb_build_object(
+            'tenantId',     '0',
+            'deptId',       '',
+            'visibility',   'PUBLIC',
+            'reviewStatus', 'APPROVED',
+            'owner',        'system',
+            'layer',        'BUILTIN'
+        ))::json
+        WHERE COALESCE(metadata->>'source', '') <> ''
+          AND COALESCE(metadata->>'source', '') NOT LIKE 'upload:%'
+          AND COALESCE(metadata->>'source', '') NOT LIKE 'case:%';
+    END IF;
+END $$;
+
 -- 兜底：兼容“列已存在但可空”的重复执行场景，确保 NOT NULL 不会失败
 DO $$
 DECLARE
