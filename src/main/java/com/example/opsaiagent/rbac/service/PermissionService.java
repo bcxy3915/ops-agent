@@ -85,6 +85,15 @@ public class PermissionService {
     }
 
     /**
+     * 清空全部用户授权缓存。
+     *
+     * 角色权限发生变更时无法定位受影响用户，直接整体失效，避免旧权限继续生效。
+     */
+    public void evictAll() {
+        cache.invalidateAll();
+    }
+
+    /**
      * 从数据库加载用户授权。
      *
      * @param userId 用户 ID

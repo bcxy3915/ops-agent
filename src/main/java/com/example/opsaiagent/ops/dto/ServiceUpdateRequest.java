@@ -17,6 +17,9 @@ public class ServiceUpdateRequest {
     @Schema(description = "负责人", example = "张三")
     private String owner;
 
+    @Schema(description = "部门 ID（可选）")
+    private Long deptId;
+
     @Schema(description = "环境", example = "prod", allowableValues = {"dev", "test", "prod"})
     private String env;
 

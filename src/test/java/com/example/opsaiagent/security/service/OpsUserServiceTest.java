@@ -4,6 +4,14 @@ import com.example.opsaiagent.crypto.util.AesGcmUtil;
 import com.example.opsaiagent.crypto.util.HashUtil;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.entity.DeptEntity;
+import com.example.opsaiagent.rbac.entity.RoleEntity;
+import com.example.opsaiagent.rbac.entity.UserIdentityEntity;
+import com.example.opsaiagent.rbac.mapper.RoleMapper;
+import com.example.opsaiagent.rbac.mapper.UserIdentityMapper;
+import com.example.opsaiagent.rbac.mapper.UserRoleMapper;
+import com.example.opsaiagent.rbac.service.DeptService;
+import com.example.opsaiagent.rbac.service.PermissionService;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
 import com.example.opsaiagent.security.mapper.OpsUserMapper;
@@ -24,6 +32,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mockStatic;
@@ -48,6 +57,21 @@ class OpsUserServiceTest {
 
     @Mock
     private HashUtil hashUtil;
+
+    @Mock
+    private UserRoleMapper userRoleMapper;
+
+    @Mock
+    private RoleMapper roleMapper;
+
+    @Mock
+    private UserIdentityMapper userIdentityMapper;
+
+    @Mock
+    private DeptService deptService;
+
+    @Mock
+    private PermissionService permissionService;
 
     @InjectMocks
     private OpsUserService userService;
@@ -395,6 +419,83 @@ class OpsUserServiceTest {
             verify(userMapper, never()).selectCount(any());
             verify(userMapper).deleteById("u-operator");
         }
+    }
+
+    @Test
+    @DisplayName("P1.5 create：写入租户/部门并绑定多角色")
+    void create_withTenantDeptAndRoleIds() {
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(1L);
+            when(userMapper.exists(any())).thenReturn(false);
+            when(deptService.requireDept("t1", 1L)).thenReturn(new DeptEntity());
+            when(passwordEncoder.encode("admin123")).thenReturn("bcrypt-hash");
+            when(roleMapper.selectBatchIds(any()))
+                    .thenReturn(List.of(role(10L, "TENANT_ADMIN")));
+            doAnswer(invocation -> {
+                OpsUserEntity entity = invocation.getArgument(0);
+                entity.setId("u-new");
+                return 1;
+            }).when(userMapper).insert(any(OpsUserEntity.class));
+
+            UserCreateRequest request = createRequest("admin");
+            request.setRoleIds(List.of(10L));
+
+            OpsUserEntity created = userService.create(request);
+
+            assertThat(created.getTenantId()).isEqualTo("t1");
+            assertThat(created.getDeptId()).isEqualTo(1L);
+            assertThat(created.getRole()).isEqualTo("ADMIN");
+            verify(userRoleMapper).insert("u-new", 10L);
+            verify(userIdentityMapper).insert(any(UserIdentityEntity.class));
+        }
+    }
+
+    @Test
+    @DisplayName("P1.5 create：平台用户未指定 tenantId 抛异常")
+    void create_platformRequiresTenant() {
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("0");
+
+            assertThatThrownBy(() -> userService.create(createRequest("admin")))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting("errorCode")
+                    .isEqualTo(ErrorCode.TENANT_REQUIRED);
+        }
+    }
+
+    @Test
+    @DisplayName("P1.5 getRoleCodes：返回用户角色编码")
+    void getRoleCodes() {
+        when(userRoleMapper.selectRoleIdsByUserId("u-1")).thenReturn(List.of(10L));
+        when(roleMapper.selectBatchIds(any()))
+                .thenReturn(List.of(role(10L, "TENANT_ADMIN"), role(11L, "VIEWER")));
+
+        assertThat(userService.getRoleCodes("u-1"))
+                .containsExactly("TENANT_ADMIN", "VIEWER");
+    }
+
+    @Test
+    @DisplayName("P1.5 delete：同时清理角色与登录身份")
+    void delete_cleansRolesAndIdentity() {
+        OpsUserEntity existing = user("operator");
+        when(userMapper.selectById("u-operator")).thenReturn(existing);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+
+            userService.delete("u-operator");
+
+            verify(userRoleMapper).deleteByUserId("u-operator");
+            verify(userIdentityMapper).delete(any());
+            verify(permissionService).evict("u-operator");
+        }
+    }
+
+    private RoleEntity role(Long id, String code) {
+        RoleEntity role = new RoleEntity();
+        role.setId(id);
+        role.setCode(code);
+        return role;
     }
 
     private UserCreateRequest createRequest(String username) {

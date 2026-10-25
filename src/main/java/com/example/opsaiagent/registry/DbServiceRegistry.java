@@ -2,6 +2,7 @@ package com.example.opsaiagent.registry;
 
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.ops.service.OpsServiceManager;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,26 +21,48 @@ public class DbServiceRegistry implements ServiceRegistry {
     private final OpsServiceManager serviceManager;
 
     /**
-     * 列出所有服务
+     * 列出服务；存在租户上下文时只返回当前租户服务。
+     *
      * @return 服务列表
      */
     @Override
     public List<ServiceInfo> listAll() {
-        return serviceManager.listAll().stream()
+        String tenantId = currentTenantId();
+        List<OpsServiceEntity> services = tenantId == null
+                ? serviceManager.listAll()
+                : serviceManager.listByTenant(tenantId);
+        return services.stream()
                 .map(this::toServiceInfo)
                 .collect(Collectors.toList());
     }
 
     /**
-     * 根据名称获取服务
+     * 根据名称获取服务；存在租户上下文时按租户隔离。
+     *
      * @param name 服务名称
      * @return 服务信息
      */
     @Override
     public ServiceInfo getByName(String name) {
-        return serviceManager.findByName(name)
+        String tenantId = currentTenantId();
+        return (tenantId == null
+                ? serviceManager.findByName(name)
+                : serviceManager.findByName(tenantId, name))
                 .map(this::toServiceInfo)
                 .orElse(null);
+    }
+
+    /**
+     * 当前租户；平台/无上下文返回 null，表示全局视角。
+     *
+     * @return 租户 ID
+     */
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        if (tenantId == null || tenantId.isBlank() || "0".equals(tenantId)) {
+            return null;
+        }
+        return tenantId;
     }
 
     /**

@@ -7,7 +7,7 @@ import com.example.opsaiagent.rbac.context.UserContext;
 import com.example.opsaiagent.security.dto.LoginRequest;
 import com.example.opsaiagent.security.dto.LoginResponse;
 import com.example.opsaiagent.security.service.AuthService;
-import com.example.opsaiagent.util.SecurityUtils;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;

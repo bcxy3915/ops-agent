@@ -18,6 +18,12 @@ public class ServiceRegisterRequest {
     @Size(max = 128)
     private String name;
 
+    @Schema(description = "租户 ID；平台管理员创建时使用，企业用户可空")
+    private String tenantId;
+
+    @Schema(description = "部门 ID；为空时使用当前登录用户部门")
+    private Long deptId;
+
     @Schema(description = "基础地址", example = "http://localhost:8082", requiredMode = Schema.RequiredMode.REQUIRED)
     @NotBlank(message = "baseUrl 不能为空")
     @Pattern(regexp = "https?://.+", message = "baseUrl 格式错误")
