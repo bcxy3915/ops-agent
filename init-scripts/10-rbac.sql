@@ -261,11 +261,14 @@ ALTER TABLE alert_rule                   ADD COLUMN IF NOT EXISTS dept_id   BIGI
 ALTER TABLE alert_event                  ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
 ALTER TABLE alert_event                  ADD COLUMN IF NOT EXISTS dept_id   BIGINT;
 ALTER TABLE user_alert_read              ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
+ALTER TABLE user_alert_read              ADD COLUMN IF NOT EXISTS dept_id   BIGINT;
 ALTER TABLE alert_rule_escalation_level  ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
 ALTER TABLE alert_escalation              ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
+ALTER TABLE alert_escalation              ADD COLUMN IF NOT EXISTS dept_id   BIGINT;
 
 -- 通知 / 快照 / 诊断
 ALTER TABLE notification_channel ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
+ALTER TABLE notification_channel ADD COLUMN IF NOT EXISTS dept_id   BIGINT;
 ALTER TABLE notification_record  ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
 ALTER TABLE notification_record  ADD COLUMN IF NOT EXISTS dept_id   BIGINT;
 ALTER TABLE failure_snapshot     ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(32) NOT NULL DEFAULT 't-default';
@@ -385,14 +388,22 @@ FROM alert_rule r
 WHERE l.rule_id = r.id;
 
 UPDATE alert_escalation e
-SET tenant_id = a.tenant_id
+SET tenant_id = a.tenant_id, dept_id = a.dept_id
 FROM alert_event a
 WHERE e.alert_event_id = a.id;
 
+UPDATE alert_escalation
+SET dept_id = (SELECT id FROM ops_dept WHERE tenant_id = 't-default' AND code = 'default')
+WHERE dept_id IS NULL;
+
 UPDATE user_alert_read uar
-SET tenant_id = u.tenant_id
+SET tenant_id = u.tenant_id, dept_id = u.dept_id
 FROM ops_user u
 WHERE uar.user_id = u.username;
+
+UPDATE user_alert_read
+SET dept_id = (SELECT id FROM ops_dept WHERE tenant_id = 't-default' AND code = 'default')
+WHERE dept_id IS NULL;
 
 -- 4.7 通知 / 快照 / 诊断
 UPDATE notification_record n
@@ -401,6 +412,10 @@ FROM ops_service s
 WHERE n.service = s.name;
 
 UPDATE notification_record
+SET dept_id = (SELECT id FROM ops_dept WHERE tenant_id = 't-default' AND code = 'default')
+WHERE dept_id IS NULL;
+
+UPDATE notification_channel
 SET dept_id = (SELECT id FROM ops_dept WHERE tenant_id = 't-default' AND code = 'default')
 WHERE dept_id IS NULL;
 
