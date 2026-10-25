@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -117,8 +118,7 @@ public class AlertEvaluator {
             eventMapper.updateById(event);
             return;
         }
-        MetricPoint latest = metricSampleStore.queryLatest(rule.getService(), rule.getMetric(),
-                System.currentTimeMillis());
+        MetricPoint latest = latest(rule, rule.getService(), rule.getMetric(), System.currentTimeMillis());
         if (latest == null || !isHit(rule, latest.getValue(), System.currentTimeMillis())) {
             event.setStatus(AlertEventStatus.RESOLVED.name());
             event.setResolvedAt(now);
@@ -139,7 +139,7 @@ public class AlertEvaluator {
      */
     void evaluateRule(AlertRuleEntity rule, long nowMs) {
         String service = rule.getService();
-        MetricPoint latest = metricSampleStore.queryLatest(service, rule.getMetric(), nowMs);
+        MetricPoint latest = latest(rule, service, rule.getMetric(), nowMs);
         if (latest == null) {
             // 无数据：无法评估，清除持续状态并尝试恢复（数据断流视为恢复）
             clearSustained(rule.getId());
@@ -232,7 +232,7 @@ public class AlertEvaluator {
     private boolean hitYoy(AlertRuleEntity rule, double value, long nowMs) {
         // 基线 = 24 小时前窗口内最近一次采样
         long baselineEnd = nowMs - 24 * 60 * 60 * 1000L;
-        MetricPoint baseline = metricSampleStore.queryLatest(rule.getService(), rule.getMetric(), baselineEnd);
+        MetricPoint baseline = latest(rule, rule.getService(), rule.getMetric(), baselineEnd);
         if (baseline == null || Math.abs(baseline.getValue()) < 1e-9) {
             return false;
         }
@@ -242,8 +242,8 @@ public class AlertEvaluator {
     }
 
     private boolean hitSigma(AlertRuleEntity rule, double value, long nowMs) {
-        List<MetricPoint> points = metricSampleStore.query(
-                rule.getService(), rule.getMetric(), nowMs - SIGMA_WINDOW_MS, nowMs);
+        List<MetricPoint> points = history(rule, rule.getService(), rule.getMetric(),
+                nowMs - SIGMA_WINDOW_MS, nowMs);
         if (points.size() < 5) {
             return false; // 样本不足不评估
         }
@@ -258,6 +258,25 @@ public class AlertEvaluator {
         double z = (value - mean) / std;
         boolean gt = "gt".equalsIgnoreCase(rule.getOperator());
         return gt ? z > rule.getThreshold() : z < -rule.getThreshold();
+    }
+
+    /**
+     * 按规则租户查询最新采样；租户为空时保持旧全局查询，兼容存量数据。
+     */
+    private MetricPoint latest(AlertRuleEntity rule, String service, String metric, long endMs) {
+        return StringUtils.hasText(rule.getTenantId())
+                ? metricSampleStore.queryLatest(rule.getTenantId(), service, metric, endMs)
+                : metricSampleStore.queryLatest(service, metric, endMs);
+    }
+
+    /**
+     * 按规则租户查询历史采样；租户为空时保持旧全局查询。
+     */
+    private List<MetricPoint> history(AlertRuleEntity rule, String service, String metric,
+                                      long startMs, long endMs) {
+        return StringUtils.hasText(rule.getTenantId())
+                ? metricSampleStore.query(rule.getTenantId(), service, metric, startMs, endMs)
+                : metricSampleStore.query(service, metric, startMs, endMs);
     }
 
     private Long findFiringId(Long ruleId) {
@@ -291,6 +310,8 @@ public class AlertEvaluator {
                              AlertEventStatus status, String detail) {
         AlertEventEntity event = new AlertEventEntity();
         event.setRuleId(rule.getId());
+        event.setTenantId(rule.getTenantId());
+        event.setDeptId(rule.getDeptId());
         event.setRuleName(rule.getName());
         event.setService(rule.getService());
         event.setMetric(rule.getMetric());
@@ -313,6 +334,8 @@ public class AlertEvaluator {
     private AlertEventEntity recordMaintenanceSuppressed(AlertRuleEntity rule, double value, long nowMs) {
         AlertEventEntity event = new AlertEventEntity();
         event.setRuleId(rule.getId());
+        event.setTenantId(rule.getTenantId());
+        event.setDeptId(rule.getDeptId());
         event.setRuleName(rule.getName());
         event.setService(rule.getService());
         event.setMetric(rule.getMetric());

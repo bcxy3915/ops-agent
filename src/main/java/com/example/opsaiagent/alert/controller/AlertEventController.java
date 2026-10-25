@@ -15,6 +15,7 @@ import com.example.opsaiagent.alert.mapper.AlertEscalationRecordMapper;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.service.AlertEventService;
 import com.example.opsaiagent.alert.service.AlertReadService;
+import com.example.opsaiagent.alert.service.AlertScope;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
 import com.example.opsaiagent.common.api.ApiResponse;
@@ -51,11 +52,13 @@ public class AlertEventController {
 
     private final AlertEventService alertEventService;
     private final AlertReadService alertReadService;
+    private final AlertScope alertScope;
     private final AlertEventMapper alertEventMapper;
     private final AlertEscalationRecordMapper escalationRecordMapper;
     private final DiagnosisRecordMapper diagnosisRecordMapper;
 
     @Operation(summary = "查询告警事件列表", description = "可按服务 / 状态 / 规则过滤。所有角色可访问")
+    @PreAuthorize("hasAuthority('alert:read')")
     @GetMapping
     public ApiResponse<List<AlertEventResponse>> list(
             @RequestParam(required = false) String service,
@@ -67,14 +70,17 @@ public class AlertEventController {
     }
 
     @Operation(summary = "查询告警事件详情", description = "所有角色可访问")
+    @PreAuthorize("hasAuthority('alert:read')")
     @GetMapping("/{id}")
     public ApiResponse<AlertEventResponse> detail(@PathVariable Long id) {
         return ApiResponse.success(toResponse(alertEventService.getById(id)));
     }
 
     @Operation(summary = "查询告警升级记录", description = "详情页处置时间线数据源（规格 4.2）")
+    @PreAuthorize("hasAuthority('alert:read')")
     @GetMapping("/{id}/escalations")
     public ApiResponse<List<AlertEscalationRecordEntity>> escalations(@PathVariable Long id) {
+        alertEventService.getById(id);
         return ApiResponse.success(escalationRecordMapper.selectList(
                 new LambdaQueryWrapper<AlertEscalationRecordEntity>()
                         .eq(AlertEscalationRecordEntity::getAlertEventId, id)
@@ -82,12 +88,14 @@ public class AlertEventController {
     }
 
     @Operation(summary = "当前用户未读告警数", description = "铃铛 badge（规格 1.2 口径）：FIRING/ACK/SILENCED 且未读")
+    @PreAuthorize("hasAuthority('alert:read')")
     @GetMapping("/unread-count")
     public ApiResponse<Map<String, Integer>> unreadCount() {
         return ApiResponse.success(Map.of("count", alertReadService.unreadCount(SecurityUtils.getCurrentUsername())));
     }
 
     @Operation(summary = "标记单条告警已读", description = "只影响已读状态，不改变处置状态。所有登录角色可访问")
+    @PreAuthorize("hasAuthority('alert:read')")
     @PostMapping("/{id}/read")
     public ApiResponse<Void> markRead(@PathVariable Long id) {
         alertReadService.markRead(id, SecurityUtils.getCurrentUsername());
@@ -95,13 +103,14 @@ public class AlertEventController {
     }
 
     @Operation(summary = "批量标记已读", description = "ids 为空时对全部待处理事件（FIRING/ACK/SILENCED）标记已读")
+    @PreAuthorize("hasAuthority('alert:read')")
     @PostMapping("/read-all")
     public ApiResponse<Void> markAllRead(@RequestBody(required = false) @Valid BatchReadRequest request) {
         String username = SecurityUtils.getCurrentUsername();
         List<Long> ids = request == null ? null : request.getIds();
         if (ids == null || ids.isEmpty()) {
             List<AlertEventEntity> pending = alertEventMapper.selectList(
-                    new LambdaQueryWrapper<AlertEventEntity>()
+                    alertScope.current().events()
                             .in(AlertEventEntity::getStatus,
                                     AlertEventStatus.FIRING.name(),
                                     AlertEventStatus.ACKNOWLEDGED.name(),
@@ -112,34 +121,34 @@ public class AlertEventController {
         return ApiResponse.success(null);
     }
 
-    @Operation(summary = "确认告警事件（自动认领）", description = "FIRING / SILENCED → ACKNOWLEDGED，记录认领人（规格 2.3）。需 ADMIN / OPERATOR")
+    @Operation(summary = "确认告警事件（自动认领）", description = "FIRING / SILENCED → ACKNOWLEDGED，记录认领人（规格 2.3）。需 alert:ack")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:ack')")
     @AuditLog(operation = "ACK_ALERT_EVENT", description = "确认告警事件")
     @PostMapping("/{id}/acknowledge")
     public ApiResponse<AlertEventResponse> acknowledge(@PathVariable Long id) {
         return ApiResponse.success(toResponse(alertEventService.acknowledge(id)));
     }
 
-    @Operation(summary = "独立认领 / 接管告警", description = "记录认领人；如为 FIRING/SILENCED 自动转 ACK（规格 3.2）。需 ADMIN / OPERATOR")
+    @Operation(summary = "独立认领 / 接管告警", description = "记录认领人；如为 FIRING/SILENCED 自动转 ACK（规格 3.2）。需 alert:ack")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:ack')")
     @AuditLog(operation = "CLAIM_ALERT_EVENT", description = "认领告警事件")
     @PostMapping("/{id}/claim")
     public ApiResponse<AlertEventResponse> claim(@PathVariable Long id) {
         return ApiResponse.success(toResponse(alertEventService.claim(id)));
     }
 
-    @Operation(summary = "批量确认告警", description = "跳过已恢复等不可确认事件（规格 2.7）。需 ADMIN / OPERATOR")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @Operation(summary = "批量确认告警", description = "跳过已恢复等不可确认事件（规格 2.7）。需 alert:ack")
+    @PreAuthorize("hasAuthority('alert:ack')")
     @AuditLog(operation = "ACK_ALERT_EVENT", description = "批量确认告警事件")
     @PostMapping("/batch-acknowledge")
     public ApiResponse<Map<String, Integer>> batchAcknowledge(@RequestBody @Valid BatchAckRequest request) {
         return ApiResponse.success(Map.of("count", alertEventService.batchAcknowledge(request.getIds())));
     }
 
-    @Operation(summary = "批量静默告警", description = "跳过已恢复等不可静默事件（P1 维护窗口）。需 ADMIN / OPERATOR")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @Operation(summary = "批量静默告警", description = "跳过已恢复等不可静默事件（P1 维护窗口）。需 alert:silence")
+    @PreAuthorize("hasAuthority('alert:silence')")
     @AuditLog(operation = "SILENCE_ALERT_EVENT", description = "批量静默告警事件")
     @PostMapping("/batch-silence")
     public ApiResponse<Map<String, Integer>> batchSilence(@RequestBody @Valid BatchSilenceRequest request) {
@@ -150,15 +159,16 @@ public class AlertEventController {
     }
 
     @Operation(summary = "告警汇总统计", description = "告警中心页顶部汇总卡数据（规格 2.3）：待处理 / 今日已触发 / 已诊断 / 平均诊断耗时")
+    @PreAuthorize("hasAuthority('alert:read')")
     @GetMapping("/summary")
     public ApiResponse<AlertSummaryResponse> summary() {
-        long openCount = alertEventMapper.selectCount(new LambdaQueryWrapper<AlertEventEntity>()
+        long openCount = alertEventMapper.selectCount(alertScope.current().events()
                 .in(AlertEventEntity::getStatus,
                         AlertEventStatus.FIRING.name(), AlertEventStatus.ACKNOWLEDGED.name()));
-        long firingCount = alertEventMapper.selectCount(new LambdaQueryWrapper<AlertEventEntity>()
+        long firingCount = alertEventMapper.selectCount(alertScope.current().events()
                 .eq(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name()));
         LocalDate today = LocalDate.now();
-        long todayCount = alertEventMapper.selectCount(new LambdaQueryWrapper<AlertEventEntity>()
+        long todayCount = alertEventMapper.selectCount(alertScope.current().events()
                 .ge(AlertEventEntity::getFiredAt, today.atStartOfDay()));
         long diagnosedCount = diagnosisRecordMapper.countDistinctSuccessEvents();
         Long avgDiagnoseMs = diagnosisRecordMapper.avgDiagnoseMs();
@@ -173,9 +183,9 @@ public class AlertEventController {
         return ApiResponse.success(resp);
     }
 
-    @Operation(summary = "手动恢复告警", description = "任意非 RESOLVED → RESOLVED，可带恢复备注（规格 2.4）。需 ADMIN / OPERATOR")
+    @Operation(summary = "手动恢复告警", description = "任意非 RESOLVED → RESOLVED，可带恢复备注（规格 2.4）。需 alert:resolve")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:resolve')")
     @AuditLog(operation = "RESOLVE_ALERT_EVENT", description = "手动恢复告警事件")
     @PostMapping("/{id}/resolve")
     public ApiResponse<AlertEventResponse> resolve(@PathVariable Long id,
@@ -184,9 +194,9 @@ public class AlertEventController {
         return ApiResponse.success(toResponse(alertEventService.resolve(id, note)));
     }
 
-    @Operation(summary = "手动静默告警", description = "FIRING/SILENCED/ACK → SILENCED，带到期时间 + 原因（规格 2.5）。需 ADMIN / OPERATOR")
+    @Operation(summary = "手动静默告警", description = "FIRING/SILENCED/ACK → SILENCED，带到期时间 + 原因（规格 2.5）。需 alert:silence")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:silence')")
     @AuditLog(operation = "SILENCE_ALERT_EVENT", description = "静默告警事件")
     @PostMapping("/{id}/silence")
     public ApiResponse<AlertEventResponse> silence(@PathVariable Long id,
@@ -195,9 +205,9 @@ public class AlertEventController {
                 alertEventService.silence(id, request.getReason(), request.getSilencedUntil(), request.getNote())));
     }
 
-    @Operation(summary = "解除静默", description = "SILENCED → 静默前状态（默认 FIRING），清除静默字段（规格 2.2）。需 ADMIN / OPERATOR")
+    @Operation(summary = "解除静默", description = "SILENCED → 静默前状态（默认 FIRING），清除静默字段（规格 2.2）。需 alert:silence")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:silence')")
     @AuditLog(operation = "UNSILENCE_ALERT_EVENT", description = "解除静默告警事件")
     @PostMapping("/{id}/unsilence")
     public ApiResponse<AlertEventResponse> unsilence(@PathVariable Long id) {

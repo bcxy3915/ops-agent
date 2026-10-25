@@ -31,12 +31,13 @@ public class AlertEventService {
 
     private final AlertEventMapper mapper;
     private final AlertReadService readService;
+    private final AlertScope alertScope;
 
     /**
      * 查询事件列表（可按服务 / 状态 / 规则过滤）
      */
     public List<AlertEventEntity> list(String service, String status, Long ruleId, int limit) {
-        LambdaQueryWrapper<AlertEventEntity> qw = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<AlertEventEntity> qw = alertScope.current().events();
         if (service != null && !service.isBlank()) {
             qw.eq(AlertEventEntity::getService, service);
         }
@@ -57,7 +58,7 @@ public class AlertEventService {
      */
     public AlertEventEntity getById(Long id) {
         AlertEventEntity entity = mapper.selectById(id);
-        if (entity == null) {
+        if (entity == null || !alertScope.current().canAccess(entity)) {
             throw new BusinessException(ErrorCode.ALERT_EVENT_NOT_FOUND, "告警事件不存在: " + id);
         }
         return entity;

@@ -10,12 +10,14 @@ import com.example.opsaiagent.alert.mapper.AlertRuleEscalationLevelMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.service.DeptService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
@@ -45,6 +47,12 @@ class AlertRuleServiceTest {
 
     @Mock
     private AlertRuleEscalationLevelMapper levelMapper;
+
+    @Mock
+    private DeptService deptService;
+
+    @Spy
+    private AlertScope alertScope = new AlertScope(null);
 
     @InjectMocks
     private AlertRuleService service;
@@ -245,6 +253,10 @@ class AlertRuleServiceTest {
     @Test
     @DisplayName("delete：删除规则并清理升级级别")
     void delete_removesLevels() {
+        AlertRuleEntity existing = new AlertRuleEntity();
+        existing.setId(3L);
+        existing.setTenantId("t-default");
+        when(mapper.selectById(3L)).thenReturn(existing);
         when(mapper.deleteById(3L)).thenReturn(1);
 
         service.delete(3L);
@@ -256,7 +268,7 @@ class AlertRuleServiceTest {
     @Test
     @DisplayName("delete：规则不存在抛 ALERT_RULE_NOT_FOUND")
     void delete_notFoundThrows() {
-        when(mapper.deleteById(99L)).thenReturn(0);
+        when(mapper.selectById(99L)).thenReturn(null);
 
         assertThatThrownBy(() -> service.delete(99L))
                 .isInstanceOf(BusinessException.class)

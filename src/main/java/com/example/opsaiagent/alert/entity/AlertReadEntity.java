@@ -18,6 +18,14 @@ public class AlertReadEntity {
     @TableField("user_id")
     private String userId;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 告警事件 ID */
     @TableField("alert_event_id")
     private Long alertEventId;

@@ -10,10 +10,13 @@ import com.example.opsaiagent.alert.mapper.AlertRuleEscalationLevelMapper;
 import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.service.DeptService;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -35,12 +38,14 @@ public class AlertRuleService {
 
     private final AlertRuleMapper mapper;
     private final AlertRuleEscalationLevelMapper levelMapper;
+    private final AlertScope alertScope;
+    private final DeptService deptService;
 
     /**
      * 查询规则列表（可按服务 / 启用状态过滤）
      */
     public List<AlertRuleEntity> list(String service, Boolean enabled) {
-        LambdaQueryWrapper<AlertRuleEntity> qw = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<AlertRuleEntity> qw = alertScope.current().rules();
         if (service != null && !service.isBlank()) {
             qw.eq(AlertRuleEntity::getService, service);
         }
@@ -57,16 +62,20 @@ public class AlertRuleService {
     @Transactional
     public AlertRuleEntity create(AlertRuleRequest request) {
         validate(request);
-        if (nameExists(request.getName(), null)) {
+        String tenantId = resolveTenant(request.getTenantId());
+        Long deptId = resolveDept(tenantId, request.getDeptId());
+        if (nameExists(request.getName(), null, tenantId)) {
             throw new BusinessException(ErrorCode.ALERT_RULE_NAME_EXISTS,
                     "告警规则名称已存在: " + request.getName());
         }
         AlertRuleEntity entity = new AlertRuleEntity();
         BeanUtils.copyProperties(request, entity);
+        entity.setTenantId(tenantId);
+        entity.setDeptId(deptId);
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         mapper.insert(entity);
-        replaceEscalationLevels(entity.getId(), request.getEscalationLevels());
+        replaceEscalationLevels(entity.getId(), tenantId, request.getEscalationLevels());
         return entity;
     }
 
@@ -78,14 +87,23 @@ public class AlertRuleService {
         AlertRuleEntity existing = getById(id);
         validate(request);
         if (request.getName() != null && !request.getName().equals(existing.getName())
-                && nameExists(request.getName(), id)) {
+                && nameExists(request.getName(), id, existing.getTenantId())) {
             throw new BusinessException(ErrorCode.ALERT_RULE_NAME_EXISTS,
                     "告警规则名称已存在: " + request.getName());
         }
+        String tenantId = existing.getTenantId();
+        Long deptId = existing.getDeptId();
         BeanUtils.copyProperties(request, existing);
+        // 租户不可通过编辑变更；部门可选调整
+        existing.setTenantId(tenantId);
+        if (request.getDeptId() != null) {
+            existing.setDeptId(resolveDept(tenantId, request.getDeptId()));
+        } else {
+            existing.setDeptId(deptId);
+        }
         existing.setUpdatedAt(LocalDateTime.now());
         mapper.updateById(existing);
-        replaceEscalationLevels(id, request.getEscalationLevels());
+        replaceEscalationLevels(id, tenantId, request.getEscalationLevels());
         return existing;
     }
 
@@ -105,7 +123,8 @@ public class AlertRuleService {
      */
     @Transactional
     public void delete(Long id) {
-        if (mapper.deleteById(id) == 0) {
+        AlertRuleEntity existing = getById(id);
+        if (mapper.deleteById(existing.getId()) == 0) {
             throw new BusinessException(ErrorCode.ALERT_RULE_NOT_FOUND, "告警规则不存在: " + id);
         }
         levelMapper.delete(new LambdaQueryWrapper<AlertRuleEscalationLevelEntity>()
@@ -117,7 +136,7 @@ public class AlertRuleService {
      */
     public AlertRuleEntity getById(Long id) {
         AlertRuleEntity entity = mapper.selectById(id);
-        if (entity == null) {
+        if (entity == null || !alertScope.current().canAccess(entity)) {
             throw new BusinessException(ErrorCode.ALERT_RULE_NOT_FOUND, "告警规则不存在: " + id);
         }
         return entity;
@@ -157,7 +176,7 @@ public class AlertRuleService {
     /**
      * 全量替换规则升级路径（先删后插）
      */
-    private void replaceEscalationLevels(Long ruleId, List<AlertRuleLevelDto> levels) {
+    private void replaceEscalationLevels(Long ruleId, String tenantId, List<AlertRuleLevelDto> levels) {
         levelMapper.delete(new LambdaQueryWrapper<AlertRuleEscalationLevelEntity>()
                 .eq(AlertRuleEscalationLevelEntity::getRuleId, ruleId));
         if (levels == null || levels.isEmpty()) {
@@ -167,6 +186,7 @@ public class AlertRuleService {
         for (AlertRuleLevelDto dto : levels) {
             AlertRuleEscalationLevelEntity entity = new AlertRuleEscalationLevelEntity();
             entity.setRuleId(ruleId);
+            entity.setTenantId(tenantId);
             entity.setLevelNo(no++);
             entity.setAfterSeconds(dto.getAfterSeconds());
             entity.setTriggerOn(dto.getTriggerOn() == null ? "UNACKNOWLEDGED" : dto.getTriggerOn());
@@ -200,13 +220,43 @@ public class AlertRuleService {
         return result;
     }
 
-    private boolean nameExists(String name, Long excludeId) {
+    private boolean nameExists(String name, Long excludeId, String tenantId) {
         LambdaQueryWrapper<AlertRuleEntity> qw = new LambdaQueryWrapper<AlertRuleEntity>()
-                .eq(AlertRuleEntity::getName, name);
+                .eq(AlertRuleEntity::getName, name)
+                .eq(AlertRuleEntity::getTenantId, tenantId);
         if (excludeId != null) {
             qw.ne(AlertRuleEntity::getId, excludeId);
         }
         return mapper.selectCount(qw) > 0;
+    }
+
+    private String resolveTenant(String requested) {
+        String current = SecurityUtils.getCurrentTenantId();
+        if (!StringUtils.hasText(current)) {
+            return StringUtils.hasText(requested) ? requested : "t-default";
+        }
+        if ("0".equals(current)) {
+            if (!StringUtils.hasText(requested)) {
+                throw new BusinessException(ErrorCode.TENANT_REQUIRED, "平台创建告警规则必须指定 tenantId");
+            }
+            return requested;
+        }
+        if (StringUtils.hasText(requested) && !requested.equals(current)) {
+            throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能跨租户创建告警规则");
+        }
+        return current;
+    }
+
+    private Long resolveDept(String tenantId, Long requested) {
+        Long deptId = requested;
+        String current = SecurityUtils.getCurrentTenantId();
+        if (deptId == null && StringUtils.hasText(current) && !"0".equals(current)) {
+            deptId = SecurityUtils.getCurrentDeptId();
+        }
+        if (deptId != null) {
+            deptService.requireDept(tenantId, deptId);
+        }
+        return deptId;
     }
 
     private void validate(AlertRuleRequest request) {

@@ -161,6 +161,7 @@ INSERT INTO ops_permission (code, name, module) VALUES
     ('service:read',        '服务查看',       'service'),
     ('service:manage',      '服务管理',       'service'),
     ('alert:read',          '告警查看',       'alert'),
+    ('alert:manage',        '告警规则管理',   'alert'),
     ('alert:ack',           '告警认领/确认',  'alert'),
     ('alert:resolve',       '告警恢复',       'alert'),
     ('alert:silence',       '告警静默',       'alert'),
@@ -193,7 +194,7 @@ JOIN ops_permission p ON p.code IN (
     'knowledge:read', 'knowledge:write', 'knowledge:review', 'knowledge:publish',
     'knowledge:delete', 'knowledge:admin',
     'service:read', 'service:manage',
-    'alert:read', 'alert:ack', 'alert:resolve', 'alert:silence',
+    'alert:read', 'alert:manage', 'alert:ack', 'alert:resolve', 'alert:silence',
     'diagnosis:read', 'diagnosis:trigger',
     'notification:manage', 'maintenance:manage', 'oncall:manage', 'audit:read'
 )
