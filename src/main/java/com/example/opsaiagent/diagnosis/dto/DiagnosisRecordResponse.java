@@ -21,6 +21,8 @@ public class DiagnosisRecordResponse {
 
     private Long id;
     private Long alertEventId;
+    private String tenantId;
+    private Long deptId;
     private Long snapshotId;
     private Long ruleId;
     private String ruleName;
@@ -44,6 +46,8 @@ public class DiagnosisRecordResponse {
         return DiagnosisRecordResponse.builder()
                 .id(entity.getId())
                 .alertEventId(entity.getAlertEventId())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
                 .snapshotId(entity.getSnapshotId())
                 .ruleId(entity.getRuleId())
                 .ruleName(entity.getRuleName())

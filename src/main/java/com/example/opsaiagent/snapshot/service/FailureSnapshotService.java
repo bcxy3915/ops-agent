@@ -5,6 +5,7 @@ import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.mapper.AuditLogMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
+import com.example.opsaiagent.diagnosis.service.DiagnosisScope;
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
@@ -46,6 +47,7 @@ public class FailureSnapshotService {
     private final MetricSampleStore metricSampleStore;
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
+    private final DiagnosisScope diagnosisScope;
 
     /**
      * 为告警事件生成快照并落库（幂等：同一事件已有快照则跳过）
@@ -61,6 +63,8 @@ public class FailureSnapshotService {
         SnapshotData data = build(event);
         FailureSnapshotEntity entity = new FailureSnapshotEntity();
         entity.setAlertEventId(event.getId());
+        entity.setTenantId(event.getTenantId());
+        entity.setDeptId(event.getDeptId());
         entity.setRuleId(event.getRuleId());
         entity.setRuleName(event.getRuleName());
         entity.setService(event.getService());
@@ -101,8 +105,10 @@ public class FailureSnapshotService {
                 .lastCheckedAt(s.getLastCheckedAt())
                 .build()).orElse(null);
 
-        List<MetricPoint> metricWindow = metricSampleStore.query(
-                event.getService(), event.getMetric(), firedMs - WINDOW_MS, firedMs);
+        List<MetricPoint> metricWindow = event.getTenantId() == null
+                ? metricSampleStore.query(event.getService(), event.getMetric(), firedMs - WINDOW_MS, firedMs)
+                : metricSampleStore.query(event.getTenantId(), event.getService(), event.getMetric(),
+                        firedMs - WINDOW_MS, firedMs);
 
         List<AuditLogEntity> auditLogs = auditLogMapper.selectList(
                 new LambdaQueryWrapper<AuditLogEntity>()
@@ -136,7 +142,7 @@ public class FailureSnapshotService {
      */
     public FailureSnapshotEntity getById(Long id) {
         FailureSnapshotEntity entity = snapshotMapper.selectById(id);
-        if (entity == null) {
+        if (entity == null || !diagnosisScope.current().canAccess(entity)) {
             throw new BusinessException(ErrorCode.SNAPSHOT_NOT_FOUND, "故障快照不存在: " + id);
         }
         return entity;
@@ -146,7 +152,7 @@ public class FailureSnapshotService {
      * 按服务 / 告警事件查询快照列表
      */
     public List<FailureSnapshotEntity> list(String service, Long alertEventId, int limit) {
-        LambdaQueryWrapper<FailureSnapshotEntity> qw = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<FailureSnapshotEntity> qw = diagnosisScope.current().snapshots();
         if (service != null && !service.isBlank()) {
             qw.eq(FailureSnapshotEntity::getService, service);
         }

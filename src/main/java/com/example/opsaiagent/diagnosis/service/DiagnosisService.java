@@ -12,6 +12,7 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
+import com.example.opsaiagent.retrieval.RetrievalScope;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -48,6 +49,7 @@ public class DiagnosisService {
     private final HybridRetriever hybridRetriever;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeCaseMapper caseMapper;
+    private final DiagnosisScope diagnosisScope;
 
     /**
      * 基于故障快照执行一次 LLM 诊断并落库
@@ -67,6 +69,8 @@ public class DiagnosisService {
         DiagnosisRecordEntity record = new DiagnosisRecordEntity();
         record.setAlertEventId(snapshot.getAlertEventId());
         record.setSnapshotId(snapshot.getId());
+        record.setTenantId(snapshot.getTenantId());
+        record.setDeptId(snapshot.getDeptId());
         record.setRuleId(snapshot.getRuleId());
         record.setRuleName(snapshot.getRuleName());
         record.setService(snapshot.getService());
@@ -76,11 +80,12 @@ public class DiagnosisService {
         record.setUpdatedAt(LocalDateTime.now());
 
         long start = System.currentTimeMillis();
+        RetrievalScope retrievalScope = diagnosisScope.of(snapshot).retrievalScope();
         try {
-            DiagnosisResult result = callLlm(snapshot.getSnapshotJson(), null);
+            DiagnosisResult result = callLlm(snapshot.getSnapshotJson(), null, retrievalScope);
             applyResult(record, result);
             // P1 溯源：把本次 RAG 检索命中（参考知识/历史案例）落库
-            record.setReferencesJson(buildReferencesJson(snapshot.getSnapshotJson()));
+            record.setReferencesJson(buildReferencesJson(snapshot.getSnapshotJson(), retrievalScope));
         } catch (Exception e) {
             log.warn("LLM 诊断失败 snapshotId={}: {}", snapshot.getId(), e.getMessage());
             record.setStatus("FAILED");
@@ -108,6 +113,8 @@ public class DiagnosisService {
         DiagnosisRecordEntity record = new DiagnosisRecordEntity();
         record.setAlertEventId(base.getAlertEventId());
         record.setSnapshotId(base.getSnapshotId());
+        record.setTenantId(base.getTenantId());
+        record.setDeptId(base.getDeptId());
         record.setRuleId(base.getRuleId());
         record.setRuleName(base.getRuleName());
         record.setService(base.getService());
@@ -135,7 +142,7 @@ public class DiagnosisService {
      */
     public DiagnosisRecordEntity getById(Long id) {
         DiagnosisRecordEntity entity = diagnosisMapper.selectById(id);
-        if (entity == null) {
+        if (entity == null || !diagnosisScope.current().canAccess(entity)) {
             throw new BusinessException(ErrorCode.DIAGNOSIS_NOT_FOUND, "诊断记录不存在: " + id);
         }
         return entity;
@@ -145,7 +152,7 @@ public class DiagnosisService {
      * 按服务 / 告警事件 / 规则查询诊断记录（默认最新优先）
      */
     public List<DiagnosisRecordEntity> list(String service, Long alertEventId, Long ruleId, int limit) {
-        LambdaQueryWrapper<DiagnosisRecordEntity> qw = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<DiagnosisRecordEntity> qw = diagnosisScope.current().diagnoses();
         if (service != null && !service.isBlank()) {
             qw.eq(DiagnosisRecordEntity::getService, service);
         }
@@ -166,8 +173,15 @@ public class DiagnosisService {
      * 结构化诊断调用：系统提示词 + 快照 JSON + 知识库上下文，约束 JSON Schema 输出 DiagnosisResult
      */
     protected DiagnosisResult callLlm(String snapshotJson, String context) {
+        return callLlm(snapshotJson, context, null);
+    }
+
+    /**
+     * 带检索范围的结构化诊断调用。
+     */
+    protected DiagnosisResult callLlm(String snapshotJson, String context, RetrievalScope scope) {
         String userMessage = promptTemplate.renderUserMessage(snapshotJson);
-        String kbContext = context == null ? retrieveContext(snapshotJson) : context;
+        String kbContext = context == null ? retrieveContext(snapshotJson, scope) : context;
         return chatClient.prompt()
                 .system(buildSystemPrompt(kbContext))
                 .user(userMessage)
@@ -181,9 +195,16 @@ public class DiagnosisService {
      * 检索失败或为空时返回"无参考"，不阻断诊断。
      */
     protected String retrieveContext(String snapshotJson) {
+        return retrieveContext(snapshotJson, null);
+    }
+
+    /**
+     * 带检索范围的知识库引用增强。
+     */
+    protected String retrieveContext(String snapshotJson, RetrievalScope scope) {
         try {
             String query = buildSearchQuery(snapshotJson);
-            List<Document> docs = hybridRetriever.retrieve(query, 3);
+            List<Document> docs = retrieve(query, 3, scope);
             if (docs.isEmpty()) {
                 return "（知识库中未检索到相关参考，请仅基于快照事实诊断）";
             }
@@ -203,9 +224,16 @@ public class DiagnosisService {
      * 检索失败或为空时返回空数组 JSON，不阻断诊断。
      */
     protected String buildReferencesJson(String snapshotJson) {
+        return buildReferencesJson(snapshotJson, null);
+    }
+
+    /**
+     * 带检索范围生成诊断引用来源 JSON。
+     */
+    protected String buildReferencesJson(String snapshotJson, RetrievalScope scope) {
         try {
             String query = buildSearchQuery(snapshotJson);
-            List<Document> docs = hybridRetriever.retrieve(query, 5);
+            List<Document> docs = retrieve(query, 5, scope);
             if (docs.isEmpty()) {
                 return "[]";
             }
@@ -218,6 +246,15 @@ public class DiagnosisService {
             log.warn("诊断引用生成失败，降级为空引用: {}", e.getMessage());
             return "[]";
         }
+    }
+
+    /**
+     * 有范围时走显式范围检索；无范围保持旧默认检索，兼容单测与系统任务。
+     */
+    private List<Document> retrieve(String query, int topK, RetrievalScope scope) {
+        return scope == null
+                ? hybridRetriever.retrieve(query, topK)
+                : hybridRetriever.retrieve(query, topK, scope);
     }
 
     /**

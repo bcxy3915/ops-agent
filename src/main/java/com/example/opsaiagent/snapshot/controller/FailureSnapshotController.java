@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +31,7 @@ public class FailureSnapshotController {
     private final ObjectMapper objectMapper;
 
     @Operation(summary = "查询故障快照列表", description = "可按服务 / 告警事件过滤")
+    @PreAuthorize("hasAuthority('diagnosis:read')")
     @GetMapping
     public ApiResponse<List<FailureSnapshotEntity>> list(
             @RequestParam(required = false) String service,
@@ -39,12 +41,15 @@ public class FailureSnapshotController {
     }
 
     @Operation(summary = "查询单个故障快照", description = "返回结构化 JSON 快照")
+    @PreAuthorize("hasAuthority('diagnosis:read')")
     @GetMapping("/{id}")
     public ApiResponse<Map<String, Object>> detail(@PathVariable Long id) {
         FailureSnapshotEntity entity = snapshotService.getById(id);
         Map<String, Object> result = new java.util.LinkedHashMap<>();
         result.put("id", entity.getId());
         result.put("alertEventId", entity.getAlertEventId());
+        result.put("tenantId", entity.getTenantId());
+        result.put("deptId", entity.getDeptId());
         result.put("ruleId", entity.getRuleId());
         result.put("ruleName", entity.getRuleName());
         result.put("service", entity.getService());
