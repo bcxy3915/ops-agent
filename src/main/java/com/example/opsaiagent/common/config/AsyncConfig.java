@@ -32,6 +32,7 @@ public class AsyncConfig implements WebMvcConfigurer {
         executor.setQueueCapacity(200);            // 队列容量
         executor.setKeepAliveSeconds(60);          // 空闲线程存活时间
         executor.setThreadNamePrefix("mvc-async-");// 线程名前缀
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);   // 停机时等任务完成
         executor.setAwaitTerminationSeconds(30);   // 最多等 30 秒
         executor.setRejectedExecutionHandler(

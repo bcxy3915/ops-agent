@@ -14,6 +14,7 @@ import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.service.AuditLogService;
 import com.example.opsaiagent.oncall.service.OncallMemberService;
+import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -83,7 +84,8 @@ public class AlertEscalationService {
             if (levels == null || levels.isEmpty()) {
                 continue;
             }
-            escalateIfDue(event, levels, now);
+            RbacContextSnapshot.forTenant(event.getTenantId())
+                    .run(() -> escalateIfDue(event, levels, now));
         }
     }
 

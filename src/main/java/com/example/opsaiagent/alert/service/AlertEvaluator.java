@@ -12,6 +12,7 @@ import com.example.opsaiagent.maintenance.service.MaintenanceWindowService;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.notification.service.NotificationCenter;
+import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import lombok.RequiredArgsConstructor;
@@ -71,7 +72,8 @@ public class AlertEvaluator {
         long now = System.currentTimeMillis();
         for (AlertRuleEntity rule : rules) {
             try {
-                evaluateRule(rule, now);
+                RbacContextSnapshot.forTenant(rule.getTenantId())
+                        .run(() -> evaluateRule(rule, now));
             } catch (Exception e) {
                 log.warn("告警评估失败 rule={}: {}", rule.getId(), e.getMessage());
             }
@@ -96,7 +98,8 @@ public class AlertEvaluator {
                         .last("LIMIT 200"));
         for (AlertEventEntity event : suppressed) {
             try {
-                restoreMaintenanceEvent(event);
+                RbacContextSnapshot.forTenant(event.getTenantId())
+                        .run(() -> restoreMaintenanceEvent(event));
             } catch (Exception e) {
                 log.warn("维护窗口告警恢复失败 eventId={}: {}", event.getId(), e.getMessage(), e);
             }

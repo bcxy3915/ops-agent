@@ -12,6 +12,7 @@ import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntit
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationChannelMapper;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;
+import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -141,7 +142,7 @@ public class NotificationCenter {
                         .orderByAsc(NotificationRecordEntity::getNextRetryAt)
                         .last("LIMIT 100"));
         for (NotificationRecordEntity record : records) {
-            retryOne(record);
+            RbacContextSnapshot.forTenant(record.getTenantId()).run(() -> retryOne(record));
         }
     }
 
