@@ -88,19 +88,20 @@ class KnowledgeVersionControllerTest {
     }
 
     @Test
-    @DisplayName("鉴权：回滚接口要求 ADMIN/OPERATOR")
-    void rollback_requiresAdminOrOperator() throws Exception {
+    @DisplayName("鉴权：回滚接口要求 knowledge:write")
+    void rollback_requiresWritePermission() throws Exception {
         java.lang.reflect.Method m = KnowledgeVersionController.class.getMethod("rollback", Long.class, Long.class);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
-        assertThat(pa.value()).contains("ADMIN").contains("OPERATOR");
+        assertThat(pa.value()).contains("hasAuthority('knowledge:write')");
     }
 
     @Test
-    @DisplayName("鉴权：版本列表为只读接口，不要求写权限")
-    void listVersions_noWriteGuard() throws Exception {
+    @DisplayName("鉴权：版本列表要求 knowledge:read")
+    void listVersions_requiresReadPermission() throws Exception {
         java.lang.reflect.Method m = KnowledgeVersionController.class.getMethod("listVersions", Long.class);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
-        assertThat(pa).isNull();
+        assertThat(pa).isNotNull();
+        assertThat(pa.value()).contains("hasAuthority('knowledge:read')");
     }
 }

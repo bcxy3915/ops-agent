@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.common.api.PageResult;
+import com.example.opsaiagent.common.error.ErrorCode;
+import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseReferenceResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHitLogResponse;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
@@ -45,6 +47,7 @@ public class KnowledgeHitLogService {
     private final KnowledgeHitLogMapper hitLogMapper;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeCaseMapper caseMapper;
+    private final KnowledgeQueryScope queryScope;
 
     /**
      * 批量记录命中流水（逐条容错，任何单条失败不影响其他命中）
@@ -81,10 +84,13 @@ public class KnowledgeHitLogService {
      */
     private void insertHit(RetrievalHitResponse hit, String query, String hitSource, String channel) {
         Long docId = hit.getDocId();
+        KnowledgeDocumentEntity doc = documentMapper.selectById(docId);
 
-        // 1. 写命中流水
+        // 1. 写命中流水，继承文档租户/部门
         KnowledgeHitLogEntity entity = new KnowledgeHitLogEntity();
         entity.setDocId(docId);
+        entity.setTenantId(doc == null ? null : doc.getTenantId());
+        entity.setDeptId(doc == null ? null : doc.getDeptId());
         entity.setQuery(truncate(query, 500));
         entity.setHitSource(hitSource);
         entity.setChannel(truncate(channel, 64));
@@ -97,7 +103,6 @@ public class KnowledgeHitLogService {
                 .setSql("hit_count = COALESCE(hit_count, 0) + 1"));
 
         // 3. CASE 层文档同步累加案例引用数
-        KnowledgeDocumentEntity doc = documentMapper.selectById(docId);
         if (doc != null && "CASE".equalsIgnoreCase(doc.getLayer())) {
             Long caseId = parseCaseId(doc.getSource());
             if (caseId != null) {
@@ -134,6 +139,10 @@ public class KnowledgeHitLogService {
      * @return 命中流水分页结果（按命中时间倒序）
      */
     public PageResult<KnowledgeHitLogResponse> listByDocument(Long docId, int page, int size) {
+        KnowledgeQueryScope.Scope scope = queryScope.current();
+        if (!scope.isUnrestricted() && !scope.canAccess(documentMapper.selectById(docId))) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND, "知识文档不存在: " + docId);
+        }
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
         Page<KnowledgeHitLogEntity> result = hitLogMapper.selectPage(
@@ -167,6 +176,12 @@ public class KnowledgeHitLogService {
                         .eq(KnowledgeDocumentEntity::getLayer, "CASE")
                         .last("LIMIT 1"));
         if (caseDoc == null) {
+            response.setDocId(null);
+            response.setTotalHits(0L);
+            response.setRecentHits(List.of());
+            return response;
+        }
+        if (!queryScope.current().canAccess(caseDoc)) {
             response.setDocId(null);
             response.setTotalHits(0L);
             response.setRecentHits(List.of());

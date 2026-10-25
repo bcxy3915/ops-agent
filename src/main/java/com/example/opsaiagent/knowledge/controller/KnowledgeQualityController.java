@@ -37,7 +37,7 @@ public class KnowledgeQualityController {
      */
     @PostMapping("/check")
     @Operation(summary = "知识文档上传质检")
-    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:write')")
     @AuditLog(operation = "UPLOAD_KNOWLEDGE")
     public ApiResponse<QualityCheckResponse> check(@RequestBody QualityCheckRequest request) {
         return ApiResponse.success(qualityService.check(request));
@@ -51,7 +51,7 @@ public class KnowledgeQualityController {
      */
     @PostMapping("/conflicts/{conflictId}/resolve")
     @Operation(summary = "知识冲突三态裁定")
-    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:review')")
     @AuditLog(operation = "CONFLICT_RESOLVE")
     public ApiResponse<ConflictResolveResponse> resolve(@PathVariable Long conflictId,
                                                         @RequestBody ConflictResolveRequest request) {

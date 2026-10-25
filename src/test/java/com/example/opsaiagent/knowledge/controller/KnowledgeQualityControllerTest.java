@@ -90,8 +90,8 @@ class KnowledgeQualityControllerTest {
     }
 
     @Test
-    @DisplayName("质检接口为写操作：方法上带 @PreAuthorize 且仅 ADMIN/OPERATOR")
-    void writeEndpoints_requireAdminOrOperator() throws Exception {
+    @DisplayName("质检接口为写操作：check 要求 knowledge:write，resolve 要求 knowledge:review")
+    void writeEndpoints_requirePermission() throws Exception {
         java.lang.reflect.Method check = KnowledgeQualityController.class.getMethod("check", com.example.opsaiagent.knowledge.dto.QualityCheckRequest.class);
         java.lang.reflect.Method resolve = KnowledgeQualityController.class.getMethod("resolve", Long.class, com.example.opsaiagent.knowledge.dto.ConflictResolveRequest.class);
 
@@ -99,8 +99,8 @@ class KnowledgeQualityControllerTest {
         PreAuthorize resolveAuth = resolve.getAnnotation(PreAuthorize.class);
         assertThat(checkAuth).isNotNull();
         assertThat(resolveAuth).isNotNull();
-        assertThat(checkAuth.value()).contains("ADMIN").contains("OPERATOR");
-        assertThat(resolveAuth.value()).contains("ADMIN").contains("OPERATOR");
+        assertThat(checkAuth.value()).contains("hasAuthority('knowledge:write')");
+        assertThat(resolveAuth.value()).contains("hasAuthority('knowledge:review')");
     }
 
     @Test

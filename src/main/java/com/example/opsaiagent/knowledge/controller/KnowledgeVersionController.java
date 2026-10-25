@@ -37,6 +37,7 @@ public class KnowledgeVersionController {
      * @return 版本列表（按版本号降序）
      */
     @Operation(summary = "查询知识文档版本历史")
+    @PreAuthorize("hasAuthority('knowledge:read')")
     @GetMapping("/{docId}/versions")
     public ApiResponse<List<KnowledgeVersionResponse>> listVersions(@PathVariable Long docId) {
         return ApiResponse.success(versionService.listVersions(docId));
@@ -50,7 +51,7 @@ public class KnowledgeVersionController {
      */
     @Operation(summary = "回滚知识文档到历史版本")
     @PostMapping("/{docId}/versions/{versionId}/rollback")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:write')")
     @AuditLog(operation = "ROLLBACK_KNOWLEDGE", description = "回滚知识文档版本")
     public ApiResponse<KnowledgeDocumentResponse> rollback(@PathVariable Long docId,
                                                            @PathVariable Long versionId) {

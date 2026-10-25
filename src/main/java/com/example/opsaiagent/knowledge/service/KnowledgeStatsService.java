@@ -47,6 +47,7 @@ public class KnowledgeStatsService {
     private final KnowledgeConflictMapper conflictMapper;
     private final OpsServiceMapper serviceMapper;
     private final ObjectMapper objectMapper;
+    private final KnowledgeQueryScope queryScope;
 
     /**
      * 知识库总览统计
@@ -56,19 +57,19 @@ public class KnowledgeStatsService {
         LocalDateTime now = LocalDateTime.now();
         // 本月起始：当月 1 日 00:00
         LocalDateTime monthStart = LocalDate.now().withDayOfMonth(1).atStartOfDay();
+        KnowledgeQueryScope.Scope scope = queryScope.current();
 
-        long totalDocs = documentMapper.selectCount(null);
-        long pendingDocs = documentMapper.selectCount(docStatus("PENDING"));
-        long expiredDocs = documentMapper.selectCount(docExpired(now));
-        long zeroHitDocs = documentMapper.selectCount(docZeroHit());
-        long orphanDocs = documentMapper.selectCount(docOrphan());
-        long totalCases = caseMapper.selectCount(null);
-        long pendingCases = caseMapper.selectCount(caseStatus("PENDING"));
-        long confirmedCases = caseMapper.selectCount(caseStatus("CONFIRMED"));
-        long pendingConflicts = conflictMapper.selectCount(conflictPending());
-        long monthHits = hitLogMapper.selectCount(
-                new LambdaQueryWrapper<com.example.opsaiagent.knowledge.entity.KnowledgeHitLogEntity>()
-                        .ge(com.example.opsaiagent.knowledge.entity.KnowledgeHitLogEntity::getCreatedAt, monthStart));
+        long totalDocs = documentMapper.selectCount(scope.isUnrestricted() ? null : scope.documents());
+        long pendingDocs = documentMapper.selectCount(docStatus(scope, "PENDING"));
+        long expiredDocs = documentMapper.selectCount(docExpired(scope, now));
+        long zeroHitDocs = documentMapper.selectCount(docZeroHit(scope));
+        long orphanDocs = documentMapper.selectCount(docOrphan(scope));
+        long totalCases = caseMapper.selectCount(scope.isUnrestricted() ? null : scope.cases());
+        long pendingCases = caseMapper.selectCount(caseStatus(scope, "PENDING"));
+        long confirmedCases = caseMapper.selectCount(caseStatus(scope, "CONFIRMED"));
+        long pendingConflicts = conflictMapper.selectCount(conflictPending(scope));
+        long monthHits = hitLogMapper.selectCount(scope.hitLogs()
+                .ge(com.example.opsaiagent.knowledge.entity.KnowledgeHitLogEntity::getCreatedAt, monthStart));
 
         return KnowledgeStatsResponse.builder()
                 .totalDocs(totalDocs)
@@ -89,7 +90,9 @@ public class KnowledgeStatsService {
      * @return 覆盖度汇总 + 服务明细
      */
     public KnowledgeCoverageResponse coverage() {
-        List<OpsServiceEntity> services = serviceMapper.selectList(null);
+        KnowledgeQueryScope.Scope scope = queryScope.current();
+        List<OpsServiceEntity> services = serviceMapper.selectList(
+                scope.isUnrestricted() ? null : scope.services());
         long coveredServices = 0;
         List<KnowledgeCoverageResponse.ServiceCoverageItem> details = new ArrayList<>();
         for (OpsServiceEntity svc : services) {
@@ -98,13 +101,11 @@ public class KnowledgeStatsService {
             }
             // service_ids 为 JSON 数组字符串，用带引号的精确片段匹配，避免前缀误匹配
             String jsonKey = "\"" + svc.getName() + "\"";
-            long docCount = documentMapper.selectCount(
-                    new LambdaQueryWrapper<KnowledgeDocumentEntity>()
-                            .like(KnowledgeDocumentEntity::getServiceIds, jsonKey));
-            long verifiedCount = documentMapper.selectCount(
-                    new LambdaQueryWrapper<KnowledgeDocumentEntity>()
-                            .like(KnowledgeDocumentEntity::getServiceIds, jsonKey)
-                            .eq(KnowledgeDocumentEntity::getTrustStatus, "VERIFIED"));
+            long docCount = documentMapper.selectCount(scope.documents()
+                    .like(KnowledgeDocumentEntity::getServiceIds, jsonKey));
+            long verifiedCount = documentMapper.selectCount(scope.documents()
+                    .like(KnowledgeDocumentEntity::getServiceIds, jsonKey)
+                    .eq(KnowledgeDocumentEntity::getTrustStatus, "VERIFIED"));
             if (docCount > 0) {
                 coveredServices++;
             }
@@ -130,30 +131,31 @@ public class KnowledgeStatsService {
      */
     public KnowledgeTodoResponse todos() {
         LocalDateTime now = LocalDateTime.now();
+        KnowledgeQueryScope.Scope scope = queryScope.current();
 
         List<KnowledgeTodoItem> pendingDocs = documentMapper.selectList(
-                        new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                        scope.documents()
                                 .eq(KnowledgeDocumentEntity::getTrustStatus, "PENDING")
                                 .orderByDesc(KnowledgeDocumentEntity::getCreatedAt)
                                 .last("LIMIT " + TODO_LIMIT))
                 .stream().map(d -> toDocumentItem(d, "PENDING")).toList();
 
         List<KnowledgeTodoItem> pendingCases = caseMapper.selectList(
-                        new LambdaQueryWrapper<KnowledgeCaseEntity>()
+                        scope.cases()
                                 .eq(KnowledgeCaseEntity::getStatus, "PENDING")
                                 .orderByDesc(KnowledgeCaseEntity::getCreatedAt)
                                 .last("LIMIT " + TODO_LIMIT))
                 .stream().map(this::toCaseItem).toList();
 
         List<KnowledgeTodoItem> conflicts = conflictMapper.selectList(
-                        new LambdaQueryWrapper<KnowledgeConflictEntity>()
+                        scope.conflicts()
                                 .eq(KnowledgeConflictEntity::getStatus, "PENDING")
                                 .orderByDesc(KnowledgeConflictEntity::getCreatedAt)
                                 .last("LIMIT " + TODO_LIMIT))
                 .stream().map(this::toConflictItem).toList();
 
         List<KnowledgeTodoItem> expiredDocs = documentMapper.selectList(
-                        new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                        scope.documents()
                                 .isNotNull(KnowledgeDocumentEntity::getReviewAt)
                                 .lt(KnowledgeDocumentEntity::getReviewAt, now)
                                 .orderByAsc(KnowledgeDocumentEntity::getReviewAt)
@@ -176,14 +178,15 @@ public class KnowledgeStatsService {
      */
     public KnowledgeHealthResponse health() {
         LocalDateTime now = LocalDateTime.now();
+        KnowledgeQueryScope.Scope scope = queryScope.current();
         KnowledgeHealthResponse response = new KnowledgeHealthResponse();
-        response.setExpired(documentMapper.selectList(docExpired(now)).stream()
+        response.setExpired(documentMapper.selectList(docExpired(scope, now)).stream()
                 .map(this::toHealthItem)
                 .toList());
-        response.setZeroHit(documentMapper.selectList(docZeroHit()).stream()
+        response.setZeroHit(documentMapper.selectList(docZeroHit(scope)).stream()
                 .map(this::toHealthItem)
                 .toList());
-        response.setOrphan(documentMapper.selectList(docOrphan()).stream()
+        response.setOrphan(documentMapper.selectList(docOrphan(scope)).stream()
                 .map(this::toHealthItem)
                 .toList());
         return response;
@@ -204,36 +207,36 @@ public class KnowledgeStatsService {
         return item;
     }
 
-    private LambdaQueryWrapper<KnowledgeDocumentEntity> docStatus(String status) {
-        return new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+    private LambdaQueryWrapper<KnowledgeDocumentEntity> docStatus(KnowledgeQueryScope.Scope scope, String status) {
+        return scope.documents()
                 .eq(KnowledgeDocumentEntity::getTrustStatus, status);
     }
 
-    private LambdaQueryWrapper<KnowledgeDocumentEntity> docExpired(LocalDateTime now) {
-        return new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+    private LambdaQueryWrapper<KnowledgeDocumentEntity> docExpired(KnowledgeQueryScope.Scope scope, LocalDateTime now) {
+        return scope.documents()
                 .isNotNull(KnowledgeDocumentEntity::getReviewAt)
                 .lt(KnowledgeDocumentEntity::getReviewAt, now);
     }
 
-    private LambdaQueryWrapper<KnowledgeDocumentEntity> docZeroHit() {
-        return new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+    private LambdaQueryWrapper<KnowledgeDocumentEntity> docZeroHit(KnowledgeQueryScope.Scope scope) {
+        return scope.documents()
                 .and(w -> w.eq(KnowledgeDocumentEntity::getHitCount, 0L)
                         .or().isNull(KnowledgeDocumentEntity::getHitCount));
     }
 
-    private LambdaQueryWrapper<KnowledgeDocumentEntity> docOrphan() {
-        return new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+    private LambdaQueryWrapper<KnowledgeDocumentEntity> docOrphan(KnowledgeQueryScope.Scope scope) {
+        return scope.documents()
                 .and(w -> w.eq(KnowledgeDocumentEntity::getChunkCount, 0)
                         .or().isNull(KnowledgeDocumentEntity::getChunkCount));
     }
 
-    private LambdaQueryWrapper<KnowledgeCaseEntity> caseStatus(String status) {
-        return new LambdaQueryWrapper<KnowledgeCaseEntity>()
+    private LambdaQueryWrapper<KnowledgeCaseEntity> caseStatus(KnowledgeQueryScope.Scope scope, String status) {
+        return scope.cases()
                 .eq(KnowledgeCaseEntity::getStatus, status);
     }
 
-    private LambdaQueryWrapper<KnowledgeConflictEntity> conflictPending() {
-        return new LambdaQueryWrapper<KnowledgeConflictEntity>()
+    private LambdaQueryWrapper<KnowledgeConflictEntity> conflictPending(KnowledgeQueryScope.Scope scope) {
+        return scope.conflicts()
                 .eq(KnowledgeConflictEntity::getStatus, "PENDING");
     }
 

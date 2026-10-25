@@ -69,7 +69,8 @@ class KnowledgeQualityServiceTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "x",
                         List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
-        service = new KnowledgeQualityService(documentMapper, conflictMapper, hybridRetriever);
+        service = new KnowledgeQualityService(documentMapper, conflictMapper, hybridRetriever,
+                new KnowledgeQueryScope(null));
     }
 
     // ==================== check ====================
