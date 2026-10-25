@@ -122,7 +122,7 @@ public class DeptService {
     /**
      * 删除部门。
      *
-     * <p>存在子部门或仍有关联用户时拒绝删除，避免产生孤儿数据。</p>
+     * 存在子部门或仍有关联用户时拒绝删除，避免产生孤儿数据。
      *
      * @param tenantId 租户 ID
      * @param deptId   部门 ID

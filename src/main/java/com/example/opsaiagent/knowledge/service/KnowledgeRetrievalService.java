@@ -178,7 +178,7 @@ public class KnowledgeRetrievalService {
      * 生成高亮片段：优先整体命中，其次词/2-gram 片段，无命中取前缀
      * @param text 原文
      * @param query 查询
-     * @return 高亮片段（<mark> 标记命中词）
+     * @return 高亮片段（mark 标签标记命中词）
      */
     public String highlight(String text, String query) {
         if (text == null || text.isBlank()) {
@@ -261,7 +261,7 @@ public class KnowledgeRetrievalService {
     }
 
     /**
-     * 以命中为中心截取片段并加 <mark>
+     * 以命中为中心截取片段并加 mark 标签
      */
     private String wrap(String text, int start, int end) {
         int center = (start + end) / 2;

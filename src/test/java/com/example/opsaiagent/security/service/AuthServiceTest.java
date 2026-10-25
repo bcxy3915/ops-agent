@@ -34,8 +34,8 @@ import static org.mockito.Mockito.when;
 /**
  * AuthService 单元测试。
  *
- * <p>覆盖：旧用户名登录兼容 / 邮箱身份登录 / 用户不存在 / 密码错误 / 账号禁用 /
- * 租户停用 / 身份停用 / 角色与权限返回。</p>
+ * 覆盖：旧用户名登录兼容 / 邮箱身份登录 / 用户不存在 / 密码错误 / 账号禁用 /
+ * 租户停用 / 身份停用 / 角色与权限返回。
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("认证服务")

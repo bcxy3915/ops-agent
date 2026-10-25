@@ -7,10 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 告警静默与通知节流。
- * <ul>
- *   <li>静默：规则触发后进入 silence_seconds 静默期，期内不再重复告警</li>
- *   <li>节流：同一服务每小时最多产生 N 条告警事件，超限事件以 SILENCED 落库</li>
- * </ul>
+ *   静默：规则触发后进入 silence_seconds 静默期，期内不再重复告警
+ *   节流：同一服务每小时最多产生 N 条告警事件，超限事件以 SILENCED 落库
  * 状态保存在内存中（重启清零），生产环境可替换为 Redis。
  */
 @Service
@@ -29,7 +27,7 @@ public class AlertThrottleService {
      * 是否处于规则静默期
      *
      * @param ruleId          规则 ID
-     * @param silenceSeconds  静默时长（秒），&lt;=0 表示不静默
+     * @param silenceSeconds  静默时长（秒），小于等于0 表示不静默
      * @param nowMs           当前时间戳
      */
     public boolean shouldSilence(Long ruleId, Integer silenceSeconds, long nowMs) {

@@ -242,7 +242,7 @@ class KnowledgeRetrievalServiceTest {
         String longText = "x".repeat(100) + "故障" + "y".repeat(100);
         String s = service.highlight(longText, "故障");
         assertThat(s).contains("<mark>故障</mark>");
-        // 内容不超过 200 字符 + <mark> 标签 13 字符 + 两端省略号 2 字符
+        // 内容不超过 200 字符 + mark 标签 13 字符 + 两端省略号 2 字符
         assertThat(s.length()).isLessThanOrEqualTo(215);
         assertThat(s).startsWith("…");
     }
