@@ -18,6 +18,8 @@ public class NotificationChannelResponse {
 
     private Long id;
     private String name;
+    private String tenantId;
+    private Long deptId;
     private String type;
     private Boolean enabled;
     private String config;

@@ -18,6 +18,8 @@ public class NotificationRecordResponse {
 
     private Long id;
     private Long alertEventId;
+    private String tenantId;
+    private Long deptId;
     private Long ruleId;
     private String ruleName;
     private String service;

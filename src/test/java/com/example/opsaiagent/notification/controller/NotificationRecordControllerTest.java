@@ -5,11 +5,13 @@ import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationRecordResponse;
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;
+import com.example.opsaiagent.notification.service.NotificationScope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
@@ -27,6 +29,9 @@ class NotificationRecordControllerTest {
 
     @Mock
     private NotificationRecordMapper recordMapper;
+
+    @Spy
+    private NotificationScope notificationScope = new NotificationScope(null);
 
     @InjectMocks
     private NotificationRecordController controller;

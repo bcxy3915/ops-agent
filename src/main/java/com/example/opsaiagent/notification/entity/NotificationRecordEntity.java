@@ -24,6 +24,14 @@ public class NotificationRecordEntity {
     @TableField("alert_event_id")
     private Long alertEventId;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
+
     @TableField("rule_id")
     private Long ruleId;
 

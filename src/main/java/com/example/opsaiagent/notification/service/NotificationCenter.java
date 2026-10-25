@@ -47,9 +47,13 @@ public class NotificationCenter {
      * 按告警事件通知所有启用渠道（T18 闭环：附带 LLM 诊断结果）
      */
     public void sendOnEvent(AlertEventEntity event, DiagnosisRecordEntity diagnosis) {
-        List<NotificationChannelConfigEntity> channels = channelMapper.selectList(
+        LambdaQueryWrapper<NotificationChannelConfigEntity> channelQuery =
                 new LambdaQueryWrapper<NotificationChannelConfigEntity>()
-                        .eq(NotificationChannelConfigEntity::getEnabled, true));
+                        .eq(NotificationChannelConfigEntity::getEnabled, true);
+        if (event.getTenantId() != null && !event.getTenantId().isBlank()) {
+            channelQuery.eq(NotificationChannelConfigEntity::getTenantId, event.getTenantId());
+        }
+        List<NotificationChannelConfigEntity> channels = channelMapper.selectList(channelQuery);
         if (channels.isEmpty()) {
             log.info("无启用通知渠道，跳过告警通知 eventId={}", event.getId());
             return;
@@ -200,6 +204,9 @@ public class NotificationCenter {
                                                  AlertEventEntity event, String tag) {
         NotificationRecordEntity record = new NotificationRecordEntity();
         record.setAlertEventId(event.getId());
+        record.setTenantId(event.getTenantId() != null && !event.getTenantId().isBlank()
+                ? event.getTenantId() : channel.getTenantId());
+        record.setDeptId(event.getDeptId() != null ? event.getDeptId() : channel.getDeptId());
         record.setRuleId(event.getRuleId());
         record.setRuleName(event.getRuleName());
         record.setService(event.getService());
