@@ -299,6 +299,35 @@ public class KnowledgeQueryScope {
             return isTenantAdmin() || (conflict.getDeptId() != null && deptIds.contains(conflict.getDeptId()));
         }
 
+        /**
+         * 判断案例是否可见。
+         *
+         * @param entity 案例
+         * @return true=可见
+         */
+        public boolean canAccess(KnowledgeCaseEntity entity) {
+            if (isUnrestricted()) {
+                return true;
+            }
+            if (entity == null || !tenantId.equals(entity.getTenantId())) {
+                return false;
+            }
+            if (isTenantAdmin()) {
+                return true;
+            }
+            String visibility = entity.getVisibility();
+            if (!StringUtils.hasText(visibility) || VISIBILITY_TENANT.equalsIgnoreCase(visibility)) {
+                return true;
+            }
+            if (VISIBILITY_DEPT.equalsIgnoreCase(visibility)) {
+                return entity.getDeptId() != null && deptIds.contains(entity.getDeptId());
+            }
+            if (VISIBILITY_PERSONAL.equalsIgnoreCase(visibility)) {
+                return StringUtils.hasText(userId) && userId.equals(entity.getConfirmedBy());
+            }
+            return false;
+        }
+
         private boolean isApproved(String reviewStatus) {
             return !StringUtils.hasText(reviewStatus) || REVIEW_APPROVED.equalsIgnoreCase(reviewStatus);
         }
