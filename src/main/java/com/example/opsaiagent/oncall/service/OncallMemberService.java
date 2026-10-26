@@ -90,9 +90,9 @@ public class OncallMemberService {
      * @param toUsers     规则显式指定用户（逗号分隔，可空）
      * @param toRole      规则/升级目标角色（可空）
      * @param levelNo     升级级别（L1→BACKUP、L2→ADMIN、其他→PRIMARY；可空）
-     * @return 收件人 user_id 列表（Long）
+     * @return 收件人用户 ID 列表（VARCHAR(32)）
      */
-    public List<Long> resolveRecipients(String toUsers, String toRole, Integer levelNo) {
+    public List<String> resolveRecipients(String toUsers, String toRole, Integer levelNo) {
         return resolveRecipients(currentTenantId(), toUsers, toRole, levelNo);
     }
 
@@ -105,20 +105,12 @@ public class OncallMemberService {
      * @param levelNo  升级级别
      * @return 收件人用户 ID 列表
      */
-    public List<Long> resolveRecipients(String tenantId, String toUsers, String toRole, Integer levelNo) {
+    public List<String> resolveRecipients(String tenantId, String toUsers, String toRole, Integer levelNo) {
         if (toUsers != null && !toUsers.isBlank()) {
-            // 规则显式 toUsers 优先：逗号分隔的用户 ID 列表
+            // 规则显式 toUsers 优先：逗号分隔的用户 ID（VARCHAR）
             return java.util.Arrays.stream(toUsers.split(","))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
-                    .map(s -> {
-                        try {
-                            return Long.parseLong(s);
-                        } catch (NumberFormatException e) {
-                            return null;
-                        }
-                    })
-                    .filter(java.util.Objects::nonNull)
                     .toList();
         }
         String role = resolveRoleByLevel(levelNo, toRole);

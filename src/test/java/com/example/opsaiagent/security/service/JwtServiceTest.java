@@ -109,6 +109,15 @@ class JwtServiceTest {
         assertThat(jwtService.isValid(null)).isFalse();
     }
 
+    @Test
+    @DisplayName("isValid：issuer 不匹配返回 false")
+    void isValid_issuerMismatch() {
+        String token = jwtService.generateToken("admin", "ADMIN");
+        JwtService other = new JwtService(SECRET, EXPIRATION, "other-issuer");
+
+        assertThat(other.isValid(token)).isFalse();
+    }
+
     // ==================== 过期 ====================
 
     @Test

@@ -509,8 +509,12 @@ UPDATE maintenance_window
 SET dept_id = (SELECT id FROM ops_dept WHERE tenant_id = 't-default' AND code = 'default')
 WHERE dept_id IS NULL;
 
--- 值班表 user_id 为 BIGINT，历史上与 ops_user.id（VARCHAR）类型不一致；
--- 这里先统一归默认部门，后续 P4 改造时再按用户重新绑定部门。
+-- 值班表 user_id 历史上为 BIGINT，与 ops_user.id（VARCHAR(32)）类型不一致；
+-- 统一改为 VARCHAR(32)，与用户主键保持一致（项目未上线，必要时可清空 oncall_member 重来）。
+ALTER TABLE oncall_member
+    ALTER COLUMN user_id TYPE VARCHAR(32) USING user_id::text;
+
+-- 统一归默认部门
 UPDATE oncall_member
 SET dept_id = (SELECT id FROM ops_dept WHERE tenant_id = 't-default' AND code = 'default')
 WHERE dept_id IS NULL;

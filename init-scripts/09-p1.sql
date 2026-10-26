@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_maintenance_window_active ON maintenance_window(u
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS oncall_member (
     id         BIGSERIAL PRIMARY KEY,
-    user_id    BIGINT      NOT NULL,
+    user_id    VARCHAR(32) NOT NULL,   -- 对应 ops_user.id（VARCHAR(32)）
     duty_role  VARCHAR(16) NOT NULL,   -- PRIMARY / BACKUP
     added_by   VARCHAR(64),
     added_at   TIMESTAMP DEFAULT NOW()

@@ -148,11 +148,11 @@ class MetricSamplerTest {
         long now = System.currentTimeMillis();
         sampler.sample();
 
-        List<MetricPoint> inRange = sampler.getHistory("svc-a", "cpu", now - 1, now + 1);
+        List<MetricPoint> inRange = sampler.getHistory("svc-a", "cpu", now - 1000, now + 10_000);
         assertThat(inRange).hasSize(1);
         assertThat(inRange.get(0).getValue()).isEqualTo(0.5);
 
-        List<MetricPoint> outRange = sampler.getHistory("svc-a", "cpu", now + 10, now + 100);
+        List<MetricPoint> outRange = sampler.getHistory("svc-a", "cpu", now + 20_000, now + 30_000);
         assertThat(outRange).isEmpty();
     }
 

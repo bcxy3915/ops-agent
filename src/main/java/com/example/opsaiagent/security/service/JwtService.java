@@ -99,8 +99,9 @@ public class JwtService {
      */
     public boolean isValid(String token) {
         try {
-            parseToken(token);
-            return true;
+            Claims claims = parseToken(token);
+            String iss = claims.getIssuer();
+            return this.issuer != null && this.issuer.equals(iss);
         } catch (Exception e) {
             log.debug("JWT 校验失败: {}", e.getMessage());
             return false;
