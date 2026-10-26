@@ -69,4 +69,15 @@ public final class SecurityUtils {
         UserContext.CurrentUser user = UserContext.get();
         return user != null && permission != null && user.permissions().contains(permission);
     }
+
+    /**
+     * 判断当前用户是否拥有指定角色。
+     *
+     * @param role 角色编码，如 TENANT_ADMIN
+     * @return true=拥有
+     */
+    public static boolean hasRole(String role) {
+        UserContext.CurrentUser user = UserContext.get();
+        return user != null && role != null && user.roles().contains(role);
+    }
 }

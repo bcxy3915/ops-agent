@@ -47,6 +47,13 @@ public class UserController {
         UserScope scope = resolveScope(tenantId, deptId);
         List<OpsUserEntity> list = userService.listByConditions(
                 keyword, role, enabled, scope.tenantId(), scope.deptIds());
+        if (isDeptAdminOnly()) {
+            // 部门管理员只能看到本部门及下级中的普通成员，不能看到企业管理员/平台管理员
+            list = list.stream()
+                    .filter(user -> userService.getRoleCodes(user.getId()).stream()
+                            .noneMatch(code -> "TENANT_ADMIN".equals(code) || "PLATFORM_ADMIN".equals(code)))
+                    .toList();
+        }
         return ApiResponse.success(list.stream().map(this::toResponse).toList());
     }
 
@@ -114,10 +121,30 @@ public class UserController {
                 && !requestedTenant.equals(current)) {
             throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能跨租户查询用户");
         }
+
+        // 企业管理员看本企业全部用户；部门管理员只看本部门及下级
+        if (SecurityUtils.hasRole("TENANT_ADMIN")) {
+            List<Long> deptIds = deptId == null ? null : deptService.subtreeIds(current, deptId);
+            return new UserScope(current, deptIds);
+        }
+
         Long effectiveDept = deptId != null ? deptId : SecurityUtils.getCurrentDeptId();
-        List<Long> deptIds = effectiveDept == null
-                ? null : deptService.subtreeIds(current, effectiveDept);
-        return new UserScope(current, deptIds);
+        if (effectiveDept == null) {
+            // 没有部门的部门管理员不应退化为全企业可见
+            return new UserScope(current, List.of());
+        }
+        return new UserScope(current, deptService.subtreeIds(current, effectiveDept));
+    }
+
+    /**
+     * 是否仅部门管理员（不含企业管理员/平台管理员）。
+     *
+     * @return true=仅部门管理员
+     */
+    private boolean isDeptAdminOnly() {
+        return !isPlatformTenant(SecurityUtils.getCurrentTenantId())
+                && SecurityUtils.hasRole("DEPT_ADMIN")
+                && !SecurityUtils.hasRole("TENANT_ADMIN");
     }
 
     private boolean isPlatformTenant(String tenantId) {

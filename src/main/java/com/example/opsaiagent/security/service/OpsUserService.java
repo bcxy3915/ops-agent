@@ -190,6 +190,7 @@ public class OpsUserService {
     public OpsUserEntity create(UserCreateRequest request) {
         String tenantId = resolveCreateTenant(request.getTenantId());
         Long deptId = resolveCreateDept(tenantId, request.getDeptId());
+        assertDeptInScope(tenantId, deptId);
 
         // 1. 校验租户内用户名唯一
         if (existsByUsername(tenantId, request.getUsername())) {
@@ -299,6 +300,7 @@ public class OpsUserService {
         }
         if (request.getDeptId() != null) {
             deptService.requireDept(user.getTenantId(), request.getDeptId());
+            assertDeptInScope(user.getTenantId(), request.getDeptId());
             user.setDeptId(request.getDeptId());
         }
 
@@ -416,6 +418,15 @@ public class OpsUserService {
             List<RoleEntity> roles = roleMapper.selectBatchIds(target);
             if (roles == null || roles.size() != target.size()) {
                 throw new BusinessException(ErrorCode.ROLE_NOT_FOUND, "存在不合法的角色 ID");
+            }
+            // 非平台租户不能授予平台管理员；部门管理员只能授予部门级角色
+            if (!isPlatformTenant(tenantId)
+                    && roles.stream().anyMatch(r -> "PLATFORM_ADMIN".equals(r.getCode()))) {
+                throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能授予平台管理员角色");
+            }
+            if (isDeptAdminOnly()
+                    && roles.stream().anyMatch(r -> !"DEPT".equals(r.getScope()))) {
+                throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "部门管理员只能授予部门级角色");
             }
             // 显式传 roleIds 时以新角色反推历史角色；否则以历史角色为准
             user.setRole(explicitRoleIds || legacyRole == null || legacyRole.isBlank()
@@ -600,6 +611,57 @@ public class OpsUserService {
         }
         if (current == null || !current.equals(user.getTenantId())) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND, "用户不存在: " + user.getId());
+        }
+
+        List<String> targetRoles = getRoleCodes(user.getId());
+        boolean targetPlatformAdmin = targetRoles.contains("PLATFORM_ADMIN");
+        boolean targetTenantAdmin = targetRoles.contains("TENANT_ADMIN");
+
+        if (SecurityUtils.hasRole("TENANT_ADMIN")) {
+            if (targetPlatformAdmin) {
+                throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能操作平台管理员");
+            }
+            return;
+        }
+
+        if (!isDeptAdminOnly()) {
+            // 非部门管理员（如企业管理员/平台管理员）已在上方校验租户，不再限制部门
+            return;
+        }
+        Long currentDept = SecurityUtils.getCurrentDeptId();
+        if (currentDept == null || user.getDeptId() == null
+                || !deptService.subtreeIds(current, currentDept).contains(user.getDeptId())) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND, "用户不存在: " + user.getId());
+        }
+        if (targetPlatformAdmin || targetTenantAdmin) {
+            throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "部门管理员不能操作企业管理员");
+        }
+    }
+
+    /**
+     * 是否仅部门管理员（不含企业管理员/平台管理员）。
+     *
+     * @return true=仅部门管理员
+     */
+    private boolean isDeptAdminOnly() {
+        return !isPlatformTenant(SecurityUtils.getCurrentTenantId())
+                && SecurityUtils.hasRole("DEPT_ADMIN")
+                && !SecurityUtils.hasRole("TENANT_ADMIN");
+    }
+
+    /**
+     * 校验目标部门是否在当前部门管理员的数据范围内。
+     *
+     * @param tenantId 租户 ID
+     * @param deptId   目标部门 ID
+     */
+    private void assertDeptInScope(String tenantId, Long deptId) {
+        if (!isDeptAdminOnly() || deptId == null) {
+            return;
+        }
+        Long currentDept = SecurityUtils.getCurrentDeptId();
+        if (currentDept == null || !deptService.subtreeIds(tenantId, currentDept).contains(deptId)) {
+            throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能操作其他部门的用户");
         }
     }
 
