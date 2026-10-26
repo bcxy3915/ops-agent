@@ -452,6 +452,36 @@ class OpsUserServiceTest {
     }
 
     @Test
+    @DisplayName("create：仅传 roleIds 时插入前补齐非空历史 role")
+    void create_roleIdsOnly_legacyRoleFilledBeforeInsert() {
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(1L);
+            when(userMapper.exists(any())).thenReturn(false);
+            when(deptService.requireDept("t1", 1L)).thenReturn(new DeptEntity());
+            when(passwordEncoder.encode("admin123")).thenReturn("bcrypt-hash");
+            when(roleMapper.selectBatchIds(any()))
+                    .thenReturn(List.of(role(10L, "TENANT_ADMIN")));
+            java.util.concurrent.atomic.AtomicReference<String> roleAtInsert =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            doAnswer(invocation -> {
+                OpsUserEntity entity = invocation.getArgument(0);
+                roleAtInsert.set(entity.getRole());
+                entity.setId("u-new2");
+                return 1;
+            }).when(userMapper).insert(any(OpsUserEntity.class));
+
+            UserCreateRequest request = createRequest("admin");
+            request.setRole(null);
+            request.setRoleIds(List.of(10L));
+
+            userService.create(request);
+
+            assertThat(roleAtInsert.get()).isNotBlank();
+        }
+    }
+
+    @Test
     @DisplayName("P1.5 create：平台用户未指定 tenantId 抛异常")
     void create_platformRequiresTenant() {
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {

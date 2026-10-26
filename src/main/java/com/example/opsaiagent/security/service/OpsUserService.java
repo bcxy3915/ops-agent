@@ -203,7 +203,9 @@ public class OpsUserService {
         user.setDisplayName(request.getDisplayName());
         // 3. BCrypt 加密密码（存储哈希值，不是明文）
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole(request.getRole());
+        // role 列为 NOT NULL：仅传 roleIds 时先给默认值，replaceRoles 会按新角色反推回写
+        user.setRole(request.getRole() != null && !request.getRole().isBlank()
+                ? request.getRole() : "VIEWER");
         user.setTenantId(tenantId);
         user.setDeptId(deptId);
         user.setEnabled(true);
