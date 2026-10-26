@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -85,6 +86,7 @@ public class MetricSampleStore {
             return;
         }
         LocalDateTime sampledAt = toLocalDateTime(timestampMs);
+        List<MetricSampleEntity> entities = new ArrayList<>(points.size());
         for (var entry : points.entrySet()) {
             MetricSampleEntity entity = new MetricSampleEntity();
             entity.setTenantId(tenantId);
@@ -92,11 +94,12 @@ public class MetricSampleStore {
             entity.setMetric(entry.getKey());
             entity.setValue(entry.getValue());
             entity.setSampledAt(sampledAt);
-            try {
-                mapper.insert(entity);
-            } catch (Exception e) {
-                log.warn("指标落库失败: {}-{}: {}", service, entry.getKey(), e.getMessage());
-            }
+            entities.add(entity);
+        }
+        try {
+            mapper.insertBatch(entities);
+        } catch (Exception e) {
+            log.warn("指标批量落库失败: {}-{}: {}", service, points.keySet(), e.getMessage());
         }
     }
 

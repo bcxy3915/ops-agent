@@ -78,18 +78,20 @@ class MetricSampleStoreTest {
     void saveBatch_emptyPoints() {
         store.saveBatch("svc-a", System.currentTimeMillis(), Map.of());
 
-        verify(mapper, never()).insert(any());
+        verify(mapper, never()).insertBatch(any());
     }
 
     @Test
-    @DisplayName("saveBatch：批量保存多个指标")
+    @DisplayName("saveBatch：批量保存多个指标（一次 SQL）")
     void saveBatch_insertsEachMetric() {
         long now = System.currentTimeMillis();
         Map<String, Double> points = Map.of("cpu", 0.5, "memory", 1024.0, "threadCount", 12.0);
 
         store.saveBatch("svc-a", now, points);
 
-        verify(mapper, times(3)).insert(any(MetricSampleEntity.class));
+        ArgumentCaptor<List<MetricSampleEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(mapper).insertBatch(captor.capture());
+        assertThat(captor.getValue()).hasSize(3);
     }
 
     @Test

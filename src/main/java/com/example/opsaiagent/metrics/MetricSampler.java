@@ -60,13 +60,13 @@ public class MetricSampler {
         List<ServiceInfo> services = serviceRegistry.listAll();
         if (services.isEmpty()) return;
 
-        for (ServiceInfo service : services) {
+        services.parallelStream().forEach(service -> {
             try {
                 sampleService(service);
             } catch (Exception e) {
                 log.warn("采样服务失败: {} - {}", service.getName(), e.getMessage());
             }
-        }
+        });
     }
 
     /**
