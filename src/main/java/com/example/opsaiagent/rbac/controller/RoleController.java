@@ -16,13 +16,13 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * 角色与权限管理接口（企业管理员）。
+ * 角色与权限管理接口（仅平台管理员）。
  */
 @Tag(name = "角色权限", description = "角色列表、权限点列表、角色权限维护")
 @RestController
 @RequestMapping("/api/roles")
 @RequiredArgsConstructor
-@PreAuthorize("hasAuthority('role:manage')")
+@PreAuthorize("hasRole('PLATFORM_ADMIN')")
 public class RoleController {
 
     private final RoleService roleService;

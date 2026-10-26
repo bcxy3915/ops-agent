@@ -81,7 +81,7 @@ ops-agent:
 
   # 跨域来源白名单（逗号分隔）
   cors:
-    allowed-origins: "${OPS_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}"
+    allowed-origins: "${OPS_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173}"
 
   # 知识库
   knowledge:
