@@ -10,6 +10,11 @@ spring:
     async:
       request-timeout: 5m # SSE 长连接超时（默认 30s 太短，5 分钟足够）
 
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+
   mail:
     # 邮件通知渠道的 SMTP 配置（T09/T11），通过环境变量注入
     host: "${SMTP_HOST:}"
@@ -73,6 +78,16 @@ ops-agent:
       secret: ${JWT_SECRET:}
       expiration: 7200
       issuer: ops-agent
+
+  # 跨域来源白名单（逗号分隔）
+  cors:
+    allowed-origins: "${OPS_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}"
+
+  # 知识库
+  knowledge:
+    upload:
+      max-size-mb: 20
+
   crypto:
     # 密钥从 application-local.yml 或环境变量注入，这里只给默认值占位
     aes-key: "${OPS_AES_KEY:}"

@@ -48,6 +48,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -254,6 +255,38 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getOwner()).isEqualTo("alice");
     }
 
+    @Test
+    @DisplayName("upload：超过大小限制拒绝")
+    void upload_oversizedRejected() {
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.isEmpty()).thenReturn(false);
+        when(file.getSize()).thenReturn(21L * 1024 * 1024);
+
+        assertThatThrownBy(() -> service.upload(file, "手册", "PRIVATE", null, null, null))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+    }
+
+    @Test
+    @DisplayName("update：禁止修改 owner（转赠文档）")
+    void update_keepsOwner() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setOwner("alice");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(chunkMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        KnowledgeDocumentUpdateRequest request = new KnowledgeDocumentUpdateRequest();
+        request.setTitle("手册");
+        request.setOwner("bob");
+
+        service.update(1L, request);
+
+        ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+        verify(documentMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getOwner()).isEqualTo("alice");
+    }
+
     // ==================== upload ====================
 
     @Test
@@ -409,7 +442,7 @@ class KnowledgeDocumentServiceTest {
     // ==================== update ====================
 
     @Test
-    @DisplayName("update：仅更新元数据不改变版本与状态")
+    @DisplayName("update：仅更新元数据不改变版本与状态（owner 不允许被转赠）")
     void update_metadataOnly() {
         when(documentMapper.selectById(1L)).thenReturn(doc(1L, "旧标题", "VERIFIED", "PRIVATE", "原内容"));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
@@ -425,7 +458,7 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getTitle()).isEqualTo("新标题");
         assertThat(r.getVersion()).isEqualTo(1);
         assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-        assertThat(r.getOwner()).isEqualTo("new-owner");
+        assertThat(r.getOwner()).isEqualTo("ops");
         verify(vectorStore, never()).add(anyList());
     }
 

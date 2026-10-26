@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
 import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
@@ -116,6 +117,10 @@ public class KnowledgeDocumentService {
     private final DeptService deptService;
     private final KnowledgeQueryScope queryScope;
 
+    /** 上传文件大小上限（MB） */
+    @Value("${ops-agent.knowledge.upload.max-size-mb:20}")
+    private long maxUploadMb = 20;
+
     /**
      * 分页查询文档列表
      * @param keyword 关键词（标题/来源模糊匹配）
@@ -189,6 +194,11 @@ public class KnowledgeDocumentService {
                                             String owner, List<String> serviceIds, List<String> tags) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "上传文件为空");
+        }
+        long maxBytes = maxUploadMb * 1024 * 1024;
+        if (file.getSize() > maxBytes) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
+                    "上传文件超过大小限制（最大 " + maxUploadMb + "MB）");
         }
         if (!LAYER_PRIVATE.equals(layer)) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
@@ -608,9 +618,7 @@ public class KnowledgeDocumentService {
                 && !Objects.equals(entity.getRawContent(), request.getRawContent());
 
         entity.setTitle(request.getTitle().trim());
-        if (request.getOwner() != null) {
-            entity.setOwner(request.getOwner());
-        }
+        // owner 仅上传时由服务端固化，编辑不允许转赠文档归属
         if (request.getServiceIds() != null) {
             entity.setServiceIds(toJson(request.getServiceIds()));
         }
