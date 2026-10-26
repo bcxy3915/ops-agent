@@ -86,16 +86,18 @@ SELECT r.id, p.id
 FROM (VALUES
     ('PLATFORM_ADMIN', 'tenant:manage'),
     ('PLATFORM_ADMIN', 'tenant:config'),
+    ('PLATFORM_ADMIN', 'role:manage'),
     ('PLATFORM_ADMIN', 'knowledge:read'),
     ('PLATFORM_ADMIN', 'service:read'),
     ('PLATFORM_ADMIN', 'alert:read'),
+    ('PLATFORM_ADMIN', 'diagnosis:read'),
+    ('PLATFORM_ADMIN', 'user:read'),
     ('PLATFORM_ADMIN', 'audit:read'),
 
     ('TENANT_ADMIN', 'dept:manage'),
     ('TENANT_ADMIN', 'dept:read'),
     ('TENANT_ADMIN', 'user:manage'),
     ('TENANT_ADMIN', 'user:read'),
-    ('TENANT_ADMIN', 'role:manage'),
     ('TENANT_ADMIN', 'knowledge:read'),
     ('TENANT_ADMIN', 'knowledge:write'),
     ('TENANT_ADMIN', 'knowledge:review'),
@@ -117,6 +119,7 @@ FROM (VALUES
     ('TENANT_ADMIN', 'audit:read'),
 
     ('DEPT_ADMIN', 'dept:read'),
+    ('DEPT_ADMIN', 'user:manage'),
     ('DEPT_ADMIN', 'user:read'),
     ('DEPT_ADMIN', 'knowledge:read'),
     ('DEPT_ADMIN', 'knowledge:write'),
