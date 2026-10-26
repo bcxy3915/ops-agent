@@ -30,6 +30,8 @@ public class KnowledgeDocumentResponse {
     private String reviewLevel;
     private String reviewedBy;
     private LocalDateTime reviewedAt;
+    private String deptReviewedBy;
+    private LocalDateTime deptReviewedAt;
     private String reviewNote;
     private Integer version;
     private String owner;

@@ -769,6 +769,8 @@ CREATE TABLE IF NOT EXISTS knowledge_document (
     reviewed_by VARCHAR(64),
     reviewed_at TIMESTAMP,
     review_note VARCHAR(500),
+    dept_reviewed_by VARCHAR(64),
+    dept_reviewed_at TIMESTAMP,
     CONSTRAINT knowledge_document_pkey PRIMARY KEY (id)
 );
 
@@ -811,6 +813,8 @@ COMMENT ON COLUMN knowledge_document.review_level IS '当前审核层级：NONE/
 COMMENT ON COLUMN knowledge_document.reviewed_by IS '最近审核人';
 COMMENT ON COLUMN knowledge_document.reviewed_at IS '最近审核时间';
 COMMENT ON COLUMN knowledge_document.review_note IS '审核意见/驳回原因';
+COMMENT ON COLUMN knowledge_document.dept_reviewed_by IS '部门审核人；企业审核后仍保留';
+COMMENT ON COLUMN knowledge_document.dept_reviewed_at IS '部门审核时间；企业审核后仍保留';
 
 -- ------------------------------------------------------------
 -- knowledge_document_version：知识文档版本表；保存文档历史版本快照

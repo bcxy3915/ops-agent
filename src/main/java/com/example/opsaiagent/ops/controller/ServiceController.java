@@ -120,9 +120,12 @@ public class ServiceController {
                 // 企业管理员可见本企业全部服务
                 list = serviceManager.listScoped(current, null, env, status);
             } else {
-                Long effectiveDept = deptId != null ? deptId : SecurityUtils.getCurrentDeptId();
-                if (effectiveDept == null) {
-                    // 部门用户没有部门时不能退化为全企业可见
+                Long currentDept = SecurityUtils.getCurrentDeptId();
+                Long effectiveDept = deptId != null ? deptId : currentDept;
+                List<Long> allowed = currentDept == null
+                        ? List.of() : deptService.subtreeIds(current, currentDept);
+                if (effectiveDept == null || !allowed.contains(effectiveDept)) {
+                    // 部门用户没有部门、或试图查询父/兄弟部门时，不能退化为全企业可见
                     list = List.of();
                 } else {
                     List<Long> deptIds = deptService.subtreeIds(current, effectiveDept);

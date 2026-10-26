@@ -154,6 +154,13 @@ public class OpsUserService {
 
         wrapper.orderByDesc(OpsUserEntity::getCreatedAt);
         List<OpsUserEntity> list = userMapper.selectList(wrapper);
+        if (isDeptAdminOnly()) {
+            // 部门管理员只能看到本部门及下级中的普通成员，不能看到企业管理员/平台管理员
+            list = list.stream()
+                    .filter(user -> getRoleCodes(user.getId()).stream()
+                            .noneMatch(code -> "TENANT_ADMIN".equals(code) || "PLATFORM_ADMIN".equals(code)))
+                    .toList();
+        }
         // 逐条解密
         return list.stream().peek(this::decryptSensitiveFields).toList();
     }

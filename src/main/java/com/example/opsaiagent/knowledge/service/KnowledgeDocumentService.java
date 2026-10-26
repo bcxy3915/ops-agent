@@ -356,6 +356,8 @@ public class KnowledgeDocumentService {
             entity.setSubmittedAt(LocalDateTime.now());
             entity.setReviewedBy(null);
             entity.setReviewedAt(null);
+            entity.setDeptReviewedBy(null);
+            entity.setDeptReviewedAt(null);
             entity.setReviewNote(null);
             documentMapper.updateById(entity);
         }
@@ -391,6 +393,9 @@ public class KnowledgeDocumentService {
             }
             checkDeptReviewer(entity);
             checkFourEyes(entity);
+            LocalDateTime deptNow = LocalDateTime.now();
+            entity.setDeptReviewedBy(currentUsername());
+            entity.setDeptReviewedAt(deptNow);
             if (!approved) {
                 rejectDocument(entity, note);
                 log.info("知识文档部门审核驳回: id={}", id);
@@ -398,7 +403,7 @@ public class KnowledgeDocumentService {
                 entity.setReviewStatus(REVIEW_PENDING_TENANT);
                 entity.setReviewLevel(REVIEW_LEVEL_TENANT);
                 entity.setReviewedBy(currentUsername());
-                entity.setReviewedAt(LocalDateTime.now());
+                entity.setReviewedAt(deptNow);
                 entity.setReviewNote(note);
                 documentMapper.updateById(entity);
                 log.info("知识文档部门审核通过，转企业审核: id={}", id);
@@ -652,6 +657,8 @@ public class KnowledgeDocumentService {
             entity.setVisibility(VISIBILITY_PERSONAL);
             entity.setReviewedBy(null);
             entity.setReviewedAt(null);
+            entity.setDeptReviewedBy(null);
+            entity.setDeptReviewedAt(null);
             entity.setReviewNote(null);
             entity.setSubmittedAt(LocalDateTime.now());
             // 内容变更后必须重新审核，先下线旧分块与向量，审核通过后再入库
@@ -693,6 +700,8 @@ public class KnowledgeDocumentService {
         entity.setVisibility(VISIBILITY_PERSONAL);
         entity.setReviewedBy(null);
         entity.setReviewedAt(null);
+        entity.setDeptReviewedBy(null);
+        entity.setDeptReviewedAt(null);
         entity.setReviewNote(null);
         entity.setSubmittedAt(LocalDateTime.now());
 
@@ -948,6 +957,8 @@ public class KnowledgeDocumentService {
                 .reviewLevel(entity.getReviewLevel())
                 .reviewedBy(entity.getReviewedBy())
                 .reviewedAt(entity.getReviewedAt())
+                .deptReviewedBy(entity.getDeptReviewedBy())
+                .deptReviewedAt(entity.getDeptReviewedAt())
                 .reviewNote(entity.getReviewNote())
                 .version(entity.getVersion())
                 .owner(entity.getOwner())

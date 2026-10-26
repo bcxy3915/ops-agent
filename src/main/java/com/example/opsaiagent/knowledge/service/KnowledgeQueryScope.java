@@ -32,6 +32,7 @@ public class KnowledgeQueryScope {
     private static final String REVIEW_APPROVED = "APPROVED";
     private static final String REVIEW_PENDING_DEPT = "PENDING_DEPT";
     private static final String REVIEW_PENDING_TENANT = "PENDING_TENANT";
+    private static final String REVIEW_REJECTED = "REJECTED";
 
     private final DataScope dataScope;
 
@@ -45,8 +46,11 @@ public class KnowledgeQueryScope {
             return unrestricted();
         }
         String tenantId = dataScope.tenantId();
-        if (!StringUtils.hasText(tenantId) || dataScope.isPlatformTenant()) {
+        if (!StringUtils.hasText(tenantId)) {
             return unrestricted();
+        }
+        if (dataScope.isPlatformTenant()) {
+            return platform();
         }
         if (SecurityUtils.hasPermission("knowledge:admin")) {
             return tenant(tenantId);
@@ -78,6 +82,15 @@ public class KnowledgeQueryScope {
     }
 
     /**
+     * 平台管理员范围：仅平台公共知识，不穿透企业私有/部门/个人文档。
+     *
+     * @return 范围
+     */
+    public Scope platform() {
+        return new Scope("0", Set.of(), null, Mode.PLATFORM);
+    }
+
+    /**
      * 部门/普通用户范围。
      *
      * @param tenantId 租户 ID
@@ -92,6 +105,7 @@ public class KnowledgeQueryScope {
     /** 范围模式 */
     public enum Mode {
         UNRESTRICTED,
+        PLATFORM,
         TENANT,
         USER
     }
@@ -121,6 +135,10 @@ public class KnowledgeQueryScope {
             return mode == Mode.TENANT;
         }
 
+        public boolean isPlatform() {
+            return mode == Mode.PLATFORM;
+        }
+
         /**
          * 文档查询条件。
          *
@@ -129,6 +147,12 @@ public class KnowledgeQueryScope {
         public LambdaQueryWrapper<KnowledgeDocumentEntity> documents() {
             LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<>();
             if (isUnrestricted()) {
+                return wrapper;
+            }
+            if (isPlatform()) {
+                // 平台管理员只读平台公共知识，不穿透企业私有/部门/个人文档
+                wrapper.eq(KnowledgeDocumentEntity::getTenantId, "0")
+                        .eq(KnowledgeDocumentEntity::getVisibility, VISIBILITY_PUBLIC);
                 return wrapper;
             }
             if (isTenantAdmin()) {
@@ -155,6 +179,12 @@ public class KnowledgeQueryScope {
                                         v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_DEPT)
                                                 .in(KnowledgeDocumentEntity::getDeptId, deptIds);
                                     }
+                                    // 部门审核人可继续查看自己已提交企业审核的文档，用于“我已审核”历史
+                                    v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_TENANT)
+                                            .eq(KnowledgeDocumentEntity::getDeptReviewedBy, userId);
+                                    // 自己驳回的文档也要能在“我已审核”中找到
+                                    v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_REJECTED)
+                                            .eq(KnowledgeDocumentEntity::getDeptReviewedBy, userId);
                                 }
                                 if (canTenantReview()) {
                                     v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_TENANT);
@@ -173,6 +203,11 @@ public class KnowledgeQueryScope {
         public LambdaQueryWrapper<KnowledgeCaseEntity> cases() {
             LambdaQueryWrapper<KnowledgeCaseEntity> wrapper = new LambdaQueryWrapper<>();
             if (isUnrestricted()) {
+                return wrapper;
+            }
+            if (isPlatform()) {
+                wrapper.eq(KnowledgeCaseEntity::getTenantId, "0")
+                        .eq(KnowledgeCaseEntity::getVisibility, VISIBILITY_PUBLIC);
                 return wrapper;
             }
             if (isTenantAdmin()) {
@@ -266,6 +301,10 @@ public class KnowledgeQueryScope {
             if (doc == null) {
                 return false;
             }
+            if (isPlatform()) {
+                return "0".equals(doc.getTenantId())
+                        && VISIBILITY_PUBLIC.equalsIgnoreCase(doc.getVisibility());
+            }
             String visibility = doc.getVisibility();
             if (!StringUtils.hasText(visibility)) {
                 return "BUILTIN".equalsIgnoreCase(doc.getLayer());
@@ -283,6 +322,16 @@ public class KnowledgeQueryScope {
             if (canDeptReview() && REVIEW_PENDING_DEPT.equalsIgnoreCase(doc.getReviewStatus())) {
                 return tenantId.equals(doc.getTenantId())
                         && doc.getDeptId() != null && deptIds.contains(doc.getDeptId());
+            }
+            // 部门审核人可继续查看自己已提交企业审核的文档
+            if (canDeptReview() && REVIEW_PENDING_TENANT.equalsIgnoreCase(doc.getReviewStatus())
+                    && StringUtils.hasText(userId) && userId.equals(doc.getDeptReviewedBy())) {
+                return tenantId.equals(doc.getTenantId());
+            }
+            // 部门审核人可查看自己驳回的文档
+            if (canDeptReview() && REVIEW_REJECTED.equalsIgnoreCase(doc.getReviewStatus())
+                    && StringUtils.hasText(userId) && userId.equals(doc.getDeptReviewedBy())) {
+                return tenantId.equals(doc.getTenantId());
             }
             if (canTenantReview() && REVIEW_PENDING_TENANT.equalsIgnoreCase(doc.getReviewStatus())) {
                 return tenantId.equals(doc.getTenantId());
@@ -348,13 +397,13 @@ public class KnowledgeQueryScope {
             return !StringUtils.hasText(reviewStatus) || REVIEW_APPROVED.equalsIgnoreCase(reviewStatus);
         }
 
-        private boolean canDeptReview() {
+        public boolean canDeptReview() {
             return SecurityUtils.hasRole("DEPT_ADMIN")
                     || SecurityUtils.hasRole("TENANT_ADMIN")
                     || SecurityUtils.hasPermission("knowledge:admin");
         }
 
-        private boolean canTenantReview() {
+        public boolean canTenantReview() {
             return SecurityUtils.hasRole("TENANT_ADMIN")
                     || SecurityUtils.hasPermission("knowledge:admin");
         }

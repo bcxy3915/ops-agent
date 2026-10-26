@@ -7,6 +7,7 @@ import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.rbac.dto.DeptCreateRequest;
 import com.example.opsaiagent.rbac.dto.DeptResponse;
 import com.example.opsaiagent.rbac.dto.DeptUpdateRequest;
+import com.example.opsaiagent.rbac.entity.DeptEntity;
 import com.example.opsaiagent.rbac.service.DeptService;
 import com.example.opsaiagent.security.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,7 +37,14 @@ public class DeptController {
     @GetMapping
     public ApiResponse<List<DeptResponse>> list(@RequestParam(required = false) String tenantId) {
         String tid = resolveTenantId(tenantId);
-        return ApiResponse.success(deptService.listByTenant(tid).stream()
+        List<DeptEntity> departments = deptService.listByTenant(tid);
+        List<Long> visible = visibleDeptIds(tid);
+        if (visible != null) {
+            departments = departments.stream()
+                    .filter(d -> visible.contains(d.getId()))
+                    .toList();
+        }
+        return ApiResponse.success(departments.stream()
                 .map(DeptResponse::from)
                 .toList());
     }
@@ -47,6 +55,7 @@ public class DeptController {
     public ApiResponse<DeptResponse> get(@PathVariable Long id,
                                          @RequestParam(required = false) String tenantId) {
         String tid = resolveTenantId(tenantId);
+        assertDeptVisible(tid, id);
         return ApiResponse.success(DeptResponse.from(deptService.requireDept(tid, id)));
     }
 
@@ -57,6 +66,13 @@ public class DeptController {
     public ApiResponse<DeptResponse> create(@Valid @RequestBody DeptCreateRequest request,
                                             @RequestParam(required = false) String tenantId) {
         String tid = resolveTenantId(tenantId);
+        if (isDeptAdminOnly()) {
+            Long parentId = request.getParentId();
+            if (parentId == null || !visibleDeptIds(tid).contains(parentId)) {
+                throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN,
+                        "只能在本部门下创建子部门");
+            }
+        }
         return ApiResponse.success(DeptResponse.from(deptService.create(tid, request)));
     }
 
@@ -68,6 +84,7 @@ public class DeptController {
                                             @Valid @RequestBody DeptUpdateRequest request,
                                             @RequestParam(required = false) String tenantId) {
         String tid = resolveTenantId(tenantId);
+        assertDeptVisible(tid, id);
         return ApiResponse.success(DeptResponse.from(deptService.update(tid, id, request)));
     }
 
@@ -78,8 +95,51 @@ public class DeptController {
     public ApiResponse<Void> delete(@PathVariable Long id,
                                     @RequestParam(required = false) String tenantId) {
         String tid = resolveTenantId(tenantId);
+        assertDeptVisible(tid, id);
         deptService.delete(tid, id);
         return ApiResponse.success(null);
+    }
+
+    /**
+     * 当前部门管理员可见的部门 ID 集合；企业管理员/平台管理员返回 null（不限制）。
+     *
+     * @param tenantId 租户 ID
+     * @return 可见部门 ID；null=不限制
+     */
+    private List<Long> visibleDeptIds(String tenantId) {
+        if (!isDeptAdminOnly()) {
+            return null;
+        }
+        Long currentDept = SecurityUtils.getCurrentDeptId();
+        return currentDept == null ? List.of() : deptService.subtreeIds(tenantId, currentDept);
+    }
+
+    /**
+     * 校验目标部门是否在当前部门管理员的可见范围内。
+     *
+     * @param tenantId 租户 ID
+     * @param deptId   部门 ID
+     */
+    private void assertDeptVisible(String tenantId, Long deptId) {
+        List<Long> visible = visibleDeptIds(tenantId);
+        if (visible != null && !visible.contains(deptId)) {
+            throw new BusinessException(ErrorCode.DEPT_NOT_FOUND, "部门不存在: " + deptId);
+        }
+    }
+
+    /**
+     * 是否仅部门管理员（不含企业管理员/平台管理员）。
+     *
+     * @return true=仅部门管理员
+     */
+    private boolean isDeptAdminOnly() {
+        return !isPlatformTenant(SecurityUtils.getCurrentTenantId())
+                && SecurityUtils.hasRole("DEPT_ADMIN")
+                && !SecurityUtils.hasRole("TENANT_ADMIN");
+    }
+
+    private boolean isPlatformTenant(String tenantId) {
+        return tenantId == null || tenantId.isBlank() || "0".equals(tenantId);
     }
 
     /**

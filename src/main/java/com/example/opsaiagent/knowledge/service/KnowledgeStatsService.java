@@ -60,7 +60,8 @@ public class KnowledgeStatsService {
         KnowledgeQueryScope.Scope scope = queryScope.current();
 
         long totalDocs = documentMapper.selectCount(scope.isUnrestricted() ? null : scope.documents());
-        long pendingDocs = documentMapper.selectCount(docStatus(scope, "PENDING"));
+        // 待审核只统计当前用户可实际处理的审核层级，DRAFT/已由自己提交下级审核的不计入
+        long pendingDocs = documentMapper.selectCount(pendingReviewDocs(scope));
         long expiredDocs = documentMapper.selectCount(docExpired(scope, now));
         long zeroHitDocs = documentMapper.selectCount(docZeroHit(scope));
         long orphanDocs = documentMapper.selectCount(docOrphan(scope));
@@ -134,8 +135,7 @@ public class KnowledgeStatsService {
         KnowledgeQueryScope.Scope scope = queryScope.current();
 
         List<KnowledgeTodoItem> pendingDocs = documentMapper.selectList(
-                        scope.documents()
-                                .eq(KnowledgeDocumentEntity::getTrustStatus, "PENDING")
+                        pendingReviewDocs(scope)
                                 .orderByDesc(KnowledgeDocumentEntity::getCreatedAt)
                                 .last("LIMIT " + TODO_LIMIT))
                 .stream().map(d -> toDocumentItem(d, "PENDING")).toList();
@@ -171,6 +171,31 @@ public class KnowledgeStatsService {
     }
 
     // ==================== 查询条件构造 ====================
+
+    /**
+     * 当前用户可实际处理的待审核文档范围。
+     *
+     * @param scope 知识数据范围
+     * @return 查询条件
+     */
+    private LambdaQueryWrapper<KnowledgeDocumentEntity> pendingReviewDocs(KnowledgeQueryScope.Scope scope) {
+        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = scope.documents();
+        if (scope.isUnrestricted()) {
+            return wrapper.in(KnowledgeDocumentEntity::getReviewStatus, "PENDING_DEPT", "PENDING_TENANT");
+        }
+        if (scope.isPlatform()) {
+            // 平台管理员没有审核入口
+            return wrapper.eq(KnowledgeDocumentEntity::getId, -1L);
+        }
+        if (scope.canTenantReview()) {
+            return wrapper.in(KnowledgeDocumentEntity::getReviewStatus, "PENDING_DEPT", "PENDING_TENANT");
+        }
+        if (scope.canDeptReview()) {
+            // 部门审核人只处理部门审核；自己已提交企业审核的文档不再算待办
+            return wrapper.eq(KnowledgeDocumentEntity::getReviewStatus, "PENDING_DEPT");
+        }
+        return wrapper.eq(KnowledgeDocumentEntity::getId, -1L);
+    }
 
     /**
      * 健康度明细（P2）：超期 / 零命中 / 孤儿三类文档明细列表

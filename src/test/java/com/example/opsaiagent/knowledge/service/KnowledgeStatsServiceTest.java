@@ -99,7 +99,7 @@ class KnowledgeStatsServiceTest {
             if (sql != null && sql.contains("chunk_count")) {
                 return 1L; // orphanDocs
             }
-            if (sql != null && sql.contains("trust_status")) {
+            if (sql != null && sql.contains("review_status")) {
                 return 3L; // pendingDocs
             }
             return 0L;
