@@ -103,7 +103,7 @@ cd ops-ai-agent
 docker compose up -d
 ```
 
-首次启动会自动执行 `init-scripts/01-init.sql ~ 09-p1.sql`，完成向量扩展与全部业务表初始化。
+首次启动会自动执行 `init-scripts/schema.sql` 和 `init-scripts/seed.sql`，完成向量扩展、全部业务表及演示数据初始化。
 
 ### 3. 配置环境变量
 
@@ -165,7 +165,7 @@ mvn spring-boot:run
 ```
 ops-ai-agent/
 ├── docker-compose.yml                 # PostgreSQL + pgvector
-├── init-scripts/                      # 01-init ~ 09-p1 数据库幂等初始化
+├── init-scripts/                      # schema.sql 全量表结构 + seed.sql 演示数据
 ├── .env.example                       # 环境变量模板
 └── src/
     ├── main/java/com/example/opsaiagent/

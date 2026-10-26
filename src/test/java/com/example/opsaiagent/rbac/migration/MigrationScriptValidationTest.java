@@ -11,12 +11,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 迁移脚本静态校验。
+ * 数据库脚本静态校验。
  *
- * 校验 10-rbac.sql 为每个业务表都补齐 tenant_id（以及需要部门的表补齐 dept_id），
- * 并包含审计租户索引，避免实体字段与数据库列不一致。
+ * 校验 schema.sql 为每个业务表都包含 tenant_id（以及需要部门的表包含 dept_id），
+ * 并包含审计租户索引和表/字段注释，避免实体字段与数据库列不一致。
  */
-@DisplayName("迁移脚本")
+@DisplayName("数据库脚本")
 class MigrationScriptValidationTest {
 
     private static final List<String> TENANT_TABLES = List.of(
@@ -35,30 +35,45 @@ class MigrationScriptValidationTest {
             "maintenance_window", "oncall_member", "ops_audit_log");
 
     private String sql() throws IOException {
-        Path path = Path.of("init-scripts", "10-rbac.sql");
-        // 折叠连续空白，避免对齐空格影响断言
-        return Files.readString(path).replaceAll("\\s+", " ");
+        Path path = Path.of("init-scripts", "schema.sql");
+        return Files.readString(path);
+    }
+
+    /**
+     * 截取单张表的 CREATE TABLE 定义。
+     *
+     * @param sql   全量脚本
+     * @param table 表名
+     * @return 该表的建表语句
+     */
+    private String tableBlock(String sql, String table) {
+        String marker = "CREATE TABLE IF NOT EXISTS " + table + " (";
+        int start = sql.indexOf(marker);
+        assertThat(start).as("schema.sql 缺少表 %s", table).isGreaterThanOrEqualTo(0);
+        int end = sql.indexOf("\n);", start);
+        assertThat(end).as("表 %s 定义未闭合", table).isGreaterThan(start);
+        return sql.substring(start, end);
     }
 
     @Test
-    @DisplayName("所有业务表均补齐 tenant_id 列")
+    @DisplayName("所有业务表均包含 tenant_id 列")
     void allTenantTablesHaveTenantColumn() throws IOException {
         String sql = sql();
         for (String table : TENANT_TABLES) {
-            assertThat(sql)
+            assertThat(tableBlock(sql, table))
                     .as("表 %s 缺少 tenant_id 列", table)
-                    .contains("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS tenant_id");
+                    .contains("tenant_id ");
         }
     }
 
     @Test
-    @DisplayName("需要部门的表均补齐 dept_id 列")
+    @DisplayName("需要部门的表均包含 dept_id 列")
     void deptTablesHaveDeptColumn() throws IOException {
         String sql = sql();
         for (String table : DEPT_TABLES) {
-            assertThat(sql)
+            assertThat(tableBlock(sql, table))
                     .as("表 %s 缺少 dept_id 列", table)
-                    .contains("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS dept_id");
+                    .contains("dept_id ");
         }
     }
 
@@ -69,10 +84,23 @@ class MigrationScriptValidationTest {
     }
 
     @Test
-    @DisplayName("tenant_id 回填为 NOT NULL")
+    @DisplayName("tenant_id 为 NOT NULL")
     void tenantColumnsNotNull() throws IOException {
-        assertThat(sql())
-                .contains("ALTER TABLE ops_user")
-                .contains("ALTER COLUMN tenant_id SET NOT NULL");
+        for (String table : TENANT_TABLES) {
+            assertThat(tableBlock(sql(), table))
+                    .as("表 %s 的 tenant_id 应为 NOT NULL", table)
+                    .containsPattern("tenant_id\\s+VARCHAR\\(32\\).*NOT NULL");
+        }
+    }
+
+    @Test
+    @DisplayName("所有表均带表注释")
+    void allTablesHaveComments() throws IOException {
+        String sql = sql();
+        for (String table : TENANT_TABLES) {
+            assertThat(sql)
+                    .as("表 %s 缺少 COMMENT ON TABLE", table)
+                    .contains("COMMENT ON TABLE " + table + " IS ");
+        }
     }
 }
