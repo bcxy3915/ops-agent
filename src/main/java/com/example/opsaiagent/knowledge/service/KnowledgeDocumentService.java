@@ -312,24 +312,19 @@ public class KnowledgeDocumentService {
     @Transactional
     public KnowledgeDocumentResponse publish(Long id, boolean approved) {
         KnowledgeDocumentEntity entity = requireDocument(id);
-        String currentTenant = SecurityUtils.getCurrentTenantId();
-        if (StringUtils.hasText(currentTenant) && !"0".equals(currentTenant)
-                && !currentTenant.equals(entity.getTenantId())) {
-            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
-                    "无权审核该企业知识文档: " + id);
+        KnowledgeReviewRequest request = new KnowledgeReviewRequest();
+        request.setApproved(approved);
+        request.setComment(approved ? "发布审核通过" : "发布审核驳回");
+        if (REVIEW_PENDING_DEPT.equals(entity.getReviewStatus())) {
+            request.setLevel(REVIEW_LEVEL_DEPT);
+            return review(id, request);
         }
-        if (approved) {
-            if (!TRUST_PENDING.equals(entity.getTrustStatus())) {
-                throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
-                        "仅待审核文档可以审核通过，当前状态: " + entity.getTrustStatus());
-            }
-            approveDocument(entity, REVIEW_LEVEL_TENANT, "发布审核通过");
-            log.info("知识文档审核通过并入库: id={}, chunks={}", entity.getId(), entity.getChunkCount());
-        } else {
-            rejectDocument(entity, "发布审核驳回");
-            log.info("知识文档审核驳回: id={}", entity.getId());
+        if (REVIEW_PENDING_TENANT.equals(entity.getReviewStatus())) {
+            request.setLevel(REVIEW_LEVEL_TENANT);
+            return review(id, request);
         }
-        return toResponse(requireDocument(id), true);
+        throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                "当前文档不处于待审核状态");
     }
 
     /**
@@ -506,6 +501,12 @@ public class KnowledgeDocumentService {
             // 单元测试 / 系统任务无登录上下文时不做作者校验
             return;
         }
+        String currentTenant = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(currentTenant) && !"0".equals(currentTenant)
+                && !currentTenant.equals(entity.getTenantId())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND,
+                    "知识文档不存在: " + entity.getId());
+        }
         if (current.equals(entity.getOwner()) || SecurityUtils.hasPermission("knowledge:admin")) {
             return;
         }
@@ -519,6 +520,12 @@ public class KnowledgeDocumentService {
      * @param entity 文档
      */
     private void checkDeptReviewer(KnowledgeDocumentEntity entity) {
+        if (!SecurityUtils.hasRole("DEPT_ADMIN")
+                && !SecurityUtils.hasRole("TENANT_ADMIN")
+                && !SecurityUtils.hasPermission("knowledge:admin")) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "仅部门管理员可执行部门审核");
+        }
         if (entity.getDeptId() == null) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID, "文档未归属部门，无法部门审核");
         }
@@ -540,10 +547,20 @@ public class KnowledgeDocumentService {
      * @param entity 文档
      */
     private void checkTenantReviewer(KnowledgeDocumentEntity entity) {
+        if (!SecurityUtils.hasRole("TENANT_ADMIN")
+                && !SecurityUtils.hasPermission("knowledge:admin")) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "仅企业管理员可执行企业审核");
+        }
         String currentTenant = SecurityUtils.getCurrentTenantId();
         if (!StringUtils.hasText(currentTenant) || !currentTenant.equals(entity.getTenantId())) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
                     "无权审核该企业知识文档: " + entity.getId());
+        }
+        // 部门审核人与企业审核人必须分离，避免同一人完成两级审核
+        if (currentUsername().equals(entity.getReviewedBy())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "部门审核人与企业审核人不能为同一人");
         }
     }
 

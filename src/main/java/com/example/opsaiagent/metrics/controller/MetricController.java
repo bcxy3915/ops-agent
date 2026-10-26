@@ -9,9 +9,12 @@ import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.dto.MetricSnapshotResponse;
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -22,6 +25,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/services/{serviceName}/metrics")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('service:read')")
 public class MetricController {
 
     private final ServiceRegistry serviceRegistry;
@@ -34,6 +38,7 @@ public class MetricController {
         if (service == null) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + serviceName);
         }
+        checkServiceTenant(service);
 
         MetricSnapshotResponse.Snapshot snapshot = metricSampler.getLatestSnapshot(serviceName);
         if (snapshot == null) {
@@ -58,6 +63,7 @@ public class MetricController {
         if (service == null) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + serviceName);
         }
+        checkServiceTenant(service);
 
         long rangeMs = parseRange(range);
         long endMs = System.currentTimeMillis();
@@ -73,6 +79,19 @@ public class MetricController {
                 .range(range)
                 .series(series)
                 .build());
+    }
+
+    /**
+     * 校验服务是否属于当前租户。
+     *
+     * @param service 服务信息
+     */
+    private void checkServiceTenant(ServiceInfo service) {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(tenantId) && !"0".equals(tenantId)
+                && !tenantId.equals(service.getTenantId())) {
+            throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + service.getName());
+        }
     }
 
     /**

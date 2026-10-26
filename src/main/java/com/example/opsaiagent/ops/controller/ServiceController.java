@@ -52,9 +52,9 @@ public class ServiceController {
      * @param request 服务注册请求
      * @return 注册结果
      */
-    @Operation(summary = "注册服务", description = "注册一个新的被监控服务。需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "注册服务", description = "注册一个新的被监控服务。需要 service:manage")
     @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('service:manage')")
     @AuditLog(operation = "REGISTER_SERVICE", description = "注册服务")
     @PostMapping
     public ApiResponse<ServiceResponse> register(@Valid @RequestBody ServiceRegisterRequest request) {
@@ -92,6 +92,7 @@ public class ServiceController {
      * @return 服务列表
      */
     @Operation(summary = "查询服务列表", description = "企业按租户+部门子树过滤；平台可按 tenantId 查看")
+    @PreAuthorize("hasAuthority('service:read')")
     @GetMapping
     public ApiResponse<List<ServiceResponse>> list(
             @RequestParam(required = false) String env,
@@ -115,10 +116,19 @@ public class ServiceController {
                     ? deptService.subtreeIds(targetTenant, deptId) : null;
             list = serviceManager.listScoped(targetTenant, deptIds, env, status);
         } else {
-            Long effectiveDept = deptId != null ? deptId : SecurityUtils.getCurrentDeptId();
-            List<Long> deptIds = effectiveDept == null
-                    ? null : deptService.subtreeIds(current, effectiveDept);
-            list = serviceManager.listScoped(current, deptIds, env, status);
+            if (SecurityUtils.hasRole("TENANT_ADMIN")) {
+                // 企业管理员可见本企业全部服务
+                list = serviceManager.listScoped(current, null, env, status);
+            } else {
+                Long effectiveDept = deptId != null ? deptId : SecurityUtils.getCurrentDeptId();
+                if (effectiveDept == null) {
+                    // 部门用户没有部门时不能退化为全企业可见
+                    list = List.of();
+                } else {
+                    List<Long> deptIds = deptService.subtreeIds(current, effectiveDept);
+                    list = serviceManager.listScoped(current, deptIds, env, status);
+                }
+            }
         }
         return ApiResponse.success(list.stream().map(this::toResponse).toList());
     }
@@ -128,12 +138,11 @@ public class ServiceController {
      * @param name 服务名
      * @return 服务详情
      */
-    @Operation(summary = "查询单个服务", description = "所有角色可访问")
+    @Operation(summary = "查询单个服务", description = "需要 service:read，部门用户仅可见本部门子树服务")
+    @PreAuthorize("hasAuthority('service:read')")
     @GetMapping("/{name}")
     public ApiResponse<ServiceResponse> get(@PathVariable String name) {
-        OpsServiceEntity entity = findService(name)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SERVICE_NOT_FOUND,
-                        "服务不存在: " + name));
+        OpsServiceEntity entity = findAccessibleService(name);
         return ApiResponse.success(toResponse(entity));
     }
 
@@ -143,16 +152,15 @@ public class ServiceController {
      * @param request 更新请求
      * @return 更新结果
      */
-    @Operation(summary = "更新服务", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "更新服务", description = "需要 service:manage")
     @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('service:manage')")
     @AuditLog(operation = "UPDATE_SERVICE", description = "更新服务")
     @PutMapping("/{name}")
     public ApiResponse<ServiceResponse> update(
             @PathVariable String name,
             @Valid @RequestBody ServiceUpdateRequest request) {
-        OpsServiceEntity entity = findService(name)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SERVICE_NOT_FOUND));
+        OpsServiceEntity entity = findAccessibleService(name);
         if (request.getBaseUrl() != null) entity.setBaseUrl(request.getBaseUrl());
         if (request.getOwner() != null) entity.setOwner(request.getOwner());
         if (request.getEnv() != null) entity.setEnv(request.getEnv());
@@ -170,12 +178,13 @@ public class ServiceController {
      * @param name 服务名
      * @return 删除结果
      */
-    @Operation(summary = "下线服务", description = "需要 ADMIN 角色")
+    @Operation(summary = "下线服务", description = "需要 service:manage")
     @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('service:manage')")
     @AuditLog(operation = "DELETE_SERVICE", description = "下线服务")
     @DeleteMapping("/{name}")
     public ApiResponse<Map<String, String>> delete(@PathVariable String name) {
+        findAccessibleService(name);
         if (!deleteService(name)) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND);
         }
@@ -187,13 +196,12 @@ public class ServiceController {
      * @param name 服务名
      * @return 健康状态
      */
-    @Operation(summary = "触发健康检查", description = "立即检查一次指定服务的健康状态。需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "触发健康检查", description = "立即检查一次指定服务的健康状态。需要 service:manage")
     @RateLimit(key = "serviceWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('service:manage')")
     @PostMapping("/{name}/check")
     public ApiResponse<Map<String, Object>> check(@PathVariable String name) {
-        findService(name).orElseThrow(() -> new BusinessException(ErrorCode.SERVICE_NOT_FOUND,
-                "服务不存在: " + name));
+        findAccessibleService(name);
         String status = healthChecker.checkNow(name);
         return ApiResponse.success(Map.of(
                 "name", name,
@@ -214,6 +222,44 @@ public class ServiceController {
             return serviceManager.findByName(name);
         }
         return serviceManager.findByName(tenantId, name);
+    }
+
+    /**
+     * 查询当前用户有权访问的服务。
+     *
+     * @param name 服务名
+     * @return 服务
+     */
+    private OpsServiceEntity findAccessibleService(String name) {
+        OpsServiceEntity entity = findService(name)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SERVICE_NOT_FOUND,
+                        "服务不存在: " + name));
+        if (!canAccessService(entity)) {
+            throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + name);
+        }
+        return entity;
+    }
+
+    /**
+     * 判断当前用户是否可以访问指定服务。
+     *
+     * @param entity 服务
+     * @return true=可访问
+     */
+    private boolean canAccessService(OpsServiceEntity entity) {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        if (tenantId == null || tenantId.isBlank() || "0".equals(tenantId)) {
+            return true;
+        }
+        if (!tenantId.equals(entity.getTenantId())) {
+            return false;
+        }
+        if (SecurityUtils.hasRole("TENANT_ADMIN")) {
+            return true;
+        }
+        Long currentDept = SecurityUtils.getCurrentDeptId();
+        return currentDept != null && entity.getDeptId() != null
+                && deptService.subtreeIds(tenantId, currentDept).contains(entity.getDeptId());
     }
 
     /**

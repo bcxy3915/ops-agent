@@ -150,11 +150,13 @@ public class KnowledgeQueryScope {
                                 }
                                 v.or().eq(KnowledgeDocumentEntity::getVisibility, VISIBILITY_TENANT)
                                         .eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_APPROVED);
-                                if (canReview()) {
+                                if (canDeptReview()) {
                                     if (!deptIds.isEmpty()) {
                                         v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_DEPT)
                                                 .in(KnowledgeDocumentEntity::getDeptId, deptIds);
                                     }
+                                }
+                                if (canTenantReview()) {
                                     v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_TENANT);
                                 }
                             }))
@@ -278,14 +280,12 @@ public class KnowledgeQueryScope {
                 return StringUtils.hasText(userId) && userId.equals(doc.getOwner());
             }
             // 审核人可见本部门子树 / 本企业内待审核文档
-            if (canReview()) {
-                if (REVIEW_PENDING_DEPT.equalsIgnoreCase(doc.getReviewStatus())) {
-                    return tenantId.equals(doc.getTenantId())
-                            && doc.getDeptId() != null && deptIds.contains(doc.getDeptId());
-                }
-                if (REVIEW_PENDING_TENANT.equalsIgnoreCase(doc.getReviewStatus())) {
-                    return tenantId.equals(doc.getTenantId());
-                }
+            if (canDeptReview() && REVIEW_PENDING_DEPT.equalsIgnoreCase(doc.getReviewStatus())) {
+                return tenantId.equals(doc.getTenantId())
+                        && doc.getDeptId() != null && deptIds.contains(doc.getDeptId());
+            }
+            if (canTenantReview() && REVIEW_PENDING_TENANT.equalsIgnoreCase(doc.getReviewStatus())) {
+                return tenantId.equals(doc.getTenantId());
             }
             if (!tenantId.equals(doc.getTenantId()) || !isApproved(doc.getReviewStatus())) {
                 return false;
@@ -348,8 +348,15 @@ public class KnowledgeQueryScope {
             return !StringUtils.hasText(reviewStatus) || REVIEW_APPROVED.equalsIgnoreCase(reviewStatus);
         }
 
-        private boolean canReview() {
-            return SecurityUtils.hasPermission("knowledge:review");
+        private boolean canDeptReview() {
+            return SecurityUtils.hasRole("DEPT_ADMIN")
+                    || SecurityUtils.hasRole("TENANT_ADMIN")
+                    || SecurityUtils.hasPermission("knowledge:admin");
+        }
+
+        private boolean canTenantReview() {
+            return SecurityUtils.hasRole("TENANT_ADMIN")
+                    || SecurityUtils.hasPermission("knowledge:admin");
         }
     }
 }

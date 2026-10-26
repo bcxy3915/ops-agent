@@ -46,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -395,31 +396,53 @@ class KnowledgeDocumentServiceTest {
     @DisplayName("publish：审核通过后分块并向量化入库")
     void publish_approved() {
         String longContent = "故障排查指南。" + "详细步骤说明内容。".repeat(200);
-        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "PENDING", "PRIVATE", longContent));
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", longContent);
+        entity.setReviewStatus("PENDING_TENANT");
+        entity.setReviewLevel("TENANT");
+        entity.setReviewedBy("dept-reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
         when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
 
-        KnowledgeDocumentResponse r = service.publish(1L, true);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
-        assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-        verify(vectorStore).add(anyList());
-        ArgumentCaptor<KnowledgeDocumentEntity> updateCaptor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
-        verify(documentMapper, org.mockito.Mockito.atLeast(2)).updateById(updateCaptor.capture());
-        assertThat(updateCaptor.getAllValues().get(0).getLastReviewAt()).isNotNull();
-        assertThat(r.getChunkCount()).isGreaterThan(0);
+            KnowledgeDocumentResponse r = service.publish(1L, true);
+
+            assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
+            verify(vectorStore).add(anyList());
+            ArgumentCaptor<KnowledgeDocumentEntity> updateCaptor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+            verify(documentMapper, org.mockito.Mockito.atLeast(1)).updateById(updateCaptor.capture());
+            assertThat(updateCaptor.getAllValues().get(0).getLastReviewAt()).isNotNull();
+            assertThat(r.getChunkCount()).isGreaterThan(0);
+        }
     }
 
     @Test
     @DisplayName("publish：驳回保持待审核且不向量化")
     void publish_rejected() {
-        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "PENDING", "PRIVATE", "内容"));
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("PENDING_TENANT");
+        entity.setReviewLevel("TENANT");
+        entity.setReviewedBy("dept-reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
 
-        KnowledgeDocumentResponse r = service.publish(1L, false);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
-        assertThat(r.getTrustStatus()).isEqualTo("PENDING");
-        assertThat(r.getLastReviewAt()).isNotNull();
-        verify(vectorStore, never()).add(anyList());
-        verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
+            KnowledgeDocumentResponse r = service.publish(1L, false);
+
+            assertThat(r.getTrustStatus()).isEqualTo("PENDING");
+            assertThat(r.getLastReviewAt()).isNotNull();
+            verify(vectorStore, never()).add(anyList());
+            verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
+        }
     }
 
     @Test
@@ -428,7 +451,7 @@ class KnowledgeDocumentServiceTest {
         when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "内容"));
         assertThatThrownBy(() -> service.publish(1L, true))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
     }
 
     @Test
@@ -769,6 +792,7 @@ class KnowledgeDocumentServiceTest {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
             sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", true));
 
@@ -794,6 +818,7 @@ class KnowledgeDocumentServiceTest {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
             sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", true));
 
@@ -818,6 +843,7 @@ class KnowledgeDocumentServiceTest {
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("TENANT", true));
 
@@ -825,6 +851,47 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
             assertThat(r.getVisibility()).isEqualTo("TENANT");
             verify(vectorStore).add(anyList());
+        }
+    }
+
+    @Test
+    @DisplayName("review：部门管理员不能执行企业审核")
+    void review_tenantRequiresTenantAdmin() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        doc.setReviewStatus("PENDING_TENANT");
+        doc.setReviewLevel("TENANT");
+        doc.setReviewedBy("dept-reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("dept-admin");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(false);
+            sec.when(() -> SecurityUtils.hasPermission(anyString())).thenReturn(false);
+
+            assertThatThrownBy(() -> service.review(1L, reviewRequest("TENANT", true)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("仅企业管理员可执行企业审核");
+        }
+    }
+
+    @Test
+    @DisplayName("review：部门审核人与企业审核人不能为同一人")
+    void review_tenantRequiresDifferentReviewer() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        doc.setReviewStatus("PENDING_TENANT");
+        doc.setReviewLevel("TENANT");
+        doc.setReviewedBy("reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
+
+            assertThatThrownBy(() -> service.review(1L, reviewRequest("TENANT", true)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("部门审核人与企业审核人不能为同一人");
         }
     }
 
@@ -842,6 +909,7 @@ class KnowledgeDocumentServiceTest {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
             sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", false));
 

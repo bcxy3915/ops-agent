@@ -176,6 +176,7 @@ class ServiceControllerTest {
     @Test
     @DisplayName("删除服务：成功")
     void delete_success() {
+        when(serviceManager.findByName("svc-a")).thenReturn(Optional.of(entity("svc-a")));
         when(serviceManager.deleteByName("svc-a")).thenReturn(true);
 
         ApiResponse<Map<String, String>> result = controller.delete("svc-a");
@@ -186,8 +187,6 @@ class ServiceControllerTest {
     @Test
     @DisplayName("删除服务：不存在抛 BusinessException")
     void delete_notFound() {
-        when(serviceManager.deleteByName("unknown")).thenReturn(false);
-
         assertThatThrownBy(() -> controller.delete("unknown"))
                 .isInstanceOf(BusinessException.class);
     }

@@ -64,6 +64,21 @@ class KnowledgeQueryScopeTest {
 
             assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_DEPT", 5L, "u2"))).isTrue();
             assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_DEPT", 9L, "u2"))).isFalse();
+            // 部门管理员不能看到待企业审核文档
+            assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
+            assertThat(scope.canAccess(doc("t2", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("企业管理员：可见待企业审核文档")
+    void tenantReviewer_canSeePendingTenant() {
+        UserContext.set(new UserContext.CurrentUser("u1", "reviewer",
+                Set.of("TENANT_ADMIN"), Set.of("knowledge:review")));
+        try {
+            KnowledgeQueryScope.Scope scope = new KnowledgeQueryScope(null).user("t1", Set.of(), "u1");
             assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_TENANT", null, "u2"))).isTrue();
             assertThat(scope.canAccess(doc("t2", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
         } finally {

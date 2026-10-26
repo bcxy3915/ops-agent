@@ -69,6 +69,7 @@ public class ChatController {
     }
 
     @Operation(summary = "[测试] BM25 独立检索")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @GetMapping("/bm25-search")
     public Map<String, Object> bm25Search(
             @RequestParam String query,
