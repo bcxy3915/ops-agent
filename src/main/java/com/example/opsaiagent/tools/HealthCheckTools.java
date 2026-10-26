@@ -2,6 +2,7 @@ package com.example.opsaiagent.tools;
 
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.resilience.RestClientFactory;
 import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +17,7 @@ import org.springframework.web.client.RestClient;
 public class HealthCheckTools {
 
     private final ServiceRegistry serviceRegistry;
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient = RestClientFactory.builder().build();
 
     @Tool(description = "查询指定服务的健康状态，返回 UP 表示健康，DOWN 表示异常。服务名如 todo-service")
     public String queryServiceHealth(

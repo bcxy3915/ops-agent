@@ -30,6 +30,8 @@ public class KnowledgeQueryScope {
     private static final String VISIBILITY_DEPT = "DEPT";
     private static final String VISIBILITY_PERSONAL = "PERSONAL";
     private static final String REVIEW_APPROVED = "APPROVED";
+    private static final String REVIEW_PENDING_DEPT = "PENDING_DEPT";
+    private static final String REVIEW_PENDING_TENANT = "PENDING_TENANT";
 
     private final DataScope dataScope;
 
@@ -148,6 +150,13 @@ public class KnowledgeQueryScope {
                                 }
                                 v.or().eq(KnowledgeDocumentEntity::getVisibility, VISIBILITY_TENANT)
                                         .eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_APPROVED);
+                                if (canReview()) {
+                                    if (!deptIds.isEmpty()) {
+                                        v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_DEPT)
+                                                .in(KnowledgeDocumentEntity::getDeptId, deptIds);
+                                    }
+                                    v.or().eq(KnowledgeDocumentEntity::getReviewStatus, REVIEW_PENDING_TENANT);
+                                }
                             }))
                     .or(pub -> pub.eq(KnowledgeDocumentEntity::getTenantId, "0")
                             .eq(KnowledgeDocumentEntity::getVisibility, VISIBILITY_PUBLIC)));
@@ -268,14 +277,21 @@ public class KnowledgeQueryScope {
             if (VISIBILITY_PERSONAL.equalsIgnoreCase(visibility)) {
                 return StringUtils.hasText(userId) && userId.equals(doc.getOwner());
             }
+            // 审核人可见本部门子树 / 本企业内待审核文档
+            if (canReview()) {
+                if (REVIEW_PENDING_DEPT.equalsIgnoreCase(doc.getReviewStatus())) {
+                    return tenantId.equals(doc.getTenantId())
+                            && doc.getDeptId() != null && deptIds.contains(doc.getDeptId());
+                }
+                if (REVIEW_PENDING_TENANT.equalsIgnoreCase(doc.getReviewStatus())) {
+                    return tenantId.equals(doc.getTenantId());
+                }
+            }
             if (!tenantId.equals(doc.getTenantId()) || !isApproved(doc.getReviewStatus())) {
                 return false;
             }
             if (VISIBILITY_TENANT.equalsIgnoreCase(visibility)) {
                 return true;
-            }
-            if (VISIBILITY_PERSONAL.equalsIgnoreCase(visibility)) {
-                return StringUtils.hasText(userId) && userId.equals(doc.getOwner());
             }
             if (VISIBILITY_DEPT.equalsIgnoreCase(visibility)) {
                 return doc.getDeptId() != null && deptIds.contains(doc.getDeptId());
@@ -330,6 +346,10 @@ public class KnowledgeQueryScope {
 
         private boolean isApproved(String reviewStatus) {
             return !StringUtils.hasText(reviewStatus) || REVIEW_APPROVED.equalsIgnoreCase(reviewStatus);
+        }
+
+        private boolean canReview() {
+            return SecurityUtils.hasPermission("knowledge:review");
         }
     }
 }

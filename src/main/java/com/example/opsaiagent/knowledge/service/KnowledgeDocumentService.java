@@ -114,6 +114,7 @@ public class KnowledgeDocumentService {
     private final KnowledgeVersionService versionService;
     private final TenantService tenantService;
     private final DeptService deptService;
+    private final KnowledgeQueryScope queryScope;
 
     /**
      * 分页查询文档列表
@@ -129,7 +130,7 @@ public class KnowledgeDocumentService {
                                                       String service, int page, int size) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
-        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = queryScope.current().documents();
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(KnowledgeDocumentEntity::getTitle, keyword)
                     .or().like(KnowledgeDocumentEntity::getSource, keyword));
@@ -167,6 +168,9 @@ public class KnowledgeDocumentService {
      */
     public KnowledgeDocumentResponse getById(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
+        if (!queryScope.current().canAccess(entity)) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND, "知识文档不存在: " + id);
+        }
         return toResponse(entity, true);
     }
 

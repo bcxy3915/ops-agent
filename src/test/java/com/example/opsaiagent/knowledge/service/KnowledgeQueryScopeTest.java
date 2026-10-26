@@ -2,6 +2,7 @@ package com.example.opsaiagent.knowledge.service;
 
 import com.example.opsaiagent.knowledge.entity.KnowledgeConflictEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
+import com.example.opsaiagent.rbac.context.UserContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -51,6 +52,23 @@ class KnowledgeQueryScopeTest {
         assertThat(scope.canAccess(doc("t1", "TENANT", "APPROVED", null, "u2"))).isTrue();
         assertThat(scope.canAccess(doc("t1", "PERSONAL", "DRAFT", null, "u1"))).isTrue();
         assertThat(scope.canAccess(doc("t1", "PERSONAL", "DRAFT", null, "u2"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("审核人：可见本部门子树待部门审核与本企业待企业审核文档")
+    void reviewer_canSeePending() {
+        UserContext.set(new UserContext.CurrentUser("u1", "reviewer",
+                Set.of("DEPT_ADMIN"), Set.of("knowledge:review")));
+        try {
+            KnowledgeQueryScope.Scope scope = new KnowledgeQueryScope(null).user("t1", Set.of(5L), "u1");
+
+            assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_DEPT", 5L, "u2"))).isTrue();
+            assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_DEPT", 9L, "u2"))).isFalse();
+            assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_TENANT", null, "u2"))).isTrue();
+            assertThat(scope.canAccess(doc("t2", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
+        } finally {
+            UserContext.clear();
+        }
     }
 
     @Test

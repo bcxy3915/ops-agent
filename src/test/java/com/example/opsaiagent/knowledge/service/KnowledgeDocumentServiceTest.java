@@ -27,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -38,6 +39,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,13 +75,16 @@ class KnowledgeDocumentServiceTest {
     @Mock
     private DeptService deptService;
 
+    @Spy
+    private KnowledgeQueryScope queryScope = new KnowledgeQueryScope(null);
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private KnowledgeDocumentService service;
 
     @BeforeEach
     void setUp() {
         service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorStore, jdbcTemplate, objectMapper,
-                versionService, tenantService, deptService);
+                versionService, tenantService, deptService, queryScope);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 
@@ -210,6 +215,43 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.getById(99L))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("getById：跨租户文档不可见（越权读取拦截）")
+    void getById_crossTenantForbidden() {
+        KnowledgeQueryScope.Scope scope = queryScope.user("t1", Set.of(5L), "alice");
+        when(queryScope.current()).thenReturn(scope);
+
+        KnowledgeDocumentEntity other = doc(9L, "他人私密", "PENDING", "PRIVATE", "内容");
+        other.setTenantId("t2");
+        other.setOwner("bob");
+        other.setVisibility("PERSONAL");
+        when(documentMapper.selectById(9L)).thenReturn(other);
+
+        assertThatThrownBy(() -> service.getById(9L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("getById：本人 PERSONAL 文档可见")
+    void getById_ownPersonalVisible() {
+        KnowledgeQueryScope.Scope scope = queryScope.user("t1", Set.of(5L), "alice");
+        when(queryScope.current()).thenReturn(scope);
+
+        KnowledgeDocumentEntity mine = doc(9L, "我的草稿", "PENDING", "PRIVATE", "内容");
+        mine.setTenantId("t1");
+        mine.setOwner("alice");
+        mine.setVisibility("PERSONAL");
+        when(documentMapper.selectById(9L)).thenReturn(mine);
+        when(chunkMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        KnowledgeDocumentResponse r = service.getById(9L);
+
+        assertThat(r.getId()).isEqualTo(9L);
+        assertThat(r.getOwner()).isEqualTo("alice");
     }
 
     // ==================== upload ====================

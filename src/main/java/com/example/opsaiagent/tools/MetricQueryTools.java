@@ -2,6 +2,7 @@ package com.example.opsaiagent.tools;
 
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.resilience.RestClientFactory;
 import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +20,7 @@ import java.util.Map;
 public class MetricQueryTools {
 
     private final ServiceRegistry serviceRegistry;
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient = RestClientFactory.builder().build();
 
     @Tool(description = "查询指定服务的指定监控指标。常用指标：system.cpu.usage（CPU 使用率）、jvm.memory.used（JVM 内存）、jvm.gc.pause（GC 暂停时间）、http.server.requests（HTTP 请求统计）")
     public String queryMetric(

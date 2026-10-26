@@ -4,6 +4,7 @@ import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.Notifier;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
+import com.example.opsaiagent.resilience.UrlSafetyValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -34,6 +35,7 @@ public class FeishuWebhookNotifier implements Notifier {
         if (webhookUrl == null || webhookUrl.isBlank()) {
             throw new IllegalArgumentException("飞书渠道缺少 webhookUrl 配置");
         }
+        UrlSafetyValidator.assertSafeWebhookUrl(webhookUrl);
         Map<String, Object> body = Map.of(
                 "msg_type", "text",
                 "content", Map.of("text", content.getTitle() + "\n" + content.getContent()));
