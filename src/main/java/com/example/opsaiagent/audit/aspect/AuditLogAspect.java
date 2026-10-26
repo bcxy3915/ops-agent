@@ -3,6 +3,8 @@ package com.example.opsaiagent.audit.aspect;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.rbac.context.DeptContext;
+import com.example.opsaiagent.rbac.context.TenantContext;
 import com.example.opsaiagent.sensitive.util.SensitiveUtil;
 import com.example.opsaiagent.common.util.IpUtils;
 import com.example.opsaiagent.security.util.SecurityUtils;
@@ -66,6 +68,8 @@ public class AuditLogAspect {
 
         // 用户：优先从认证上下文取，登录场景则从参数提取
         entity.setUsername(resolveUsername(joinPoint));
+        entity.setTenantId(TenantContext.get());
+        entity.setDeptId(DeptContext.get());
 
         // HTTP 上下文：通过 RequestContextHolder 从当前线程获取请求对象
         ServletRequestAttributes attributes =

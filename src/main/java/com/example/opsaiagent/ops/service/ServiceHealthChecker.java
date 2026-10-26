@@ -4,6 +4,7 @@ import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.registry.ServiceInfo;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.resilience.RestClientFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -16,7 +17,7 @@ public class ServiceHealthChecker {
 
     private final OpsServiceManager serviceManager;
     private final ServiceRegistry serviceRegistry;
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient = RestClientFactory.builder().build();
 
     /**
      * 立即检查一次指定服务的健康状态，返回最新状态

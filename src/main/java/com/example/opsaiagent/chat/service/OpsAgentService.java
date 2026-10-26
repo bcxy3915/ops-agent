@@ -5,6 +5,7 @@ import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
+import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
@@ -166,6 +167,17 @@ public class OpsAgentService {
      * @return SSE 事件流
      */
     public Flux<ServerSentEvent<String>> askStreamWithCitations(String sessionId, String question) {
+        RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
+        return Flux.defer(() -> {
+            snapshot.restore();
+            return doAskStreamWithCitations(sessionId, question);
+        }).doFinally(signal -> snapshot.clear());
+    }
+
+    /**
+     * 在恢复的请求上下文中构建 SSE 流。
+     */
+    private Flux<ServerSentEvent<String>> doAskStreamWithCitations(String sessionId, String question) {
         // 1. 拿当前用户名
         String username = getCurrentUsername();
 

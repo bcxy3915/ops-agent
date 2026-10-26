@@ -62,6 +62,8 @@ public class KnowledgeCaseService {
     public static final String LAYER_CASE = "CASE";
     /** CASE 文档信任状态 */
     public static final String TRUST_VERIFIED = "VERIFIED";
+    /** CASE 案例可见性：企业 */
+    public static final String VISIBILITY_TENANT = "TENANT";
     /** CASE 文档向量 source 前缀 */
     public static final String CASE_VECTOR_SOURCE_PREFIX = "case:";
 
@@ -75,6 +77,7 @@ public class KnowledgeCaseService {
     private final KnowledgeChunkMapper chunkMapper;
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
+    private final KnowledgeQueryScope queryScope;
 
     /**
      * 分页查询案例列表
@@ -86,7 +89,7 @@ public class KnowledgeCaseService {
     public PageResult<KnowledgeCaseSummaryResponse> list(String status, int page, int size) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
-        LambdaQueryWrapper<KnowledgeCaseEntity> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<KnowledgeCaseEntity> wrapper = queryScope.current().cases();
         if (StringUtils.hasText(status)) {
             wrapper.eq(KnowledgeCaseEntity::getStatus, status);
         }
@@ -134,6 +137,14 @@ public class KnowledgeCaseService {
         requirePending(entity);
         String reviewer = currentReviewer();
         entity.setStatus(STATUS_CONFIRMED);
+        // 历史案例可能缺少归属，确认时按当前上下文补齐，保证沉淀为 TENANT 知识
+        if (!StringUtils.hasText(entity.getTenantId())) {
+            entity.setTenantId(currentTenantId());
+        }
+        if (entity.getDeptId() == null) {
+            entity.setDeptId(SecurityUtils.getCurrentDeptId());
+        }
+        entity.setVisibility(VISIBILITY_TENANT);
         if (!StringUtils.hasText(entity.getRealRootCause())) {
             entity.setRealRootCause(entity.getRootCause());
         }
@@ -224,6 +235,9 @@ public class KnowledgeCaseService {
             entity.setMaskedStatus(MASK_NONE);
             entity.setStatus(STATUS_PENDING);
             entity.setCitedCount(0);
+            entity.setTenantId(currentTenantId());
+            entity.setDeptId(SecurityUtils.getCurrentDeptId());
+            entity.setVisibility(VISIBILITY_TENANT);
             caseMapper.insert(entity);
             generated++;
         }
@@ -274,6 +288,14 @@ public class KnowledgeCaseService {
         doc.setDocType("MARKDOWN");
         doc.setLayer(LAYER_CASE);
         doc.setTrustStatus(TRUST_VERIFIED);
+        doc.setTenantId(entity.getTenantId());
+        doc.setDeptId(entity.getDeptId());
+        doc.setVisibility(VISIBILITY_TENANT);
+        doc.setReviewStatus("APPROVED");
+        doc.setReviewLevel("TENANT");
+        doc.setReviewedBy(entity.getConfirmedBy());
+        doc.setReviewedAt(LocalDateTime.now());
+        doc.setLastReviewAt(LocalDateTime.now());
         doc.setVersion(1);
         doc.setOwner(entity.getConfirmedBy());
         doc.setServiceIds(toJson(List.of(entity.getService())));
@@ -294,25 +316,35 @@ public class KnowledgeCaseService {
         List<Document> chunks = splitter.apply(List.of(new Document(content)));
         List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
         List<Document> vectorDocs = new ArrayList<>();
+        String tenantId = doc.getTenantId() == null ? "" : doc.getTenantId();
+        String deptId = doc.getDeptId() == null ? "" : String.valueOf(doc.getDeptId());
+        String owner = doc.getOwner() == null ? "" : doc.getOwner();
         int ordinal = 1;
         for (Document chunk : chunks) {
             KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
             chunkEntity.setDocId(doc.getId());
+            chunkEntity.setTenantId(doc.getTenantId());
+            chunkEntity.setDeptId(doc.getDeptId());
             chunkEntity.setOrdinal(ordinal);
             chunkEntity.setContent(chunk.getText());
             chunkEntity.setSection(extractSection(chunk.getText(), "MARKDOWN"));
             chunkMapper.insert(chunkEntity);
             chunkEntities.add(chunkEntity);
 
-            Document vectorDoc = new Document(chunk.getText(), Map.of(
-                    "source", CASE_VECTOR_SOURCE_PREFIX + doc.getId(),
-                    "docId", String.valueOf(doc.getId()),
-                    "title", doc.getTitle() == null ? "" : doc.getTitle(),
-                    "layer", doc.getLayer(),
-                    "trustStatus", doc.getTrustStatus(),
-                    "ordinal", String.valueOf(ordinal),
-                    "chunkId", String.valueOf(chunkEntity.getId())
-            ));
+            java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+            metadata.put("source", CASE_VECTOR_SOURCE_PREFIX + doc.getId());
+            metadata.put("docId", String.valueOf(doc.getId()));
+            metadata.put("title", doc.getTitle() == null ? "" : doc.getTitle());
+            metadata.put("layer", doc.getLayer());
+            metadata.put("trustStatus", doc.getTrustStatus());
+            metadata.put("tenantId", tenantId);
+            metadata.put("deptId", deptId);
+            metadata.put("visibility", VISIBILITY_TENANT);
+            metadata.put("reviewStatus", "APPROVED");
+            metadata.put("owner", owner);
+            metadata.put("ordinal", String.valueOf(ordinal));
+            metadata.put("chunkId", String.valueOf(chunkEntity.getId()));
+            Document vectorDoc = new Document(chunk.getText(), metadata);
             vectorDocs.add(vectorDoc);
             ordinal++;
         }
@@ -352,6 +384,9 @@ public class KnowledgeCaseService {
     private KnowledgeCaseSummaryResponse toSummary(KnowledgeCaseEntity entity) {
         return KnowledgeCaseSummaryResponse.builder()
                 .id(entity.getId())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
+                .visibility(entity.getVisibility())
                 .sourceAlertId(entity.getSourceAlertId())
                 .diagnosisRecordId(entity.getDiagnosisRecordId())
                 .service(entity.getService())
@@ -375,6 +410,9 @@ public class KnowledgeCaseService {
                                                  FailureSnapshotEntity snapshot) {
         return KnowledgeCaseDetailResponse.builder()
                 .id(entity.getId())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
+                .visibility(entity.getVisibility())
                 .sourceAlertId(entity.getSourceAlertId())
                 .diagnosisRecordId(entity.getDiagnosisRecordId())
                 .service(entity.getService())
@@ -555,10 +593,15 @@ public class KnowledgeCaseService {
 
     private KnowledgeCaseEntity requireCase(Long id) {
         KnowledgeCaseEntity entity = caseMapper.selectById(id);
-        if (entity == null) {
+        if (entity == null || !queryScope.current().canAccess(entity)) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_CASE_NOT_FOUND, "故障案例不存在: " + id);
         }
         return entity;
+    }
+
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return StringUtils.hasText(tenantId) ? tenantId : "t-default";
     }
 
     private void requirePending(KnowledgeCaseEntity entity) {

@@ -23,6 +23,10 @@ public class AlertRuleEscalationLevelEntity {
     @TableField("rule_id")
     private Long ruleId;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
     /** 级别（1..N，同一规则内唯一） */
     @TableField("level_no")
     private Integer levelNo;

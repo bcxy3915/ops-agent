@@ -7,6 +7,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Schema(description = "创建用户请求")
 public class UserCreateRequest {
@@ -26,10 +28,19 @@ public class UserCreateRequest {
     @Size(min = 6, max = 64, message = "密码长度 6-64 位")
     private String password;
 
-    @Schema(description = "角色", example = "OPERATOR", allowableValues = {"ADMIN", "OPERATOR", "VIEWER"}, requiredMode = Schema.RequiredMode.REQUIRED)
-    @NotBlank(message = "角色不能为空")
-    @Pattern(regexp = "ADMIN|OPERATOR|VIEWER", message = "角色必须是 ADMIN/OPERATOR/VIEWER")
+    @Schema(description = "历史角色；未传 roleIds 时用于映射新角色",
+            allowableValues = {"ADMIN", "OPERATOR", "VIEWER"})
+    @Pattern(regexp = "ADMIN|OPERATOR|VIEWER", message = "角色必须为 ADMIN/OPERATOR/VIEWER")
     private String role;
+
+    @Schema(description = "租户 ID；平台管理员创建时使用，企业用户可空")
+    private String tenantId;
+
+    @Schema(description = "部门 ID；为空时使用当前登录用户部门")
+    private Long deptId;
+
+    @Schema(description = "新角色 ID 列表；优先于 role")
+    private List<Long> roleIds;
 
     @Schema(description = "手机号", example = "13812345678")
     @Pattern(regexp = "^$|^1[3-9]\\d{9}$", message = "手机号格式不正确")

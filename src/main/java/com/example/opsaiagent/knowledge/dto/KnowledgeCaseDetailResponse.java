@@ -19,6 +19,9 @@ import java.util.List;
 public class KnowledgeCaseDetailResponse {
 
     private Long id;
+    private String tenantId;
+    private Long deptId;
+    private String visibility;
     private Long sourceAlertId;
     private Long diagnosisRecordId;
     private String service;

@@ -1,20 +1,24 @@
 package com.example.opsaiagent.controller;
 
 import com.example.opsaiagent.common.api.ApiResponse;
+import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.ops.controller.ServiceController;
 import com.example.opsaiagent.ops.dto.ServiceRegisterRequest;
 import com.example.opsaiagent.ops.dto.ServiceResponse;
 import com.example.opsaiagent.ops.dto.ServiceUpdateRequest;
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
-import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.ops.service.OpsServiceManager;
 import com.example.opsaiagent.ops.service.ServiceHealthChecker;
+import com.example.opsaiagent.rbac.entity.DeptEntity;
+import com.example.opsaiagent.rbac.service.DeptService;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -25,6 +29,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +46,9 @@ class ServiceControllerTest {
 
     @Mock
     private ServiceHealthChecker healthChecker;
+
+    @Mock
+    private DeptService deptService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -188,6 +197,7 @@ class ServiceControllerTest {
     @Test
     @DisplayName("健康检查：返回状态")
     void check() {
+        when(serviceManager.findByName("svc-a")).thenReturn(Optional.of(entity("svc-a")));
         when(healthChecker.checkNow("svc-a")).thenReturn("UP");
 
         ApiResponse<Map<String, Object>> result = controller.check("svc-a");
@@ -195,5 +205,55 @@ class ServiceControllerTest {
         assertThat(result.getData())
                 .containsEntry("name", "svc-a")
                 .containsEntry("status", "UP");
+    }
+
+    // ==================== P2 租户/部门归属 ====================
+
+    @Test
+    @DisplayName("P2 注册服务：写入当前租户与部门")
+    void register_withTenantAndDept() {
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(1L);
+            when(serviceManager.findByName("t1", "todo-service")).thenReturn(Optional.empty());
+            when(deptService.requireDept("t1", 1L)).thenReturn(new DeptEntity());
+
+            ServiceRegisterRequest req = new ServiceRegisterRequest();
+            req.setName("todo-service");
+            req.setBaseUrl("http://todo-service:8080");
+
+            controller.register(req);
+
+            verify(serviceManager).save(argThat(entity ->
+                    "t1".equals(entity.getTenantId()) && Long.valueOf(1L).equals(entity.getDeptId())));
+        }
+    }
+
+    @Test
+    @DisplayName("P2 列表：按当前租户 + 部门子树过滤")
+    void list_scopedByTenantAndDept() {
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(1L);
+            when(deptService.subtreeIds("t1", 1L)).thenReturn(List.of(1L, 2L));
+            when(serviceManager.listScoped("t1", List.of(1L, 2L), null, null))
+                    .thenReturn(List.of(entity("svc-a")));
+
+            ApiResponse<List<ServiceResponse>> result = controller.list(null, null, null, null);
+
+            assertThat(result.getData()).hasSize(1);
+        }
+    }
+
+    @Test
+    @DisplayName("P2 查询：跨租户服务不可见")
+    void get_crossTenant_notFound() {
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            when(serviceManager.findByName("t1", "unknown")).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> controller.get("unknown"))
+                    .isInstanceOf(BusinessException.class);
+        }
     }
 }

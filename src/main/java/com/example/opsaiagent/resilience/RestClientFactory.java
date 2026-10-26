@@ -22,9 +22,19 @@ public final class RestClientFactory {
      * 使用指定容错配置创建 RestClient.Builder（超时从配置读取）
      */
     public static RestClient.Builder builder(ResilienceProperties properties) {
+        return RestClient.builder().requestFactory(requestFactory(properties));
+    }
+
+    /**
+     * 按容错配置创建带超时的请求工厂。
+     *
+     * @param properties 容错配置
+     * @return 请求工厂
+     */
+    public static SimpleClientHttpRequestFactory requestFactory(ResilienceProperties properties) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.getConnectTimeoutMs());
         requestFactory.setReadTimeout(properties.getReadTimeoutMs());
-        return RestClient.builder().requestFactory(requestFactory);
+        return requestFactory;
     }
 }

@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.audit.dto.AuditLogResponse;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.mapper.AuditLogMapper;
+import com.example.opsaiagent.audit.service.AuditQueryScope;
 import com.example.opsaiagent.common.api.ApiResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
@@ -32,6 +34,9 @@ class AuditLogControllerTest {
 
     @Mock
     private AuditLogMapper auditLogMapper;
+
+    @Spy
+    private AuditQueryScope auditQueryScope = new AuditQueryScope(null);
 
     @InjectMocks
     private AuditLogController controller;

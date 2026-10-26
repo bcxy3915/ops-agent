@@ -19,9 +19,17 @@ public class AlertRuleEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 规则名称（唯一） */
+    /** 规则名称（租户内唯一） */
     @TableField("name")
     private String name;
+
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
 
     /** 规则描述 */
     @TableField("description")

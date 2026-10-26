@@ -12,12 +12,10 @@ import java.util.function.Supplier;
 
 /**
  * 第三方调用容错支持（编程式 Resilience4j）。
- * <p>
+ *
  * 提供按调用名隔离的熔断器 + 重试组合执行：
- * <ul>
- *   <li>重试：网络抖动 / 瞬时 5xx 时自动重试</li>
- *   <li>熔断：持续失败达到阈值后快速失败，避免雪崩</li>
- * </ul>
+ *   重试：网络抖动 / 瞬时 5xx 时自动重试
+ *   熔断：持续失败达到阈值后快速失败，避免雪崩
  * 失败时异常向上抛出，由调用方降级。
  */
 public final class ResilienceSupport {

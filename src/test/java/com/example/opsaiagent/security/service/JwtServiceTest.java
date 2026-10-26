@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -39,6 +41,19 @@ class JwtServiceTest {
         assertThat(claims.getSubject()).isEqualTo("admin");
         assertThat(claims.getIssuer()).isEqualTo(ISSUER);
         assertThat(claims.get("role", String.class)).isEqualTo("ADMIN");
+    }
+
+    @Test
+    @DisplayName("generateToken：写入 userId/tenantId/deptId/roles")
+    void generateToken_withTenantClaims() {
+        String token = jwtService.generateToken("zhangwei", "DEPT_ADMIN", "u-1",
+                "t-default", 5L, List.of("DEPT_ADMIN", "VIEWER"));
+
+        Claims claims = jwtService.parseToken(token);
+        assertThat(claims.get("userId", String.class)).isEqualTo("u-1");
+        assertThat(claims.get("tenantId", String.class)).isEqualTo("t-default");
+        assertThat(((Number) claims.get("deptId")).longValue()).isEqualTo(5L);
+        assertThat(claims.get("roles", List.class)).containsExactly("DEPT_ADMIN", "VIEWER");
     }
 
     // ==================== extractUsername / extractRole ====================
@@ -92,6 +107,15 @@ class JwtServiceTest {
         assertThat(jwtService.isValid("")).isFalse();
         assertThat(jwtService.isValid("abc")).isFalse();
         assertThat(jwtService.isValid(null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("isValid：issuer 不匹配返回 false")
+    void isValid_issuerMismatch() {
+        String token = jwtService.generateToken("admin", "ADMIN");
+        JwtService other = new JwtService(SECRET, EXPIRATION, "other-issuer");
+
+        assertThat(other.isValid(token)).isFalse();
     }
 
     // ==================== 过期 ====================

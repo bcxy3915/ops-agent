@@ -259,6 +259,11 @@ class DocumentLoaderTest {
         org.springframework.ai.document.Document d = (org.springframework.ai.document.Document) docs.get(0);
         assertThat(d.getMetadata()).containsEntry("source", "test.md");
         assertThat(d.getMetadata()).containsEntry(DocumentLoader.HASH_METADATA_KEY, hash);
+        assertThat(d.getMetadata())
+                .containsEntry("tenantId", "0")
+                .containsEntry("visibility", "PUBLIC")
+                .containsEntry("reviewStatus", "APPROVED")
+                .containsEntry("owner", "system");
     }
 
     @Test

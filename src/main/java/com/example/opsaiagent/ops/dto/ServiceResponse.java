@@ -21,6 +21,12 @@ public class ServiceResponse {
     @Schema(description = "服务名", example = "todo-service")
     private String name;
 
+    @Schema(description = "租户 ID")
+    private String tenantId;
+
+    @Schema(description = "部门 ID")
+    private Long deptId;
+
     @Schema(description = "基础地址", example = "http://localhost:8081")
     private String baseUrl;
 

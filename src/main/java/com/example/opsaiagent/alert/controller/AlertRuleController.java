@@ -39,6 +39,7 @@ public class AlertRuleController {
     private final AlertRuleService alertRuleService;
 
     @Operation(summary = "查询告警规则列表", description = "可按服务 / 启用状态过滤。所有角色可访问")
+    @PreAuthorize("hasAuthority('alert:read')")
     @GetMapping
     public ApiResponse<List<AlertRuleResponse>> list(
             @RequestParam(required = false) String service,
@@ -47,18 +48,18 @@ public class AlertRuleController {
                 alertRuleService.list(service, enabled).stream().map(this::toResponse).toList());
     }
 
-    @Operation(summary = "创建告警规则", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "创建告警规则", description = "需要 alert:manage")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:manage')")
     @AuditLog(operation = "CREATE_ALERT_RULE", description = "创建告警规则")
     @PostMapping
     public ApiResponse<AlertRuleResponse> create(@Valid @RequestBody AlertRuleRequest request) {
         return ApiResponse.success(toResponse(alertRuleService.create(request)));
     }
 
-    @Operation(summary = "更新告警规则", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "更新告警规则", description = "需要 alert:manage")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:manage')")
     @AuditLog(operation = "UPDATE_ALERT_RULE", description = "更新告警规则")
     @PutMapping("/{id}")
     public ApiResponse<AlertRuleResponse> update(@PathVariable Long id,
@@ -66,9 +67,9 @@ public class AlertRuleController {
         return ApiResponse.success(toResponse(alertRuleService.update(id, request)));
     }
 
-    @Operation(summary = "启用 / 停用告警规则", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "启用 / 停用告警规则", description = "需要 alert:manage")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('alert:manage')")
     @AuditLog(operation = "TOGGLE_ALERT_RULE", description = "切换告警规则启停")
     @PutMapping("/{id}/enabled")
     public ApiResponse<AlertRuleResponse> setEnabled(@PathVariable Long id,
@@ -77,9 +78,9 @@ public class AlertRuleController {
         return ApiResponse.success(toResponse(alertRuleService.setEnabled(id, enabled)));
     }
 
-    @Operation(summary = "删除告警规则", description = "需要 ADMIN 角色")
+    @Operation(summary = "删除告警规则", description = "需要 alert:manage")
     @RateLimit(key = "alertWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('alert:manage')")
     @AuditLog(operation = "DELETE_ALERT_RULE", description = "删除告警规则")
     @DeleteMapping("/{id}")
     public ApiResponse<Map<String, Object>> delete(@PathVariable Long id) {

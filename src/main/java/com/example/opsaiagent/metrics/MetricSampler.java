@@ -60,13 +60,13 @@ public class MetricSampler {
         List<ServiceInfo> services = serviceRegistry.listAll();
         if (services.isEmpty()) return;
 
-        for (ServiceInfo service : services) {
+        services.parallelStream().forEach(service -> {
             try {
                 sampleService(service);
             } catch (Exception e) {
                 log.warn("采样服务失败: {} - {}", service.getName(), e.getMessage());
             }
-        }
+        });
     }
 
     /**
@@ -148,7 +148,7 @@ public class MetricSampler {
         points.put("threadCount", (double) threadCount);
         points.put("gcPause", gcPause);
         points.put("hikariActive", (double) hikariActiveVal);
-        metricSampleStore.saveBatch(name, now, points);
+        metricSampleStore.saveBatch(service.getTenantId(), name, now, points);
 
         // 4. 存储时序点
         appendPoint(name, "cpu", now, cpu);

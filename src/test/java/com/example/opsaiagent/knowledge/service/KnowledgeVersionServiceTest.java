@@ -4,6 +4,7 @@ import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeVersionResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeVersionMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,11 +33,14 @@ class KnowledgeVersionServiceTest {
     @Mock
     private KnowledgeVersionMapper versionMapper;
 
+    @Mock
+    private KnowledgeDocumentMapper documentMapper;
+
     private KnowledgeVersionService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeVersionService(versionMapper);
+        service = new KnowledgeVersionService(versionMapper, documentMapper, new KnowledgeQueryScope(null));
     }
 
     private KnowledgeDocumentVersionEntity version(Long id, Long docId, int v, String content, String reason) {

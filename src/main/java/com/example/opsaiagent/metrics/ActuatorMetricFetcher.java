@@ -1,5 +1,6 @@
 package com.example.opsaiagent.metrics;
 
+import com.example.opsaiagent.resilience.RestClientFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,7 @@ import org.springframework.web.client.RestClient;
 public class ActuatorMetricFetcher {
 
     private final ObjectMapper objectMapper;
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient = RestClientFactory.builder().build();
 
     /**
      * 从服务的 Actuator 拉取单个指标

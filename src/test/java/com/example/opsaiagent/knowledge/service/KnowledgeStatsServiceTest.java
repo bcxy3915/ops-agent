@@ -70,7 +70,8 @@ class KnowledgeStatsServiceTest {
     void setUp() {
         // 手动构造：ObjectMapper 无需 mock，用真实实例
         service = new KnowledgeStatsService(
-                documentMapper, caseMapper, hitLogMapper, conflictMapper, serviceMapper, new ObjectMapper());
+                documentMapper, caseMapper, hitLogMapper, conflictMapper, serviceMapper, new ObjectMapper(),
+                new KnowledgeQueryScope(null));
     }
 
     private OpsServiceEntity service(String name) {

@@ -16,6 +16,8 @@ public class KnowledgeChunkResponse {
 
     private Long id;
     private Long docId;
+    private String tenantId;
+    private Long deptId;
     private Integer ordinal;
     private String content;
     private String section;

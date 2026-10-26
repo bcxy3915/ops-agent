@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -156,5 +157,41 @@ class OpsServiceManagerTest {
         manager.update(service("a"));
 
         verify(mapper).updateById(any(OpsServiceEntity.class));
+    }
+
+    // ==================== P2 租户/部门 ====================
+
+    @Test
+    @DisplayName("listScoped：按租户/部门/环境/状态过滤")
+    void listScoped() {
+        when(mapper.selectList(any())).thenReturn(List.of(service("a")));
+
+        List<OpsServiceEntity> result = manager.listScoped(
+                "t1", List.of(1L, 2L), "prod", "UP");
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("listScoped：部门范围为空时直接返回空")
+    void listScoped_emptyDept() {
+        assertThat(manager.listScoped("t1", List.of(), null, null)).isEmpty();
+        verifyNoInteractions(mapper);
+    }
+
+    @Test
+    @DisplayName("findByName：按租户查询")
+    void findByName_tenant() {
+        when(mapper.selectOne(any())).thenReturn(service("a"));
+
+        assertThat(manager.findByName("t1", "a")).isPresent();
+    }
+
+    @Test
+    @DisplayName("deleteByName：按租户删除")
+    void deleteByName_tenant() {
+        when(mapper.delete(any())).thenReturn(1);
+
+        assertThat(manager.deleteByName("t1", "a")).isTrue();
     }
 }

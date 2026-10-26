@@ -20,9 +20,17 @@ public class OncallMemberEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 值班人用户 ID（对应用户表主键） */
+    /** 值班人用户 ID（对应 ops_user.id，VARCHAR(32)） */
     @TableField("user_id")
-    private Long userId;
+    private String userId;
+
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
 
     /** 值班角色：PRIMARY（主值班）/ BACKUP（备值班） */
     @TableField("duty_role")

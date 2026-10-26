@@ -12,12 +12,14 @@ import com.example.opsaiagent.maintenance.service.MaintenanceWindowService;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.notification.service.NotificationCenter;
+import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.service.FailureSnapshotService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -70,7 +72,8 @@ public class AlertEvaluator {
         long now = System.currentTimeMillis();
         for (AlertRuleEntity rule : rules) {
             try {
-                evaluateRule(rule, now);
+                RbacContextSnapshot.forTenant(rule.getTenantId())
+                        .run(() -> evaluateRule(rule, now));
             } catch (Exception e) {
                 log.warn("告警评估失败 rule={}: {}", rule.getId(), e.getMessage());
             }
@@ -95,7 +98,8 @@ public class AlertEvaluator {
                         .last("LIMIT 200"));
         for (AlertEventEntity event : suppressed) {
             try {
-                restoreMaintenanceEvent(event);
+                RbacContextSnapshot.forTenant(event.getTenantId())
+                        .run(() -> restoreMaintenanceEvent(event));
             } catch (Exception e) {
                 log.warn("维护窗口告警恢复失败 eventId={}: {}", event.getId(), e.getMessage(), e);
             }
@@ -117,8 +121,7 @@ public class AlertEvaluator {
             eventMapper.updateById(event);
             return;
         }
-        MetricPoint latest = metricSampleStore.queryLatest(rule.getService(), rule.getMetric(),
-                System.currentTimeMillis());
+        MetricPoint latest = latest(rule, rule.getService(), rule.getMetric(), System.currentTimeMillis());
         if (latest == null || !isHit(rule, latest.getValue(), System.currentTimeMillis())) {
             event.setStatus(AlertEventStatus.RESOLVED.name());
             event.setResolvedAt(now);
@@ -139,7 +142,7 @@ public class AlertEvaluator {
      */
     void evaluateRule(AlertRuleEntity rule, long nowMs) {
         String service = rule.getService();
-        MetricPoint latest = metricSampleStore.queryLatest(service, rule.getMetric(), nowMs);
+        MetricPoint latest = latest(rule, service, rule.getMetric(), nowMs);
         if (latest == null) {
             // 无数据：无法评估，清除持续状态并尝试恢复（数据断流视为恢复）
             clearSustained(rule.getId());
@@ -160,7 +163,10 @@ public class AlertEvaluator {
                 return;
             }
             // 维护窗口：命中但服务处于维护窗口 → 以维护静默落库，不通知不升级（P1 规格 5）
-            if (maintenanceWindowService.isServiceInWindow(service, LocalDateTime.now())) {
+            boolean inMaintenance = rule.getTenantId() == null
+                    ? maintenanceWindowService.isServiceInWindow(service, LocalDateTime.now())
+                    : maintenanceWindowService.isServiceInWindow(rule.getTenantId(), service, LocalDateTime.now());
+            if (inMaintenance) {
                 recordMaintenanceSuppressed(rule, value, nowMs);
                 return;
             }
@@ -232,7 +238,7 @@ public class AlertEvaluator {
     private boolean hitYoy(AlertRuleEntity rule, double value, long nowMs) {
         // 基线 = 24 小时前窗口内最近一次采样
         long baselineEnd = nowMs - 24 * 60 * 60 * 1000L;
-        MetricPoint baseline = metricSampleStore.queryLatest(rule.getService(), rule.getMetric(), baselineEnd);
+        MetricPoint baseline = latest(rule, rule.getService(), rule.getMetric(), baselineEnd);
         if (baseline == null || Math.abs(baseline.getValue()) < 1e-9) {
             return false;
         }
@@ -242,8 +248,8 @@ public class AlertEvaluator {
     }
 
     private boolean hitSigma(AlertRuleEntity rule, double value, long nowMs) {
-        List<MetricPoint> points = metricSampleStore.query(
-                rule.getService(), rule.getMetric(), nowMs - SIGMA_WINDOW_MS, nowMs);
+        List<MetricPoint> points = history(rule, rule.getService(), rule.getMetric(),
+                nowMs - SIGMA_WINDOW_MS, nowMs);
         if (points.size() < 5) {
             return false; // 样本不足不评估
         }
@@ -258,6 +264,25 @@ public class AlertEvaluator {
         double z = (value - mean) / std;
         boolean gt = "gt".equalsIgnoreCase(rule.getOperator());
         return gt ? z > rule.getThreshold() : z < -rule.getThreshold();
+    }
+
+    /**
+     * 按规则租户查询最新采样；租户为空时保持旧全局查询，兼容存量数据。
+     */
+    private MetricPoint latest(AlertRuleEntity rule, String service, String metric, long endMs) {
+        return StringUtils.hasText(rule.getTenantId())
+                ? metricSampleStore.queryLatest(rule.getTenantId(), service, metric, endMs)
+                : metricSampleStore.queryLatest(service, metric, endMs);
+    }
+
+    /**
+     * 按规则租户查询历史采样；租户为空时保持旧全局查询。
+     */
+    private List<MetricPoint> history(AlertRuleEntity rule, String service, String metric,
+                                      long startMs, long endMs) {
+        return StringUtils.hasText(rule.getTenantId())
+                ? metricSampleStore.query(rule.getTenantId(), service, metric, startMs, endMs)
+                : metricSampleStore.query(service, metric, startMs, endMs);
     }
 
     private Long findFiringId(Long ruleId) {
@@ -291,6 +316,8 @@ public class AlertEvaluator {
                              AlertEventStatus status, String detail) {
         AlertEventEntity event = new AlertEventEntity();
         event.setRuleId(rule.getId());
+        event.setTenantId(rule.getTenantId());
+        event.setDeptId(rule.getDeptId());
         event.setRuleName(rule.getName());
         event.setService(rule.getService());
         event.setMetric(rule.getMetric());
@@ -313,6 +340,8 @@ public class AlertEvaluator {
     private AlertEventEntity recordMaintenanceSuppressed(AlertRuleEntity rule, double value, long nowMs) {
         AlertEventEntity event = new AlertEventEntity();
         event.setRuleId(rule.getId());
+        event.setTenantId(rule.getTenantId());
+        event.setDeptId(rule.getDeptId());
         event.setRuleName(rule.getName());
         event.setService(rule.getService());
         event.setMetric(rule.getMetric());

@@ -72,7 +72,8 @@ class KnowledgeCaseServiceTest {
     @BeforeEach
     void setUp() {
         service = new KnowledgeCaseService(caseMapper, diagnosisRecordMapper, alertEventMapper,
-                failureSnapshotMapper, documentMapper, chunkMapper, vectorStore, objectMapper);
+                failureSnapshotMapper, documentMapper, chunkMapper, vectorStore, objectMapper,
+                new KnowledgeQueryScope(null));
     }
 
     private KnowledgeCaseEntity pendingCase() {
@@ -291,6 +292,8 @@ class KnowledgeCaseServiceTest {
             assertThat(e.getConfirmedBy()).isEqualTo("system");
             assertThat(e.getClosedLoopAt()).isNotNull();
             assertThat(e.getMaskedStatus()).isEqualTo("NONE");
+            assertThat(e.getTenantId()).isEqualTo("t-default");
+            assertThat(e.getVisibility()).isEqualTo("TENANT");
             verify(caseMapper).updateById(e);
             verify(documentMapper).insert(any(KnowledgeDocumentEntity.class));
             verify(chunkMapper, org.mockito.Mockito.atLeastOnce()).insert(any(KnowledgeChunkEntity.class));
@@ -487,6 +490,8 @@ class KnowledgeCaseServiceTest {
             assertThat(first.getStatus()).isEqualTo("PENDING");
             assertThat(first.getMaskedStatus()).isEqualTo("NONE");
             assertThat(first.getCitedCount()).isZero();
+            assertThat(first.getTenantId()).isEqualTo("t-default");
+            assertThat(first.getVisibility()).isEqualTo("TENANT");
         }
 
         @Test

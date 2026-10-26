@@ -58,6 +58,79 @@ public class OpsServiceManager {
     }
 
     /**
+     * 按租户 + 部门子树 + 环境/状态查询服务。
+     *
+     * @param tenantId 租户 ID；为空不限制（平台视角）
+     * @param deptIds  可见部门 ID；null=不限制，空列表=无可见部门
+     * @param env      环境；为空不限制
+     * @param status   状态；为空不限制
+     * @return 服务列表
+     */
+    public List<OpsServiceEntity> listScoped(String tenantId, List<Long> deptIds,
+                                             String env, String status) {
+        if (deptIds != null && deptIds.isEmpty()) {
+            return List.of();
+        }
+        LambdaQueryWrapper<OpsServiceEntity> wrapper = new LambdaQueryWrapper<>();
+        if (tenantId != null && !tenantId.isBlank()) {
+            wrapper.eq(OpsServiceEntity::getTenantId, tenantId);
+        }
+        if (deptIds != null) {
+            wrapper.in(OpsServiceEntity::getDeptId, deptIds);
+        }
+        if (env != null && !env.isBlank()) {
+            wrapper.eq(OpsServiceEntity::getEnv, env);
+        }
+        if (status != null && !status.isBlank()) {
+            wrapper.eq(OpsServiceEntity::getStatus, status);
+        }
+        wrapper.orderByAsc(OpsServiceEntity::getName);
+        return mapper.selectList(wrapper);
+    }
+
+    /**
+     * 按租户查询服务。
+     *
+     * @param tenantId 租户 ID
+     * @return 服务列表
+     */
+    public List<OpsServiceEntity> listByTenant(String tenantId) {
+        return listScoped(tenantId, null, null, null);
+    }
+
+    /**
+     * 按租户 + 服务名查询（租户内服务名唯一）。
+     *
+     * @param tenantId 租户 ID；为空时退化为全局查询
+     * @param name     服务名
+     * @return 服务实体
+     */
+    public Optional<OpsServiceEntity> findByName(String tenantId, String name) {
+        LambdaQueryWrapper<OpsServiceEntity> wrapper = new LambdaQueryWrapper<OpsServiceEntity>()
+                .eq(OpsServiceEntity::getName, name);
+        if (tenantId != null && !tenantId.isBlank()) {
+            wrapper.eq(OpsServiceEntity::getTenantId, tenantId);
+        }
+        return Optional.ofNullable(mapper.selectOne(wrapper));
+    }
+
+    /**
+     * 按租户 + 服务名删除。
+     *
+     * @param tenantId 租户 ID；为空时退化为全局删除
+     * @param name     服务名
+     * @return 是否删除成功
+     */
+    public boolean deleteByName(String tenantId, String name) {
+        LambdaQueryWrapper<OpsServiceEntity> wrapper = new LambdaQueryWrapper<OpsServiceEntity>()
+                .eq(OpsServiceEntity::getName, name);
+        if (tenantId != null && !tenantId.isBlank()) {
+            wrapper.eq(OpsServiceEntity::getTenantId, tenantId);
+        }
+        return mapper.delete(wrapper) > 0;
+    }
+
+    /**
      * 保存或更新（name 已存在则更新）
      * @param entity 服务实体
      */

@@ -47,6 +47,7 @@ class MetricSamplerTest {
     private ServiceInfo svc(String name) {
         ServiceInfo info = new ServiceInfo();
         info.setName(name);
+        info.setTenantId("t-default");
         info.setBaseUrl("http://" + name + ":8080");
         info.setHealthPath("/actuator/health");
         return info;
@@ -100,7 +101,7 @@ class MetricSamplerTest {
         assertThat(snapshot.getHikariPending()).isEqualTo(1);
 
         // 落库 5 个指标
-        verify(metricSampleStore).saveBatch(eq("svc-a"), anyLong(), anyMap());
+        verify(metricSampleStore).saveBatch(eq("t-default"), eq("svc-a"), anyLong(), anyMap());
     }
 
     @Test
@@ -126,7 +127,8 @@ class MetricSamplerTest {
         when(serviceRegistry.listAll()).thenReturn(List.of(service));
         when(fetcher.fetch(anyString(), anyString()))
                 .thenReturn(new ActuatorMetricFetcher.MetricValue(0.5, 0, 0, 0));
-        doThrow(new RuntimeException("db down")).when(metricSampleStore).saveBatch(anyString(), anyLong(), anyMap());
+        doThrow(new RuntimeException("db down")).when(metricSampleStore)
+                .saveBatch(anyString(), anyString(), anyLong(), anyMap());
 
         sampler.sample();
 
@@ -146,11 +148,11 @@ class MetricSamplerTest {
         long now = System.currentTimeMillis();
         sampler.sample();
 
-        List<MetricPoint> inRange = sampler.getHistory("svc-a", "cpu", now - 1, now + 1);
+        List<MetricPoint> inRange = sampler.getHistory("svc-a", "cpu", now - 1000, now + 10_000);
         assertThat(inRange).hasSize(1);
         assertThat(inRange.get(0).getValue()).isEqualTo(0.5);
 
-        List<MetricPoint> outRange = sampler.getHistory("svc-a", "cpu", now + 10, now + 100);
+        List<MetricPoint> outRange = sampler.getHistory("svc-a", "cpu", now + 20_000, now + 30_000);
         assertThat(outRange).isEmpty();
     }
 

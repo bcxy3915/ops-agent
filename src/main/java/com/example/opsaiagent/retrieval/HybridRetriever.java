@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval;
 
+import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
 import com.example.opsaiagent.retrieval.rerank.RerankerClient;
 import lombok.RequiredArgsConstructor;
@@ -25,26 +26,39 @@ public class HybridRetriever {
     private final KeywordRetriever keywordRetriever;
     private final RrfFuser rrfFuser;
     private final RerankerClient rerankerClient;
+    private final DataScope dataScope;
 
     /**
-     * 混合检索
+     * 混合检索（使用当前请求的数据范围）
      * @param query 查询文本
      * @param topK 返回结果数量
      * @return 检索结果
      */
     public List<Document> retrieve(String query, int topK) {
+        return retrieve(query, topK, RetrievalScope.current(dataScope));
+    }
+
+    /**
+     * 混合检索
+     * @param query 查询文本
+     * @param topK 返回结果数量
+     * @param scope 数据范围
+     * @return 检索结果
+     */
+    public List<Document> retrieve(String query, int topK, RetrievalScope scope) {
+        RetrievalScope effective = scope == null ? RetrievalScope.publicOnly() : scope;
         // 1. 双路召回
         // 向量检索
         List<Document> vectorResults = new ArrayList<>();
         try {
-            vectorResults = vectorSearch(query, 20);
+            vectorResults = vectorSearch(query, 20, effective);
         } catch (Exception e) {
             // 降级策略：不抛出异常，向量结果为空，后续依赖 BM25
             log.warn("向量检索失败（可能网络问题或 API 限流），降级为仅使用 BM25。错误: {}", e.getMessage());
         }
 
         // BM25 检索
-        List<Document> bm25Results = keywordRetriever.search(query, 20);
+        List<Document> bm25Results = keywordRetriever.search(query, 20, effective);
         log.info("混合检索: 向量命中 {} 个, BM25 命中 {} 个", vectorResults.size(), bm25Results.size());
         if (vectorResults.isEmpty()) {
             return bm25Results.stream().limit(topK).toList();
@@ -65,15 +79,17 @@ public class HybridRetriever {
      * 向量检索
      * @param query 查询文本
      * @param topK 返回结果数量
+     * @param scope 数据范围
      * @return 检索结果
      */
-    private List<Document> vectorSearch(String query, int topK) {
+    private List<Document> vectorSearch(String query, int topK, RetrievalScope scope) {
         try {
             return vectorStore.similaritySearch(
                     SearchRequest.builder()
                             .query(query)
                             .topK(topK)
                             .similarityThreshold(0.5)
+                            .filterExpression(scope.filterExpression())
                             .build()
             );
         } catch (Exception e) {

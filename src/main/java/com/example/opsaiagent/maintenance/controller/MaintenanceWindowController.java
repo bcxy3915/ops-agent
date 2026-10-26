@@ -23,12 +23,12 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/maintenance/windows")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('maintenance:manage')")
 public class MaintenanceWindowController {
 
     private final MaintenanceWindowService windowService;
 
-    @Operation(summary = "创建维护窗口", description = "多选服务 + 原因 + 到期时间；内部对存量告警批量静默。需 ADMIN / OPERATOR")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @Operation(summary = "创建维护窗口", description = "多选服务 + 原因 + 到期时间；内部对存量告警批量静默。需 maintenance:manage")
     @AuditLog(operation = "CREATE_MAINTENANCE_WINDOW", description = "创建维护窗口")
     @PostMapping
     public ApiResponse<List<MaintenanceWindowResponse>> create(@Valid @RequestBody MaintenanceWindowCreateRequest request) {
@@ -42,8 +42,7 @@ public class MaintenanceWindowController {
         return ApiResponse.success(windowService.list(activeOnly));
     }
 
-    @Operation(summary = "提前结束维护窗口", description = "结束窗口；压制告警由到期恢复逻辑重新评估。需 ADMIN / OPERATOR")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @Operation(summary = "提前结束维护窗口", description = "结束窗口；压制告警由到期恢复逻辑重新评估。需 maintenance:manage")
     @AuditLog(operation = "END_MAINTENANCE_WINDOW", description = "提前结束维护窗口")
     @DeleteMapping("/{id}")
     public ApiResponse<MaintenanceWindowResponse> end(@PathVariable Long id) {

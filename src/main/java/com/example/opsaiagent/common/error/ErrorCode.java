@@ -33,7 +33,18 @@ public enum ErrorCode {
     USER_NOT_FOUND(1024, "用户不存在"),
     USER_OPERATION_FORBIDDEN(1025, "禁止对该用户执行该操作"),
     ALERT_EVENT_INVALID(1026, "告警事件操作非法"),
-    MAINTENANCE_WINDOW_NOT_FOUND(1027, "维护窗口不存在");
+    MAINTENANCE_WINDOW_NOT_FOUND(1027, "维护窗口不存在"),
+    TENANT_NOT_FOUND(1028, "租户不存在"),
+    TENANT_CODE_EXISTS(1029, "租户编码已存在"),
+    DEPT_NOT_FOUND(1030, "部门不存在"),
+    DEPT_CODE_EXISTS(1031, "部门编码已存在"),
+    DEPT_HAS_CHILDREN(1032, "部门下存在子部门"),
+    DEPT_HAS_USERS(1033, "部门下存在用户"),
+    ROLE_NOT_FOUND(1034, "角色不存在"),
+    ROLE_PERMISSION_INVALID(1035, "角色权限参数不合法"),
+    TENANT_REQUIRED(1036, "缺少租户上下文"),
+    KNOWLEDGE_REVIEW_INVALID(1037, "知识审核状态不合法"),
+    KNOWLEDGE_OPERATION_FORBIDDEN(1038, "无权操作该知识文档");
 
     private final int code;
     private final String message;

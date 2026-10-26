@@ -35,6 +35,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/notifications/channels")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('notification:manage')")
 public class NotificationChannelController {
 
     private final NotificationChannelService notificationChannelService;
@@ -48,18 +49,16 @@ public class NotificationChannelController {
                 .stream().map(this::toResponse).toList());
     }
 
-    @Operation(summary = "创建通知渠道", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "创建通知渠道", description = "需要 notification:manage")
     @RateLimit(key = "notificationWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @AuditLog(operation = "CREATE_NOTIFICATION_CHANNEL", description = "创建通知渠道")
     @PostMapping
     public ApiResponse<NotificationChannelResponse> create(@Valid @RequestBody NotificationChannelRequest request) {
         return ApiResponse.success(toResponse(notificationChannelService.create(request)));
     }
 
-    @Operation(summary = "更新通知渠道", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "更新通知渠道", description = "需要 notification:manage")
     @RateLimit(key = "notificationWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @AuditLog(operation = "UPDATE_NOTIFICATION_CHANNEL", description = "更新通知渠道")
     @PutMapping("/{id}")
     public ApiResponse<NotificationChannelResponse> update(@PathVariable Long id,
@@ -67,9 +66,8 @@ public class NotificationChannelController {
         return ApiResponse.success(toResponse(notificationChannelService.update(id, request)));
     }
 
-    @Operation(summary = "启用 / 停用通知渠道", description = "需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "启用 / 停用通知渠道", description = "需要 notification:manage")
     @RateLimit(key = "notificationWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @AuditLog(operation = "TOGGLE_NOTIFICATION_CHANNEL", description = "切换通知渠道启停")
     @PutMapping("/{id}/enabled")
     public ApiResponse<NotificationChannelResponse> setEnabled(@PathVariable Long id,
@@ -78,9 +76,8 @@ public class NotificationChannelController {
         return ApiResponse.success(toResponse(notificationChannelService.setEnabled(id, enabled)));
     }
 
-    @Operation(summary = "删除通知渠道", description = "需要 ADMIN 角色")
+    @Operation(summary = "删除通知渠道", description = "需要 notification:manage")
     @RateLimit(key = "notificationWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(operation = "DELETE_NOTIFICATION_CHANNEL", description = "删除通知渠道")
     @DeleteMapping("/{id}")
     public ApiResponse<Map<String, Object>> delete(@PathVariable Long id) {
@@ -90,7 +87,6 @@ public class NotificationChannelController {
 
     @Operation(summary = "测试发送", description = "向渠道发送一条测试通知，返回发送记录")
     @RateLimit(key = "notificationWrite", limit = 10, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     @PostMapping("/{id}/test")
     public ApiResponse<NotificationRecordResponse> test(@PathVariable Long id) {
         NotificationRecordEntity record = notificationChannelService.testSend(id);

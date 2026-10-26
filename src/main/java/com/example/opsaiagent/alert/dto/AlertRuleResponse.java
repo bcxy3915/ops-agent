@@ -19,6 +19,8 @@ public class AlertRuleResponse {
 
     private Long id;
     private String name;
+    private String tenantId;
+    private Long deptId;
     private String description;
     private String service;
     private String metric;

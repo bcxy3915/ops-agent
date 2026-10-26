@@ -4,6 +4,7 @@ import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.Notifier;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
+import com.example.opsaiagent.resilience.UrlSafetyValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -37,6 +38,7 @@ public class GenericWebhookNotifier implements Notifier {
         if (webhookUrl == null || webhookUrl.isBlank()) {
             throw new IllegalArgumentException("通用 Webhook 渠道缺少 webhookUrl 配置");
         }
+        UrlSafetyValidator.assertSafeWebhookUrl(webhookUrl);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("title", content.getTitle());
         body.put("content", content.getContent());

@@ -25,6 +25,18 @@ public class OpsServiceEntity {
     private String name;
 
     /**
+     * 所属租户 ID
+     */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /**
+     * 所属部门 ID
+     */
+    @TableField("dept_id")
+    private Long deptId;
+
+    /**
      * 基础 URL
      */
     @TableField("base_url")

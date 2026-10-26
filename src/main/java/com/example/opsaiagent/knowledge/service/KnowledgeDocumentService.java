@@ -9,11 +9,15 @@ import com.example.opsaiagent.knowledge.dto.KnowledgeChunkResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
+import com.example.opsaiagent.rbac.entity.TenantEntity;
+import com.example.opsaiagent.rbac.service.DeptService;
+import com.example.opsaiagent.rbac.service.TenantService;
 import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -22,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
 import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
@@ -68,6 +73,38 @@ public class KnowledgeDocumentService {
     /** 在线编写文档 source 前缀 */
     public static final String ONLINE_SOURCE_PREFIX = "online:";
 
+    /** 可见性：个人 */
+    public static final String VISIBILITY_PERSONAL = "PERSONAL";
+    /** 可见性：部门 */
+    public static final String VISIBILITY_DEPT = "DEPT";
+    /** 可见性：企业 */
+    public static final String VISIBILITY_TENANT = "TENANT";
+
+    /** 审核状态：草稿 */
+    public static final String REVIEW_DRAFT = "DRAFT";
+    /** 审核状态：待部门审核 */
+    public static final String REVIEW_PENDING_DEPT = "PENDING_DEPT";
+    /** 审核状态：待企业审核 */
+    public static final String REVIEW_PENDING_TENANT = "PENDING_TENANT";
+    /** 审核状态：已通过 */
+    public static final String REVIEW_APPROVED = "APPROVED";
+    /** 审核状态：已驳回 */
+    public static final String REVIEW_REJECTED = "REJECTED";
+
+    /** 审核层级：无 */
+    public static final String REVIEW_LEVEL_NONE = "NONE";
+    /** 审核层级：部门 */
+    public static final String REVIEW_LEVEL_DEPT = "DEPT";
+    /** 审核层级：企业 */
+    public static final String REVIEW_LEVEL_TENANT = "TENANT";
+
+    /** 审核模式：仅部门 */
+    public static final String REVIEW_MODE_DEPT_ONLY = "DEPT_ONLY";
+    /** 审核模式：部门 + 企业 */
+    public static final String REVIEW_MODE_DEPT_AND_TENANT = "DEPT_AND_TENANT";
+    /** 审核模式：无需审核 */
+    public static final String REVIEW_MODE_NONE = "NONE";
+
     private static final Pattern MD_HEADING = Pattern.compile("^#{1,6}\\s+(.+)$", Pattern.MULTILINE);
 
     private final KnowledgeDocumentMapper documentMapper;
@@ -76,6 +113,13 @@ public class KnowledgeDocumentService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final KnowledgeVersionService versionService;
+    private final TenantService tenantService;
+    private final DeptService deptService;
+    private final KnowledgeQueryScope queryScope;
+
+    /** 上传文件大小上限（MB） */
+    @Value("${ops-agent.knowledge.upload.max-size-mb:20}")
+    private long maxUploadMb = 20;
 
     /**
      * 分页查询文档列表
@@ -91,7 +135,7 @@ public class KnowledgeDocumentService {
                                                       String service, int page, int size) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
-        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = queryScope.current().documents();
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(KnowledgeDocumentEntity::getTitle, keyword)
                     .or().like(KnowledgeDocumentEntity::getSource, keyword));
@@ -129,6 +173,9 @@ public class KnowledgeDocumentService {
      */
     public KnowledgeDocumentResponse getById(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
+        if (!queryScope.current().canAccess(entity)) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND, "知识文档不存在: " + id);
+        }
         return toResponse(entity, true);
     }
 
@@ -148,6 +195,11 @@ public class KnowledgeDocumentService {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "上传文件为空");
         }
+        long maxBytes = maxUploadMb * 1024 * 1024;
+        if (file.getSize() > maxBytes) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
+                    "上传文件超过大小限制（最大 " + maxUploadMb + "MB）");
+        }
         if (!LAYER_PRIVATE.equals(layer)) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
                     "上传文档层级只能为 PRIVATE（内置/案例由系统生成）");
@@ -162,8 +214,9 @@ public class KnowledgeDocumentService {
         entity.setDocType(parsed.docType());
         entity.setLayer(LAYER_PRIVATE);
         entity.setTrustStatus(TRUST_PENDING);
+        applyDraftScope(entity);
         entity.setVersion(1);
-        entity.setOwner(owner);
+        entity.setOwner(resolveOwner(owner));
         entity.setServiceIds(toJson(serviceIds));
         entity.setTags(toJson(tags));
         entity.setHitCount(0L);
@@ -195,8 +248,9 @@ public class KnowledgeDocumentService {
         entity.setDocType("MARKDOWN");
         entity.setLayer(LAYER_PRIVATE);
         entity.setTrustStatus(TRUST_PENDING);
+        applyDraftScope(entity);
         entity.setVersion(1);
-        entity.setOwner(request.getOwner());
+        entity.setOwner(resolveOwner(request.getOwner()));
         entity.setServiceIds(toJson(request.getServiceIds()));
         entity.setTags(toJson(request.getTags()));
         entity.setHitCount(0L);
@@ -258,24 +312,296 @@ public class KnowledgeDocumentService {
     @Transactional
     public KnowledgeDocumentResponse publish(Long id, boolean approved) {
         KnowledgeDocumentEntity entity = requireDocument(id);
+        String currentTenant = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(currentTenant) && !"0".equals(currentTenant)
+                && !currentTenant.equals(entity.getTenantId())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "无权审核该企业知识文档: " + id);
+        }
         if (approved) {
             if (!TRUST_PENDING.equals(entity.getTrustStatus())) {
                 throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
                         "仅待审核文档可以审核通过，当前状态: " + entity.getTrustStatus());
             }
-            entity.setTrustStatus(TRUST_VERIFIED);
-            entity.setLastReviewAt(LocalDateTime.now());
-            documentMapper.updateById(entity);
-            // 分块 + 向量化入库
-            chunkAndIndex(entity);
+            approveDocument(entity, REVIEW_LEVEL_TENANT, "发布审核通过");
             log.info("知识文档审核通过并入库: id={}, chunks={}", entity.getId(), entity.getChunkCount());
         } else {
-            // 驳回：保持待审核状态，仅记录审核时间
-            entity.setLastReviewAt(LocalDateTime.now());
-            documentMapper.updateById(entity);
+            rejectDocument(entity, "发布审核驳回");
             log.info("知识文档审核驳回: id={}", entity.getId());
         }
         return toResponse(requireDocument(id), true);
+    }
+
+    /**
+     * 提交知识文档审核。
+     *
+     * 仅作者或知识管理员可提交；按租户审核模式进入部门审核，
+     * 审核模式为 NONE 时直接通过并入库。
+     *
+     * @param id 文档 ID
+     * @return 文档响应
+     */
+    @Transactional
+    public KnowledgeDocumentResponse submitForReview(Long id) {
+        KnowledgeDocumentEntity entity = requireDocument(id);
+        checkOwnerOrAdmin(entity);
+        if (!REVIEW_DRAFT.equals(entity.getReviewStatus())
+                && !REVIEW_REJECTED.equals(entity.getReviewStatus())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                    "仅草稿或已驳回文档可以提交审核，当前状态: " + entity.getReviewStatus());
+        }
+
+        String mode = reviewMode(entity.getTenantId());
+        if (REVIEW_MODE_NONE.equals(mode)) {
+            approveDocument(entity, REVIEW_LEVEL_TENANT, "租户无需审核，自动通过");
+        } else {
+            entity.setReviewStatus(REVIEW_PENDING_DEPT);
+            entity.setReviewLevel(REVIEW_LEVEL_DEPT);
+            entity.setVisibility(VISIBILITY_DEPT);
+            entity.setSubmittedAt(LocalDateTime.now());
+            entity.setReviewedBy(null);
+            entity.setReviewedAt(null);
+            entity.setReviewNote(null);
+            documentMapper.updateById(entity);
+        }
+        log.info("知识文档提交审核: id={}, mode={}, status={}", id, mode, entity.getReviewStatus());
+        return toResponse(requireDocument(id), true);
+    }
+
+    /**
+     * 审核知识文档。
+     *
+     * <p>部门审核通过后：DEPT_ONLY 直接发布；DEPT_AND_TENANT 继续流转企业审核。
+     * 企业审核通过后可见性提升为 TENANT。驳回一律退回 PERSONAL。</p>
+     *
+     * @param id      文档 ID
+     * @param request 审核请求
+     * @return 文档响应
+     */
+    @Transactional
+    public KnowledgeDocumentResponse review(Long id, KnowledgeReviewRequest request) {
+        if (request == null || !StringUtils.hasText(request.getLevel())
+                || request.getApproved() == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID, "审核参数不完整");
+        }
+        KnowledgeDocumentEntity entity = requireDocument(id);
+        String note = request.getComment();
+        boolean approved = Boolean.TRUE.equals(request.getApproved());
+
+        if (REVIEW_LEVEL_DEPT.equals(request.getLevel())) {
+            if (!REVIEW_PENDING_DEPT.equals(entity.getReviewStatus())
+                    || !REVIEW_LEVEL_DEPT.equals(entity.getReviewLevel())) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                        "当前文档不处于待部门审核状态");
+            }
+            checkDeptReviewer(entity);
+            checkFourEyes(entity);
+            if (!approved) {
+                rejectDocument(entity, note);
+                log.info("知识文档部门审核驳回: id={}", id);
+            } else if (REVIEW_MODE_DEPT_AND_TENANT.equals(reviewMode(entity.getTenantId()))) {
+                entity.setReviewStatus(REVIEW_PENDING_TENANT);
+                entity.setReviewLevel(REVIEW_LEVEL_TENANT);
+                entity.setReviewedBy(currentUsername());
+                entity.setReviewedAt(LocalDateTime.now());
+                entity.setReviewNote(note);
+                documentMapper.updateById(entity);
+                log.info("知识文档部门审核通过，转企业审核: id={}", id);
+            } else {
+                approveDocument(entity, REVIEW_LEVEL_DEPT, note);
+                log.info("知识文档部门审核通过: id={}", id);
+            }
+        } else if (REVIEW_LEVEL_TENANT.equals(request.getLevel())) {
+            if (!REVIEW_PENDING_TENANT.equals(entity.getReviewStatus())
+                    || !REVIEW_LEVEL_TENANT.equals(entity.getReviewLevel())) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                        "当前文档不处于待企业审核状态");
+            }
+            checkTenantReviewer(entity);
+            checkFourEyes(entity);
+            if (!approved) {
+                rejectDocument(entity, note);
+                log.info("知识文档企业审核驳回: id={}", id);
+            } else {
+                approveDocument(entity, REVIEW_LEVEL_TENANT, note);
+                log.info("知识文档企业审核通过: id={}", id);
+            }
+        } else {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                    "审核层级不合法: " + request.getLevel());
+        }
+        return toResponse(requireDocument(id), true);
+    }
+
+    /**
+     * 设置新文档的默认租户/部门/可见性/审核状态。
+     *
+     * @param entity 文档实体
+     */
+    private void applyDraftScope(KnowledgeDocumentEntity entity) {
+        entity.setTenantId(currentTenantId());
+        entity.setDeptId(currentDeptId());
+        entity.setVisibility(VISIBILITY_PERSONAL);
+        entity.setReviewStatus(REVIEW_DRAFT);
+        entity.setReviewLevel(REVIEW_LEVEL_NONE);
+    }
+
+    /**
+     * 解析文档负责人：登录用户优先，未登录时保留请求值。
+     *
+     * @param requested 请求中的负责人
+     * @return 负责人
+     */
+    private String resolveOwner(String requested) {
+        String current = SecurityUtils.getCurrentUsername();
+        if (StringUtils.hasText(current)) {
+            return current;
+        }
+        return StringUtils.hasText(requested) ? requested : "system";
+    }
+
+    /**
+     * 当前租户；无上下文时回退引导租户，兼容旧调用。
+     *
+     * @return 租户 ID
+     */
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return StringUtils.hasText(tenantId) ? tenantId : "t-default";
+    }
+
+    /**
+     * 当前部门。
+     *
+     * @return 部门 ID；未设置返回 null
+     */
+    private Long currentDeptId() {
+        return SecurityUtils.getCurrentDeptId();
+    }
+
+    /**
+     * 查询租户知识审核模式。
+     *
+     * @param tenantId 租户 ID
+     * @return DEPT_ONLY / DEPT_AND_TENANT / NONE
+     */
+    private String reviewMode(String tenantId) {
+        if (!StringUtils.hasText(tenantId)) {
+            return REVIEW_MODE_DEPT_ONLY;
+        }
+        return tenantService.findById(tenantId)
+                .map(TenantEntity::getKnowledgeReviewMode)
+                .filter(StringUtils::hasText)
+                .orElse(REVIEW_MODE_DEPT_ONLY);
+    }
+
+    /**
+     * 校验当前用户是作者或知识管理员。
+     *
+     * @param entity 文档
+     */
+    private void checkOwnerOrAdmin(KnowledgeDocumentEntity entity) {
+        String current = SecurityUtils.getCurrentUsername();
+        if (!StringUtils.hasText(current)) {
+            // 单元测试 / 系统任务无登录上下文时不做作者校验
+            return;
+        }
+        if (current.equals(entity.getOwner()) || SecurityUtils.hasPermission("knowledge:admin")) {
+            return;
+        }
+        throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                "无权操作该知识文档: " + entity.getId());
+    }
+
+    /**
+     * 校验部门审核人：本部门或上级部门（子树包含文档部门）。
+     *
+     * @param entity 文档
+     */
+    private void checkDeptReviewer(KnowledgeDocumentEntity entity) {
+        if (entity.getDeptId() == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID, "文档未归属部门，无法部门审核");
+        }
+        Long currentDept = currentDeptId();
+        boolean allowed = currentDept != null
+                && deptService.subtreeIds(entity.getTenantId(), currentDept).contains(entity.getDeptId());
+        if (!allowed && SecurityUtils.hasPermission("knowledge:admin")) {
+            allowed = true;
+        }
+        if (!allowed) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "无权审核该部门知识文档: " + entity.getId());
+        }
+    }
+
+    /**
+     * 校验企业审核人属于文档所属租户。
+     *
+     * @param entity 文档
+     */
+    private void checkTenantReviewer(KnowledgeDocumentEntity entity) {
+        String currentTenant = SecurityUtils.getCurrentTenantId();
+        if (!StringUtils.hasText(currentTenant) || !currentTenant.equals(entity.getTenantId())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "无权审核该企业知识文档: " + entity.getId());
+        }
+    }
+
+    /**
+     * 四眼原则：审核人不能是作者。
+     *
+     * @param entity 文档
+     */
+    private void checkFourEyes(KnowledgeDocumentEntity entity) {
+        boolean enabled = tenantService.findById(entity.getTenantId())
+                .map(TenantEntity::getReviewFourEyes)
+                .orElse(Boolean.FALSE);
+        if (enabled && currentUsername().equals(entity.getOwner())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "四眼原则要求审核人不能是作者");
+        }
+    }
+
+    /**
+     * 审核通过：更新可见性/审核字段，并重新分块向量化入库。
+     *
+     * @param entity 文档
+     * @param level  审核层级
+     * @param note   审核意见
+     */
+    private void approveDocument(KnowledgeDocumentEntity entity, String level, String note) {
+        LocalDateTime now = LocalDateTime.now();
+        entity.setTrustStatus(TRUST_VERIFIED);
+        entity.setReviewStatus(REVIEW_APPROVED);
+        entity.setReviewLevel(level);
+        entity.setVisibility(REVIEW_LEVEL_TENANT.equals(level) ? VISIBILITY_TENANT : VISIBILITY_DEPT);
+        entity.setReviewedBy(currentUsername());
+        entity.setReviewedAt(now);
+        entity.setLastReviewAt(now);
+        entity.setReviewNote(note);
+        // 重新审核通过前先清理旧分块/向量，避免重复
+        deleteChunksAndVectors(entity.getId());
+        documentMapper.updateById(entity);
+        chunkAndIndex(entity);
+    }
+
+    /**
+     * 审核驳回：退回个人可见，不进入检索。
+     *
+     * @param entity 文档
+     * @param note   驳回原因
+     */
+    private void rejectDocument(KnowledgeDocumentEntity entity, String note) {
+        entity.setTrustStatus(TRUST_PENDING);
+        entity.setReviewStatus(REVIEW_REJECTED);
+        entity.setReviewLevel(REVIEW_LEVEL_NONE);
+        entity.setVisibility(VISIBILITY_PERSONAL);
+        entity.setReviewedBy(currentUsername());
+        entity.setReviewedAt(LocalDateTime.now());
+        entity.setLastReviewAt(LocalDateTime.now());
+        entity.setReviewNote(note);
+        deleteChunksAndVectors(entity.getId());
+        documentMapper.updateById(entity);
     }
 
     /**
@@ -287,13 +613,12 @@ public class KnowledgeDocumentService {
     @Transactional
     public KnowledgeDocumentResponse update(Long id, KnowledgeDocumentUpdateRequest request) {
         KnowledgeDocumentEntity entity = requireDocument(id);
+        checkOwnerOrAdmin(entity);
         boolean contentChanged = request.getRawContent() != null
                 && !Objects.equals(entity.getRawContent(), request.getRawContent());
 
         entity.setTitle(request.getTitle().trim());
-        if (request.getOwner() != null) {
-            entity.setOwner(request.getOwner());
-        }
+        // owner 仅上传时由服务端固化，编辑不允许转赠文档归属
         if (request.getServiceIds() != null) {
             entity.setServiceIds(toJson(request.getServiceIds()));
         }
@@ -305,11 +630,16 @@ public class KnowledgeDocumentService {
             entity.setRawContent(request.getRawContent());
             entity.setVersion(entity.getVersion() == null ? 1 : entity.getVersion() + 1);
             entity.setTrustStatus(TRUST_PENDING);
+            entity.setReviewStatus(REVIEW_DRAFT);
+            entity.setReviewLevel(REVIEW_LEVEL_NONE);
+            entity.setVisibility(VISIBILITY_PERSONAL);
+            entity.setReviewedBy(null);
+            entity.setReviewedAt(null);
+            entity.setReviewNote(null);
             entity.setSubmittedAt(LocalDateTime.now());
-            // 清理旧分块与向量后重新入库
+            // 内容变更后必须重新审核，先下线旧分块与向量，审核通过后再入库
             deleteChunksAndVectors(id);
             documentMapper.updateById(entity);
-            chunkAndIndex(entity);
             // 记录变更后的版本快照，支持历史回滚
             versionService.recordSnapshot(id, request.getRawContent(), currentUsername(),
                     KnowledgeVersionService.REASON_UPDATE);
@@ -331,21 +661,27 @@ public class KnowledgeDocumentService {
     public KnowledgeDocumentResponse rollback(Long docId, Long versionId) {
         KnowledgeDocumentVersionEntity target = versionService.requireVersion(docId, versionId);
         KnowledgeDocumentEntity entity = requireDocument(docId);
+        checkOwnerOrAdmin(entity);
 
         // 1. 备份当前内容为历史版本，保留回滚现场
         versionService.recordSnapshot(docId, entity.getRawContent(), currentUsername(),
                 KnowledgeVersionService.REASON_ROLLBACK_BACKUP);
 
-        // 2. 用目标版本内容覆盖文档
+        // 2. 用目标版本内容覆盖文档，回滚后需重新审核
         entity.setRawContent(target.getContentSnapshot());
         entity.setVersion(entity.getVersion() == null ? 1 : entity.getVersion() + 1);
         entity.setTrustStatus(TRUST_PENDING);
+        entity.setReviewStatus(REVIEW_DRAFT);
+        entity.setReviewLevel(REVIEW_LEVEL_NONE);
+        entity.setVisibility(VISIBILITY_PERSONAL);
+        entity.setReviewedBy(null);
+        entity.setReviewedAt(null);
+        entity.setReviewNote(null);
         entity.setSubmittedAt(LocalDateTime.now());
 
-        // 3. 清理旧分块与向量，重新入库
+        // 3. 下线旧分块与向量，审核通过后再入库
         deleteChunksAndVectors(docId);
         documentMapper.updateById(entity);
-        chunkAndIndex(entity);
         log.info("知识文档版本回滚: docId={}, versionId={}, version={}", docId, versionId, target.getVersion());
         return toResponse(requireDocument(docId), true);
     }
@@ -357,6 +693,7 @@ public class KnowledgeDocumentService {
     @Transactional
     public void delete(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
+        checkOwnerOrAdmin(entity);
         deleteChunksAndVectors(id);
         documentMapper.deleteById(id);
         log.info("知识文档已删除: id={}, title={}", entity.getId(), entity.getTitle());
@@ -477,29 +814,45 @@ public class KnowledgeDocumentService {
                 .withKeepSeparator(true)
                 .build();
         List<Document> chunks = splitter.apply(List.of(new Document(content)));
+        if (chunks.isEmpty()) {
+            // 短文本可能被切分器丢弃，至少保留一个块，保证可检索
+            chunks = List.of(new Document(content));
+        }
 
         List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
         List<Document> vectorDocs = new ArrayList<>();
+        String tenantId = entity.getTenantId() == null ? "" : entity.getTenantId();
+        String deptId = entity.getDeptId() == null ? "" : String.valueOf(entity.getDeptId());
+        String visibility = entity.getVisibility() == null ? VISIBILITY_PERSONAL : entity.getVisibility();
+        String trustStatus = entity.getTrustStatus() == null ? "" : entity.getTrustStatus();
+        String owner = entity.getOwner() == null ? "" : entity.getOwner();
+        String reviewStatus = entity.getReviewStatus() == null ? "" : entity.getReviewStatus();
         int ordinal = 1;
         for (Document chunk : chunks) {
             KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
             chunkEntity.setDocId(entity.getId());
+            chunkEntity.setTenantId(entity.getTenantId());
+            chunkEntity.setDeptId(entity.getDeptId());
             chunkEntity.setOrdinal(ordinal);
             chunkEntity.setContent(chunk.getText());
             chunkEntity.setSection(extractSection(chunk.getText(), entity.getDocType()));
             chunkMapper.insert(chunkEntity);
             chunkEntities.add(chunkEntity);
 
-            Document vectorDoc = new Document(chunk.getText(),
-                    java.util.Map.of(
-                            "source", UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId(),
-                            "docId", String.valueOf(entity.getId()),
-                            "title", entity.getTitle() == null ? "" : entity.getTitle(),
-                            "layer", entity.getLayer(),
-                            "trustStatus", entity.getTrustStatus(),
-                            "ordinal", String.valueOf(ordinal),
-                            "chunkId", String.valueOf(chunkEntity.getId())
-                    ));
+            java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+            metadata.put("source", UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId());
+            metadata.put("docId", String.valueOf(entity.getId()));
+            metadata.put("title", entity.getTitle() == null ? "" : entity.getTitle());
+            metadata.put("layer", entity.getLayer() == null ? "" : entity.getLayer());
+            metadata.put("trustStatus", trustStatus);
+            metadata.put("tenantId", tenantId);
+            metadata.put("deptId", deptId);
+            metadata.put("visibility", visibility);
+            metadata.put("reviewStatus", reviewStatus);
+            metadata.put("owner", owner);
+            metadata.put("ordinal", String.valueOf(ordinal));
+            metadata.put("chunkId", String.valueOf(chunkEntity.getId()));
+            Document vectorDoc = new Document(chunk.getText(), metadata);
             vectorDocs.add(vectorDoc);
             ordinal++;
         }
@@ -571,6 +924,14 @@ public class KnowledgeDocumentService {
                 .docType(entity.getDocType())
                 .layer(entity.getLayer())
                 .trustStatus(entity.getTrustStatus())
+                .tenantId(entity.getTenantId())
+                .deptId(entity.getDeptId())
+                .visibility(entity.getVisibility())
+                .reviewStatus(entity.getReviewStatus())
+                .reviewLevel(entity.getReviewLevel())
+                .reviewedBy(entity.getReviewedBy())
+                .reviewedAt(entity.getReviewedAt())
+                .reviewNote(entity.getReviewNote())
                 .version(entity.getVersion())
                 .owner(entity.getOwner())
                 .serviceIds(fromJson(entity.getServiceIds()))
@@ -594,6 +955,8 @@ public class KnowledgeDocumentService {
                     .map(c -> KnowledgeChunkResponse.builder()
                             .id(c.getId())
                             .docId(c.getDocId())
+                            .tenantId(c.getTenantId())
+                            .deptId(c.getDeptId())
                             .ordinal(c.getOrdinal())
                             .content(c.getContent())
                             .section(c.getSection())

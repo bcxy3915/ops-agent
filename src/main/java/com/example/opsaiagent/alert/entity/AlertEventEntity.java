@@ -24,6 +24,14 @@ public class AlertEventEntity {
     @TableField("rule_id")
     private Long ruleId;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 规则名称（快照，避免规则删除后事件失去语义） */
     @TableField("rule_name")
     private String ruleName;

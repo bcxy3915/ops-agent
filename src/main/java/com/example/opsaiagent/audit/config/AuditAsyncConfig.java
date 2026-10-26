@@ -5,6 +5,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import com.example.opsaiagent.common.config.ContextPropagatingTaskDecorator;
+
 import java.util.concurrent.Executor;
 
 @Configuration
@@ -19,6 +21,7 @@ public class AuditAsyncConfig {
         executor.setMaxPoolSize(4);             // 最大线程数
         executor.setQueueCapacity(500);         // 队列容量
         executor.setThreadNamePrefix("audit-"); // 线程名称前缀
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true); // 等待任务完成后再关闭
         executor.setAwaitTerminationSeconds(10);            // 等待时间
 

@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval;
 
+import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
 import com.example.opsaiagent.retrieval.rerank.RerankerClient;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +45,9 @@ class HybridRetrieverTest {
     @Mock
     private RerankerClient rerankerClient;
 
+    @Mock
+    private DataScope dataScope;
+
     @InjectMocks
     private HybridRetriever hybridRetriever;
 
@@ -56,7 +61,8 @@ class HybridRetrieverTest {
         Document v = doc("向量文档");
         Document b = doc("BM25文档");
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(v));
-        when(keywordRetriever.search("查询", 20)).thenReturn(List.of(b));
+        when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
+                .thenReturn(List.of(b));
         when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));
         when(rerankerClient.rerank("查询", List.of(v, b), 3)).thenReturn(List.of(v));
 
@@ -73,7 +79,8 @@ class HybridRetrieverTest {
         Document b = doc("BM25文档");
         when(vectorStore.similaritySearch(any(SearchRequest.class)))
                 .thenThrow(new RuntimeException("network error"));
-        when(keywordRetriever.search("查询", 20)).thenReturn(List.of(b, doc("BM25文档2")));
+        when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
+                .thenReturn(List.of(b, doc("BM25文档2")));
 
         List<Document> result = hybridRetriever.retrieve("查询", 1);
 
@@ -87,7 +94,7 @@ class HybridRetrieverTest {
     @DisplayName("retrieve：向量结果为空时直接返回 BM25 前 topK")
     void retrieve_vectorEmptyUsesBm25TopK() {
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
-        when(keywordRetriever.search("查询", 20))
+        when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(doc("a"), doc("b"), doc("c"), doc("d")));
 
         List<Document> result = hybridRetriever.retrieve("查询", 2);
@@ -100,7 +107,8 @@ class HybridRetrieverTest {
     @DisplayName("retrieve：BM25 无结果时返回空列表")
     void retrieve_bm25Empty() {
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
-        when(keywordRetriever.search("查询", 20)).thenReturn(List.of());
+        when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
+                .thenReturn(List.of());
 
         List<Document> result = hybridRetriever.retrieve("查询", 3);
 

@@ -29,23 +29,54 @@ public class JwtService {
     }
 
     /**
-     * 生成 Token
+     * 生成 Token（兼容旧调用：仅用户名 + 单角色）。
+     *
      * @param username 用户名
-     * @param role 角色
+     * @param role     角色
      * @return Token
      */
     public String generateToken(String username, String role) {
+        return generateToken(username, role, null, null, null,
+                role == null ? null : java.util.List.of(role));
+    }
+
+    /**
+     * 生成 Token（多租户 / 多角色）。
+     *
+     * @param username 用户名（JWT subject，保持不变以兼容旧代码）
+     * @param role     主角色（历史字段，兼容旧前端）
+     * @param userId   用户 ID
+     * @param tenantId 租户 ID
+     * @param deptId   部门 ID
+     * @param roles    角色编码列表（多角色）
+     * @return Token
+     */
+    public String generateToken(String username, String role, String userId,
+                                String tenantId, Long deptId, java.util.List<String> roles) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationSeconds * 1000);
 
-        return Jwts.builder()
+        io.jsonwebtoken.JwtBuilder builder = Jwts.builder()
                 .subject(username)
                 .issuer(issuer)
                 .claim("role", role)
                 .issuedAt(now)
                 .expiration(expiry)
-                .signWith(secretKey)
-                .compact();
+                .signWith(secretKey);
+
+        if (userId != null && !userId.isBlank()) {
+            builder.claim("userId", userId);
+        }
+        if (tenantId != null && !tenantId.isBlank()) {
+            builder.claim("tenantId", tenantId);
+        }
+        if (deptId != null) {
+            builder.claim("deptId", deptId);
+        }
+        if (roles != null && !roles.isEmpty()) {
+            builder.claim("roles", roles);
+        }
+        return builder.compact();
     }
 
     /**
@@ -68,8 +99,9 @@ public class JwtService {
      */
     public boolean isValid(String token) {
         try {
-            parseToken(token);
-            return true;
+            Claims claims = parseToken(token);
+            String iss = claims.getIssuer();
+            return this.issuer != null && this.issuer.equals(iss);
         } catch (Exception e) {
             log.debug("JWT 校验失败: {}", e.getMessage());
             return false;

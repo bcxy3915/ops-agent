@@ -1,6 +1,8 @@
 package com.example.opsaiagent.retrieval.bm25;
 
+import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
+import com.example.opsaiagent.retrieval.RetrievalScope;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,7 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final DataScope dataScope;
     private final Bm25Index index = new Bm25Index();
 
     /**
@@ -46,8 +49,25 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
      */
     @Override
     public List<Document> search(String query, int topK) {
-        return index.search(query, topK).stream()
+        return search(query, topK, RetrievalScope.current(dataScope));
+    }
+
+    /**
+     * 按数据范围检索：索引全量构建，查询期过滤 + 过取，避免过滤后结果不足。
+     *
+     * @param query 查询文本
+     * @param topK  topK
+     * @param scope 检索范围
+     * @return 文档列表
+     */
+    @Override
+    public List<Document> search(String query, int topK, RetrievalScope scope) {
+        RetrievalScope effective = scope == null ? RetrievalScope.publicOnly() : scope;
+        int fetch = Math.min(index.size(), Math.max(topK, topK * 4));
+        return index.search(query, fetch).stream()
                 .map(Bm25Index.ScoredDocument::getDocument)
+                .filter(doc -> effective.matches(doc.getMetadata()))
+                .limit(topK)
                 .toList();
     }
 

@@ -23,6 +23,14 @@ public class AlertEscalationRecordEntity {
     @TableField("alert_event_id")
     private Long alertEventId;
 
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 升级到的级别 */
     @TableField("level")
     private Integer level;

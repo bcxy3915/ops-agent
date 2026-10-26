@@ -14,6 +14,11 @@ public class ServiceInfo {
     private String name;
 
     /**
+     * 所属租户 ID
+     */
+    private String tenantId;
+
+    /**
      * 基础地址，如 http://localhost:8081
      */
     private String baseUrl;

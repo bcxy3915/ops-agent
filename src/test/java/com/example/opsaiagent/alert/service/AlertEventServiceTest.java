@@ -13,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
@@ -43,6 +44,9 @@ class AlertEventServiceTest {
 
     @Mock
     private AlertEventMapper mapper;
+
+    @Spy
+    private AlertScope alertScope = new AlertScope(null);
 
     @Mock
     private AlertReadService readService;

@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeVersionResponse;
+import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeVersionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +36,8 @@ public class KnowledgeVersionService {
     public static final String REASON_ROLLBACK_BACKUP = "ROLLBACK_BACKUP";
 
     private final KnowledgeVersionMapper versionMapper;
+    private final KnowledgeDocumentMapper documentMapper;
+    private final KnowledgeQueryScope queryScope;
 
     /**
      * 记录一条版本快照（同文档版本号取最大值 +1）
@@ -58,8 +62,11 @@ public class KnowledgeVersionService {
                 .findFirst()
                 .orElse(0);
 
+        KnowledgeDocumentEntity doc = documentMapper.selectById(docId);
         KnowledgeDocumentVersionEntity snapshot = new KnowledgeDocumentVersionEntity();
         snapshot.setDocId(docId);
+        snapshot.setTenantId(doc == null ? null : doc.getTenantId());
+        snapshot.setDeptId(doc == null ? null : doc.getDeptId());
         snapshot.setVersion(maxVersion + 1);
         snapshot.setContentSnapshot(content);
         snapshot.setChangedBy(changedBy);
@@ -76,6 +83,11 @@ public class KnowledgeVersionService {
      * @return 版本列表
      */
     public List<KnowledgeVersionResponse> listVersions(Long docId) {
+        KnowledgeQueryScope.Scope scope = queryScope.current();
+        if (!scope.isUnrestricted() && !scope.canAccess(documentMapper.selectById(docId))) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND,
+                    "知识文档不存在: " + docId);
+        }
         return versionMapper.selectList(
                         new LambdaQueryWrapper<KnowledgeDocumentVersionEntity>()
                                 .eq(KnowledgeDocumentVersionEntity::getDocId, docId)
@@ -113,6 +125,8 @@ public class KnowledgeVersionService {
     private KnowledgeVersionResponse toResponse(KnowledgeDocumentVersionEntity entity) {
         KnowledgeVersionResponse response = new KnowledgeVersionResponse();
         response.setId(entity.getId());
+        response.setTenantId(entity.getTenantId());
+        response.setDeptId(entity.getDeptId());
         response.setVersion(entity.getVersion());
         response.setContentSnapshot(entity.getContentSnapshot());
         response.setChangedBy(entity.getChangedBy());

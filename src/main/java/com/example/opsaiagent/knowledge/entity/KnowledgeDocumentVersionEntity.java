@@ -24,6 +24,14 @@ public class KnowledgeDocumentVersionEntity {
     @TableField("doc_id")
     private Long docId;
 
+    /** 所属租户 ID */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 ID */
+    @TableField("dept_id")
+    private Long deptId;
+
     /** 版本号 */
     @TableField("version")
     private Integer version;

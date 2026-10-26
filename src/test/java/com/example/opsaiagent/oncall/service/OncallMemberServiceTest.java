@@ -37,7 +37,7 @@ class OncallMemberServiceTest {
     @InjectMocks
     private OncallMemberService service;
 
-    private OncallMemberEntity member(Long id, Long userId, String role) {
+    private OncallMemberEntity member(Long id, String userId, String role) {
         OncallMemberEntity e = new OncallMemberEntity();
         e.setId(id);
         e.setUserId(userId);
@@ -49,7 +49,7 @@ class OncallMemberServiceTest {
     @DisplayName("添加：正常插入并返回响应")
     void add_insertsMember() {
         OncallMemberCreateRequest req = new OncallMemberCreateRequest();
-        req.setUserId(1001L);
+        req.setUserId("1001");
         req.setDutyRole("PRIMARY");
         when(memberMapper.selectCount(any())).thenReturn(0L);
 
@@ -57,16 +57,16 @@ class OncallMemberServiceTest {
 
         ArgumentCaptor<OncallMemberEntity> captor = ArgumentCaptor.forClass(OncallMemberEntity.class);
         verify(memberMapper).insert(captor.capture());
-        assertThat(captor.getValue().getUserId()).isEqualTo(1001L);
+        assertThat(captor.getValue().getUserId()).isEqualTo("1001");
         assertThat(captor.getValue().getDutyRole()).isEqualTo("PRIMARY");
-        assertThat(resp.getUserId()).isEqualTo(1001L);
+        assertThat(resp.getUserId()).isEqualTo("1001");
     }
 
     @Test
     @DisplayName("添加：同用户同角色重复添加抛异常")
     void add_duplicateThrows() {
         OncallMemberCreateRequest req = new OncallMemberCreateRequest();
-        req.setUserId(1001L);
+        req.setUserId("1001");
         req.setDutyRole("BACKUP");
         when(memberMapper.selectCount(any())).thenReturn(1L);
 
@@ -79,7 +79,7 @@ class OncallMemberServiceTest {
     @DisplayName("列表：按角色筛选")
     void list_filtersByRole() {
         when(memberMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(member(1L, 1001L, "PRIMARY"), member(2L, 1002L, "BACKUP")));
+                .thenReturn(List.of(member(1L, "1001", "PRIMARY"), member(2L, "1002", "BACKUP")));
         List<OncallMemberResponse> resp = service.list("PRIMARY");
         assertThat(resp).hasSize(2);
     }
@@ -87,6 +87,9 @@ class OncallMemberServiceTest {
     @Test
     @DisplayName("移除：正常删除")
     void remove_deletes() {
+        OncallMemberEntity entity = member(3L, "1003", "PRIMARY");
+        entity.setTenantId("t-default");
+        when(memberMapper.selectById(3L)).thenReturn(entity);
         when(memberMapper.deleteById(3L)).thenReturn(1);
         service.remove(3L);
         verify(memberMapper).deleteById(3L);
@@ -95,16 +98,16 @@ class OncallMemberServiceTest {
     @Test
     @DisplayName("移除：不存在抛异常")
     void remove_notFoundThrows() {
-        when(memberMapper.deleteById(99L)).thenReturn(0);
+        when(memberMapper.selectById(99L)).thenReturn(null);
         assertThatThrownBy(() -> service.remove(99L))
                 .isInstanceOf(BusinessException.class);
     }
 
     @Test
-    @DisplayName("收件人解析：规则显式 toUsers 优先（逗号分隔，忽略非法项）")
+    @DisplayName("收件人解析：规则显式 toUsers 优先（逗号分隔，保留非空项）")
     void resolveRecipients_toUsersWins() {
-        List<Long> users = service.resolveRecipients("1001, 1002, abc, 1003", null, null);
-        assertThat(users).containsExactly(1001L, 1002L, 1003L);
+        List<String> users = service.resolveRecipients("1001, 1002, abc, 1003", null, null);
+        assertThat(users).containsExactly("1001", "1002", "abc", "1003");
         verify(memberMapper, never()).selectList(any(Wrapper.class));
     }
 
@@ -112,27 +115,27 @@ class OncallMemberServiceTest {
     @DisplayName("收件人解析：L1 升级 → 备值班 BACKUP")
     void resolveRecipients_l1UsesBackup() {
         when(memberMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(member(1L, 2002L, "BACKUP")));
-        List<Long> users = service.resolveRecipients(null, "OPERATOR", 1);
-        assertThat(users).containsExactly(2002L);
+                .thenReturn(List.of(member(1L, "2002", "BACKUP")));
+        List<String> users = service.resolveRecipients(null, "OPERATOR", 1);
+        assertThat(users).containsExactly("2002");
     }
 
     @Test
     @DisplayName("收件人解析：L2 升级 → ADMIN")
     void resolveRecipients_l2UsesAdmin() {
         when(memberMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(member(1L, 3001L, "ADMIN")));
-        List<Long> users = service.resolveRecipients(null, null, 2);
-        assertThat(users).containsExactly(3001L);
+                .thenReturn(List.of(member(1L, "3001", "ADMIN")));
+        List<String> users = service.resolveRecipients(null, null, 2);
+        assertThat(users).containsExactly("3001");
     }
 
     @Test
     @DisplayName("收件人解析：OPERATOR 角色且无级别 → 主值班 PRIMARY")
     void resolveRecipients_operatorUsesPrimary() {
         when(memberMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(member(1L, 1001L, "PRIMARY")));
-        List<Long> users = service.resolveRecipients(null, "OPERATOR", null);
-        assertThat(users).containsExactly(1001L);
+                .thenReturn(List.of(member(1L, "1001", "PRIMARY")));
+        List<String> users = service.resolveRecipients(null, "OPERATOR", null);
+        assertThat(users).containsExactly("1001");
     }
 
     @Test

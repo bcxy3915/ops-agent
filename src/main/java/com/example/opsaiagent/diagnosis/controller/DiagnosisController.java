@@ -35,6 +35,7 @@ public class DiagnosisController {
     private final DiagnosisService diagnosisService;
 
     @Operation(summary = "查询诊断记录", description = "可按服务 / 告警事件 / 规则过滤")
+    @PreAuthorize("hasAuthority('diagnosis:read')")
     @GetMapping
     public ApiResponse<List<DiagnosisRecordResponse>> list(
             @RequestParam(required = false) String service,
@@ -47,23 +48,24 @@ public class DiagnosisController {
     }
 
     @Operation(summary = "查询诊断详情", description = "返回结构化诊断结果")
+    @PreAuthorize("hasAuthority('diagnosis:read')")
     @GetMapping("/{id}")
     public ApiResponse<DiagnosisRecordResponse> detail(@PathVariable Long id) {
         return ApiResponse.success(toResponse(diagnosisService.getById(id)));
     }
 
-    @Operation(summary = "手动触发诊断", description = "基于故障快照执行 LLM 诊断，需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "手动触发诊断", description = "基于故障快照执行 LLM 诊断，需要 diagnosis:trigger")
     @RateLimit(key = "diagnosis", limit = 10, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('diagnosis:trigger')")
     @AuditLog(operation = "TRIGGER_DIAGNOSIS", description = "手动触发 LLM 诊断")
     @PostMapping("/snapshot/{snapshotId}")
     public ApiResponse<DiagnosisRecordResponse> diagnose(@PathVariable Long snapshotId) {
         return ApiResponse.success(toResponse(diagnosisService.diagnoseBySnapshot(snapshotId)));
     }
 
-    @Operation(summary = "追问诊断", description = "基于已有诊断继续追问，需要 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "追问诊断", description = "基于已有诊断继续追问，需要 diagnosis:trigger")
     @RateLimit(key = "diagnosis", limit = 10, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('diagnosis:trigger')")
     @AuditLog(operation = "FOLLOW_UP_DIAGNOSIS", description = "诊断追问")
     @PostMapping("/{id}/follow-up")
     public ApiResponse<DiagnosisRecordResponse> followUp(@PathVariable Long id,

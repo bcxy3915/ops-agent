@@ -9,6 +9,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
@@ -25,6 +26,15 @@ public class UserResponse {
 
     @Schema(description = "显示名称", example = "张三")
     private String displayName;
+
+    @Schema(description = "租户 ID")
+    private String tenantId;
+
+    @Schema(description = "部门 ID")
+    private Long deptId;
+
+    @Schema(description = "角色编码列表")
+    private List<String> roles;
 
     @Sensitive(value = SensitiveType.PASSWORD)
     @Schema(description = "密码（脱敏）", example = "******")

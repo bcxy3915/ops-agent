@@ -18,6 +18,8 @@ public class AlertEventResponse {
 
     private Long id;
     private Long ruleId;
+    private String tenantId;
+    private Long deptId;
     private String ruleName;
     private String service;
     private String metric;

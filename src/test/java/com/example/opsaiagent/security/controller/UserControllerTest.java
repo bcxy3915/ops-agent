@@ -1,7 +1,9 @@
 package com.example.opsaiagent.security.controller;
 
 import com.example.opsaiagent.common.api.ApiResponse;
+import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.service.DeptService;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
 import com.example.opsaiagent.security.dto.UserResponse;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
@@ -15,10 +17,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +36,9 @@ class UserControllerTest {
     @Mock
     private OpsUserService userService;
 
+    @Mock
+    private DeptService deptService;
+
     @InjectMocks
     private UserController controller;
 
@@ -42,6 +48,8 @@ class UserControllerTest {
         u.setUsername(username);
         u.setPassword("encoded");
         u.setRole("OPERATOR");
+        u.setTenantId("t-default");
+        u.setDeptId(1L);
         u.setEnabled(true);
         u.setPhone("13812345678");
         u.setEmail("admin@example.com");
@@ -53,31 +61,35 @@ class UserControllerTest {
     @Test
     @DisplayName("list：返回转换后的用户响应列表")
     void list_success() {
-        when(userService.listByConditions("adm", "ADMIN", true))
+        when(userService.listByConditions("adm", "ADMIN", true, null, null))
                 .thenReturn(List.of(user("admin")));
+        when(userService.getRoleCodes("u-admin")).thenReturn(List.of("CONTRIBUTOR"));
 
-        ApiResponse<List<UserResponse>> result = controller.list("adm", "ADMIN", true);
+        ApiResponse<List<UserResponse>> result = controller.list("adm", "ADMIN", true, null, null);
 
         assertThat(result.getData()).hasSize(1);
         assertThat(result.getData().get(0).getUsername()).isEqualTo("admin");
         assertThat(result.getData().get(0).getRole()).isEqualTo("OPERATOR");
+        assertThat(result.getData().get(0).getRoles()).containsExactly("CONTRIBUTOR");
     }
 
     @Test
     @DisplayName("get：查询成功并解密敏感字段")
     void get_success() {
-        when(userService.findById("u-admin")).thenReturn(Optional.of(user("admin")));
+        when(userService.getAccessibleUser("u-admin")).thenReturn(user("admin"));
+        when(userService.getRoleCodes("u-admin")).thenReturn(List.of("CONTRIBUTOR"));
 
         ApiResponse<UserResponse> result = controller.get("u-admin");
 
         assertThat(result.getData().getUsername()).isEqualTo("admin");
-        verify(userService).decryptSensitiveFields(org.mockito.ArgumentMatchers.any(OpsUserEntity.class));
+        verify(userService).decryptSensitiveFields(any(OpsUserEntity.class));
     }
 
     @Test
     @DisplayName("get：用户不存在抛业务异常")
     void get_notFound_throws() {
-        when(userService.findById("u-missing")).thenReturn(Optional.empty());
+        when(userService.getAccessibleUser("u-missing"))
+                .thenThrow(new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         assertThatThrownBy(() -> controller.get("u-missing"))
                 .isInstanceOf(BusinessException.class);
@@ -91,6 +103,7 @@ class UserControllerTest {
         request.setPassword("admin123");
         request.setRole("OPERATOR");
         when(userService.create(request)).thenReturn(user("operator1"));
+        when(userService.getRoleCodes(anyString())).thenReturn(List.of("CONTRIBUTOR"));
 
         ApiResponse<UserResponse> result = controller.create(request);
 

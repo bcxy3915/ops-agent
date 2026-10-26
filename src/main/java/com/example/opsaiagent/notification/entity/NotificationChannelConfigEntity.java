@@ -23,9 +23,17 @@ public class NotificationChannelConfigEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 渠道名称（唯一） */
+    /** 渠道名称（租户内唯一） */
     @TableField("name")
     private String name;
+
+    /** 所属租户 */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 */
+    @TableField("dept_id")
+    private Long deptId;
 
     /** 渠道类型：FEISHU_WEBHOOK / EMAIL / GENERIC_WEBHOOK */
     @TableField("type")

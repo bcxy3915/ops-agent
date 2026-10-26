@@ -7,6 +7,7 @@ import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgePublishRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.service.KnowledgeDocumentService;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import io.swagger.v3.oas.annotations.Operation;
@@ -43,6 +44,7 @@ public class KnowledgeDocumentController {
     private final KnowledgeDocumentService documentService;
 
     @Operation(summary = "查询文档列表", description = "支持关键词 / 层级 / 状态 / 服务筛选与分页，所有角色可访问")
+    @PreAuthorize("hasAuthority('knowledge:read')")
     @GetMapping
     public ApiResponse<PageResult<KnowledgeDocumentResponse>> list(
             @RequestParam(required = false) String keyword,
@@ -55,14 +57,15 @@ public class KnowledgeDocumentController {
     }
 
     @Operation(summary = "查询文档详情", description = "返回文档元数据与分块列表，所有角色可访问")
+    @PreAuthorize("hasAuthority('knowledge:read')")
     @GetMapping("/{id}")
     public ApiResponse<KnowledgeDocumentResponse> detail(@PathVariable Long id) {
         return ApiResponse.success(documentService.getById(id));
     }
 
-    @Operation(summary = "上传知识文档", description = "支持 md/pdf/txt/docx，解析后保存为待审核，需 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "上传知识文档", description = "支持 md/pdf/txt/docx，解析后保存为草稿，需 knowledge:write")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:write')")
     @AuditLog(operation = "UPLOAD_KNOWLEDGE", description = "上传知识文档")
     @PostMapping("/upload")
     public ApiResponse<KnowledgeDocumentResponse> upload(
@@ -76,27 +79,27 @@ public class KnowledgeDocumentController {
                 file, title, layer, owner, split(serviceIds), split(tags)));
     }
 
-    @Operation(summary = "在线编写知识文档", description = "直接填写标题与正文创建文档，保存为待审核，需 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "在线编写知识文档", description = "直接填写标题与正文创建草稿，需 knowledge:write")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:write')")
     @AuditLog(operation = "ONLINE_CREATE_KNOWLEDGE", description = "在线编写知识文档")
     @PostMapping("/online-create")
     public ApiResponse<KnowledgeDocumentResponse> onlineCreate(@Valid @RequestBody KnowledgeOnlineCreateRequest request) {
         return ApiResponse.success(documentService.onlineCreate(request));
     }
 
-    @Operation(summary = "自动超期判定", description = "扫描复核到期的 VERIFIED 文档并标记为 EXPIRED，需 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "自动超期判定", description = "扫描复核到期的 VERIFIED 文档并标记为 EXPIRED，需 knowledge:admin")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:admin')")
     @AuditLog(operation = "UPDATE_KNOWLEDGE", description = "自动超期判定")
     @PostMapping("/expire-scan")
     public ApiResponse<Map<String, Integer>> expireScan() {
         return ApiResponse.success(Map.of("expired", documentService.expireOverdueDocuments()));
     }
 
-    @Operation(summary = "发布审核", description = "通过则向量化入库（VERIFIED），驳回保持待审核，需 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "发布审核（兼容旧接口）", description = "通过则向量化入库（VERIFIED），驳回退回个人，需 knowledge:review")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:review')")
     @AuditLog(operation = "PUBLISH_KNOWLEDGE", description = "审核发布知识文档")
     @PostMapping("/{id}/publish")
     public ApiResponse<KnowledgeDocumentResponse> publish(@PathVariable Long id,
@@ -104,9 +107,29 @@ public class KnowledgeDocumentController {
         return ApiResponse.success(documentService.publish(id, Boolean.TRUE.equals(request.getApproved())));
     }
 
-    @Operation(summary = "编辑知识文档", description = "可更新元数据与内容；内容变更会重新分块向量化并重置为待审核，需 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "提交审核", description = "作者将草稿/已驳回文档提交部门审核，需 knowledge:write")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:write')")
+    @AuditLog(operation = "SUBMIT_KNOWLEDGE_REVIEW", description = "提交知识审核")
+    @PostMapping("/{id}/submit")
+    public ApiResponse<KnowledgeDocumentResponse> submit(@PathVariable Long id) {
+        return ApiResponse.success(documentService.submitForReview(id));
+    }
+
+    @Operation(summary = "审核知识文档", description = "部门/企业审核，需 knowledge:review")
+    @RateLimit(key = "knowledgeReview", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAuthority('knowledge:review')")
+    @AuditLog(operation = "REVIEW_KNOWLEDGE", description = "审核知识文档")
+    @PostMapping("/{id}/review")
+    public ApiResponse<KnowledgeDocumentResponse> review(
+            @PathVariable Long id,
+            @Valid @RequestBody KnowledgeReviewRequest request) {
+        return ApiResponse.success(documentService.review(id, request));
+    }
+
+    @Operation(summary = "编辑知识文档", description = "内容变更会下线旧向量并重置为草稿，需 knowledge:write")
+    @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAuthority('knowledge:write')")
     @AuditLog(operation = "UPDATE_KNOWLEDGE", description = "编辑知识文档")
     @PutMapping("/{id}")
     public ApiResponse<KnowledgeDocumentResponse> update(@PathVariable Long id,
@@ -114,9 +137,9 @@ public class KnowledgeDocumentController {
         return ApiResponse.success(documentService.update(id, request));
     }
 
-    @Operation(summary = "删除知识文档", description = "删除文档及其分块与向量，需 ADMIN 或 OPERATOR 角色")
+    @Operation(summary = "删除知识文档", description = "作者或知识管理员删除文档及其分块与向量，需 knowledge:write")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    @PreAuthorize("hasAuthority('knowledge:write')")
     @AuditLog(operation = "DELETE_KNOWLEDGE", description = "删除知识文档")
     @DeleteMapping("/{id}")
     public ApiResponse<Map<String, Long>> delete(@PathVariable Long id) {

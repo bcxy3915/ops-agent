@@ -14,6 +14,7 @@ import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.service.AuditLogService;
 import com.example.opsaiagent.oncall.service.OncallMemberService;
+import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,14 +62,14 @@ public class AlertEscalationService {
             return;
         }
         Map<Long, List<AlertRuleEscalationLevelEntity>> levelMap = new HashMap<>();
-        for (AlertRuleEntity rule : rules) {
-            List<AlertRuleEscalationLevelEntity> levels = levelMapper.selectList(
-                    new LambdaQueryWrapper<AlertRuleEscalationLevelEntity>()
-                            .eq(AlertRuleEscalationLevelEntity::getRuleId, rule.getId())
-                            .orderByAsc(AlertRuleEscalationLevelEntity::getLevelNo));
-            if (!levels.isEmpty()) {
-                levelMap.put(rule.getId(), levels);
-            }
+        List<Long> ruleIds = rules.stream().map(AlertRuleEntity::getId).toList();
+        List<AlertRuleEscalationLevelEntity> allLevels = levelMapper.selectList(
+                new LambdaQueryWrapper<AlertRuleEscalationLevelEntity>()
+                        .in(AlertRuleEscalationLevelEntity::getRuleId, ruleIds)
+                        .orderByAsc(AlertRuleEscalationLevelEntity::getRuleId)
+                        .orderByAsc(AlertRuleEscalationLevelEntity::getLevelNo));
+        for (AlertRuleEscalationLevelEntity level : allLevels) {
+            levelMap.computeIfAbsent(level.getRuleId(), k -> new ArrayList<>()).add(level);
         }
         if (levelMap.isEmpty()) {
             return;
@@ -83,7 +85,8 @@ public class AlertEscalationService {
             if (levels == null || levels.isEmpty()) {
                 continue;
             }
-            escalateIfDue(event, levels, now);
+            RbacContextSnapshot.forTenant(event.getTenantId())
+                    .run(() -> escalateIfDue(event, levels, now));
         }
     }
 
@@ -145,12 +148,15 @@ public class AlertEscalationService {
         escalationMapper.insert(record);
 
         // P1 值班联动：规则显式 toUsers 优先，否则按级别取值班人（L1→备值班、L2→ADMIN）
-        List<Long> recipients = oncallMemberService.resolveRecipients(
-                level.getToUsers(), level.getToRole(), level.getLevelNo());
+        List<String> recipients = event.getTenantId() == null
+                ? oncallMemberService.resolveRecipients(
+                        level.getToUsers(), level.getToRole(), level.getLevelNo())
+                : oncallMemberService.resolveRecipients(event.getTenantId(),
+                        level.getToUsers(), level.getToRole(), level.getLevelNo());
         String recipientDesc = recipients.isEmpty()
                 ? (level.getToUsers() != null && !level.getToUsers().isBlank()
                         ? level.getToUsers() : (level.getToRole() == null ? "角色兜底" : level.getToRole()))
-                : recipients.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+                : String.join(",", recipients);
 
         AuditLogEntity audit = new AuditLogEntity();
         audit.setUsername("system");

@@ -31,6 +31,7 @@ class DbServiceRegistryTest {
     private OpsServiceEntity entity(String name, String baseUrl) {
         OpsServiceEntity e = new OpsServiceEntity();
         e.setName(name);
+        e.setTenantId("t1");
         e.setBaseUrl(baseUrl);
         e.setHealthPath("/actuator/health");
         e.setMetricsPath("/actuator/metrics");
@@ -53,6 +54,7 @@ class DbServiceRegistryTest {
 
         assertThat(list).hasSize(2);
         assertThat(list.get(0).getName()).isEqualTo("svc-a");
+        assertThat(list.get(0).getTenantId()).isEqualTo("t1");
         assertThat(list.get(0).getBaseUrl()).isEqualTo("http://a:8080");
         assertThat(list.get(0).getHealthPath()).isEqualTo("/actuator/health");
         assertThat(list.get(0).getMetricsPath()).isEqualTo("/actuator/metrics");

@@ -10,8 +10,10 @@ import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntit
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationChannelMapper;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -27,12 +29,13 @@ public class NotificationChannelService {
     private final NotificationRecordMapper recordMapper;
     private final NotifierRegistry notifierRegistry;
     private final NotificationCenter notificationCenter;
+    private final NotificationScope notificationScope;
 
     /**
      * 列表查询（可按类型 / 启用状态过滤）
      */
     public List<NotificationChannelConfigEntity> list(String type, Boolean enabled) {
-        LambdaQueryWrapper<NotificationChannelConfigEntity> qw = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<NotificationChannelConfigEntity> qw = notificationScope.current().channels();
         if (type != null && !type.isBlank()) {
             qw.eq(NotificationChannelConfigEntity::getType, type);
         }
@@ -48,13 +51,17 @@ public class NotificationChannelService {
      */
     public NotificationChannelConfigEntity create(NotificationChannelRequest request) {
         validate(request);
+        String tenantId = currentTenantId();
         Long count = channelMapper.selectCount(new LambdaQueryWrapper<NotificationChannelConfigEntity>()
-                .eq(NotificationChannelConfigEntity::getName, request.getName()));
+                .eq(NotificationChannelConfigEntity::getName, request.getName())
+                .eq(NotificationChannelConfigEntity::getTenantId, tenantId));
         if (count != null && count > 0) {
             throw new BusinessException(ErrorCode.NOTIFICATION_CHANNEL_NAME_EXISTS, "渠道名称已存在: " + request.getName());
         }
         NotificationChannelConfigEntity entity = new NotificationChannelConfigEntity();
         entity.setName(request.getName());
+        entity.setTenantId(tenantId);
+        entity.setDeptId(SecurityUtils.getCurrentDeptId());
         entity.setType(request.getType());
         entity.setEnabled(request.getEnabled() == null || request.getEnabled());
         entity.setConfig(request.getConfig());
@@ -71,7 +78,8 @@ public class NotificationChannelService {
         validate(request);
         NotificationChannelConfigEntity nameOwner = channelMapper.selectOne(
                 new LambdaQueryWrapper<NotificationChannelConfigEntity>()
-                        .eq(NotificationChannelConfigEntity::getName, request.getName()));
+                        .eq(NotificationChannelConfigEntity::getName, request.getName())
+                        .eq(NotificationChannelConfigEntity::getTenantId, entity.getTenantId()));
         if (nameOwner != null && !nameOwner.getId().equals(id)) {
             throw new BusinessException(ErrorCode.NOTIFICATION_CHANNEL_NAME_EXISTS, "渠道名称已存在: " + request.getName());
         }
@@ -116,10 +124,15 @@ public class NotificationChannelService {
 
     public NotificationChannelConfigEntity getById(Long id) {
         NotificationChannelConfigEntity entity = channelMapper.selectById(id);
-        if (entity == null) {
+        if (entity == null || !notificationScope.current().canAccess(entity)) {
             throw new BusinessException(ErrorCode.NOTIFICATION_CHANNEL_NOT_FOUND, "通知渠道不存在: " + id);
         }
         return entity;
+    }
+
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return StringUtils.hasText(tenantId) ? tenantId : "t-default";
     }
 
     private void validate(NotificationChannelRequest request) {

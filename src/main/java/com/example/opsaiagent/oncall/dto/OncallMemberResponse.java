@@ -13,7 +13,9 @@ import java.time.LocalDateTime;
 public class OncallMemberResponse {
 
     private Long id;
-    private Long userId;
+    private String userId;
+    private String tenantId;
+    private Long deptId;
     private String dutyRole;
     private String addedBy;
     private LocalDateTime addedAt;

@@ -5,10 +5,12 @@ import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationRecordResponse;
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;
+import com.example.opsaiagent.notification.service.NotificationScope;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,9 +25,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/notifications/records")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('notification:manage')")
 public class NotificationRecordController {
 
     private final NotificationRecordMapper recordMapper;
+    private final NotificationScope notificationScope;
 
     @Operation(summary = "查询通知发送记录", description = "可按状态 / 渠道 / 告警事件过滤")
     @GetMapping
@@ -34,7 +38,7 @@ public class NotificationRecordController {
             @RequestParam(required = false) Long channelId,
             @RequestParam(required = false) Long alertEventId,
             @RequestParam(defaultValue = "50") int limit) {
-        LambdaQueryWrapper<NotificationRecordEntity> qw = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<NotificationRecordEntity> qw = notificationScope.current().records();
         if (status != null && !status.isBlank()) {
             qw.eq(NotificationRecordEntity::getStatus, status);
         }

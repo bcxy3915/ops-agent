@@ -6,6 +6,7 @@ import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgePublishRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.service.KnowledgeDocumentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -271,31 +272,31 @@ class KnowledgeDocumentControllerTest {
     }
 
     @Test
-    @DisplayName("鉴权：写接口要求 ADMIN/OPERATOR")
-    void writeEndpoints_requireAdminOrOperator() throws Exception {
-        assertWriteRequires("upload", MultipartFile.class, String.class, String.class, String.class, String.class, String.class);
-        assertWriteRequires("publish", Long.class, KnowledgePublishRequest.class);
-        assertWriteRequires("update", Long.class, KnowledgeDocumentUpdateRequest.class);
-        assertWriteRequires("delete", Long.class);
-        assertWriteRequires("onlineCreate", KnowledgeOnlineCreateRequest.class);
-        assertWriteRequires("expireScan");
+    @DisplayName("鉴权：写接口要求对应权限点")
+    void writeEndpoints_requirePermission() throws Exception {
+        assertAuthority("upload", "knowledge:write",
+                MultipartFile.class, String.class, String.class, String.class, String.class, String.class);
+        assertAuthority("publish", "knowledge:review", Long.class, KnowledgePublishRequest.class);
+        assertAuthority("submit", "knowledge:write", Long.class);
+        assertAuthority("review", "knowledge:review", Long.class, KnowledgeReviewRequest.class);
+        assertAuthority("update", "knowledge:write", Long.class, KnowledgeDocumentUpdateRequest.class);
+        assertAuthority("delete", "knowledge:write", Long.class);
+        assertAuthority("onlineCreate", "knowledge:write", KnowledgeOnlineCreateRequest.class);
+        assertAuthority("expireScan", "knowledge:admin");
     }
 
     @Test
-    @DisplayName("鉴权：读接口不要求写权限（VIEWER 可读）")
-    void readEndpoints_openToAllRoles() throws Exception {
-        assertThat(KnowledgeDocumentController.class
-                .getMethod("list", String.class, String.class, String.class, String.class, int.class, int.class)
-                .getAnnotation(PreAuthorize.class)).isNull();
-        assertThat(KnowledgeDocumentController.class
-                .getMethod("detail", Long.class)
-                .getAnnotation(PreAuthorize.class)).isNull();
+    @DisplayName("鉴权：读接口要求 knowledge:read")
+    void readEndpoints_requireReadPermission() throws Exception {
+        assertAuthority("list", "knowledge:read",
+                String.class, String.class, String.class, String.class, int.class, int.class);
+        assertAuthority("detail", "knowledge:read", Long.class);
     }
 
-    private void assertWriteRequires(String methodName, Class<?>... params) throws NoSuchMethodException {
+    private void assertAuthority(String methodName, String authority, Class<?>... params) throws NoSuchMethodException {
         java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod(methodName, params);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
-        assertThat(pa.value()).contains("ADMIN").contains("OPERATOR");
+        assertThat(pa.value()).contains("hasAuthority('" + authority + "')");
     }
 }

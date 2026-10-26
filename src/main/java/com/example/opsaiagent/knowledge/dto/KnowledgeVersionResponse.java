@@ -11,6 +11,12 @@ public class KnowledgeVersionResponse {
     /** 版本记录 ID */
     private Long id;
 
+    /** 所属租户 ID */
+    private String tenantId;
+
+    /** 归属部门 ID */
+    private Long deptId;
+
     /** 版本号（同文档内自增） */
     private Integer version;
 
@@ -32,6 +38,22 @@ public class KnowledgeVersionResponse {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public Long getDeptId() {
+        return deptId;
+    }
+
+    public void setDeptId(Long deptId) {
+        this.deptId = deptId;
     }
 
     public Integer getVersion() {

@@ -15,6 +15,8 @@ public class MaintenanceWindowResponse {
 
     private Long id;
     private String service;
+    private String tenantId;
+    private Long deptId;
     private String reason;
     private LocalDateTime until;
     private String note;

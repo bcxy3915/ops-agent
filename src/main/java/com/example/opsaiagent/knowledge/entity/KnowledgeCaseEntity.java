@@ -21,6 +21,18 @@ public class KnowledgeCaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 所属租户 ID */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /** 归属部门 ID */
+    @TableField("dept_id")
+    private Long deptId;
+
+    /** 案例可见性：PERSONAL / DEPT / TENANT / PUBLIC */
+    @TableField("visibility")
+    private String visibility;
+
     /** 来源告警事件 ID */
     @TableField("source_alert_id")
     private Long sourceAlertId;

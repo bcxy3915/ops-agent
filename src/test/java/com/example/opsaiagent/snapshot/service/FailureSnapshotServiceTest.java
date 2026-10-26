@@ -5,6 +5,7 @@ import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.mapper.AuditLogMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
+import com.example.opsaiagent.diagnosis.service.DiagnosisScope;
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
@@ -63,6 +64,9 @@ class FailureSnapshotServiceTest {
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+
+    @Spy
+    private DiagnosisScope diagnosisScope = new DiagnosisScope(null, null);
 
     @InjectMocks
     private FailureSnapshotService snapshotService;

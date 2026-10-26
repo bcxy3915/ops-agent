@@ -203,30 +203,27 @@ class KnowledgeCaseControllerTest {
     // ==================== 鉴权注解 ====================
 
     @Test
-    @DisplayName("鉴权：沉淀/修正/丢弃要求 ADMIN/OPERATOR")
-    void writeEndpoints_requireAdminOrOperator() throws Exception {
-        assertWriteRequires("confirm", Long.class);
-        assertWriteRequires("revise", Long.class, CaseReviseRequest.class);
-        assertWriteRequires("discard", Long.class);
-        assertWriteRequires("generate", int.class);
+    @DisplayName("鉴权：沉淀/修正/丢弃/生成要求 knowledge:write")
+    void writeEndpoints_requireWritePermission() throws Exception {
+        assertAuthority("confirm", "knowledge:write", Long.class);
+        assertAuthority("revise", "knowledge:write", Long.class, CaseReviseRequest.class);
+        assertAuthority("discard", "knowledge:write", Long.class);
+        assertAuthority("generate", "knowledge:write", int.class);
     }
 
     @Test
-    @DisplayName("鉴权：案例列表/详情不要求写权限（VIEWER 可读）")
-    void readEndpoints_openToAllRoles() throws Exception {
-        assertThat(KnowledgeCaseController.class
-                .getMethod("list", String.class, int.class, int.class)
-                .getAnnotation(PreAuthorize.class)).isNull();
-        assertThat(KnowledgeCaseController.class
-                .getMethod("detail", Long.class)
-                .getAnnotation(PreAuthorize.class)).isNull();
+    @DisplayName("鉴权：案例列表/详情要求 knowledge:read")
+    void readEndpoints_requireReadPermission() throws Exception {
+        assertAuthority("list", "knowledge:read", String.class, int.class, int.class);
+        assertAuthority("detail", "knowledge:read", Long.class);
     }
 
-    private void assertWriteRequires(String methodName, Class<?>... params) throws NoSuchMethodException {
+    private void assertAuthority(String methodName, String authority, Class<?>... params)
+            throws NoSuchMethodException {
         java.lang.reflect.Method m = KnowledgeCaseController.class.getMethod(methodName, params);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
-        assertThat(pa.value()).contains("ADMIN").contains("OPERATOR");
+        assertThat(pa.value()).contains("hasAuthority('" + authority + "')");
     }
 
     // ==================== P1-⑤ 案例自动生成 ====================

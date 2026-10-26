@@ -70,7 +70,8 @@ class DiagnosisServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient, objectMapper, hybridRetriever, documentMapper, caseMapper);
+        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient, objectMapper,
+                hybridRetriever, documentMapper, caseMapper, new DiagnosisScope(null, null));
         snapshot = new FailureSnapshotEntity();
         snapshot.setId(100L);
         snapshot.setAlertEventId(200L);

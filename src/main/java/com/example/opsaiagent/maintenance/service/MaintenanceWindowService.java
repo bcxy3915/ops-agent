@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -52,11 +53,15 @@ public class MaintenanceWindowService {
             throw new BusinessException(ErrorCode.ALERT_EVENT_INVALID,
                     "维护窗口到期时间必须晚于当前时间");
         }
+        String tenantId = currentTenantId();
+        Long deptId = SecurityUtils.getCurrentDeptId();
         List<String> services = request.getServices().stream().distinct().toList();
         List<MaintenanceWindowResponse> created = new ArrayList<>();
         for (String service : services) {
             MaintenanceWindowEntity window = new MaintenanceWindowEntity();
             window.setService(service);
+            window.setTenantId(tenantId);
+            window.setDeptId(deptId);
             window.setReason(request.getReason());
             window.setUntil(request.getUntil());
             window.setNote(request.getNote());
@@ -65,7 +70,7 @@ public class MaintenanceWindowService {
             windowMapper.insert(window);
             created.add(toResponse(window));
         }
-        silenceExistingAlerts(services, request.getReason(), request.getUntil());
+        silenceExistingAlerts(services, tenantId, request.getReason(), request.getUntil());
         return created;
     }
 
@@ -73,17 +78,21 @@ public class MaintenanceWindowService {
      * 存量告警批量静默：服务下所有 FIRING / ACKNOWLEDGED / 已 SILENCED 事件
      * 统一置为维护窗口到期时间，reason 打上维护窗口前缀便于到期恢复识别。
      */
-    private void silenceExistingAlerts(List<String> services, String reason, LocalDateTime until) {
+    private void silenceExistingAlerts(List<String> services, String tenantId,
+                                       String reason, LocalDateTime until) {
         if (services.isEmpty()) {
             return;
         }
-        List<AlertEventEntity> events = alertEventMapper.selectList(
-                new LambdaQueryWrapper<AlertEventEntity>()
-                        .in(AlertEventEntity::getService, services)
-                        .in(AlertEventEntity::getStatus,
-                                AlertEventStatus.FIRING.name(),
-                                AlertEventStatus.ACKNOWLEDGED.name(),
-                                AlertEventStatus.SILENCED.name()));
+        LambdaQueryWrapper<AlertEventEntity> qw = new LambdaQueryWrapper<AlertEventEntity>()
+                .in(AlertEventEntity::getService, services)
+                .in(AlertEventEntity::getStatus,
+                        AlertEventStatus.FIRING.name(),
+                        AlertEventStatus.ACKNOWLEDGED.name(),
+                        AlertEventStatus.SILENCED.name());
+        if (StringUtils.hasText(tenantId)) {
+            qw.eq(AlertEventEntity::getTenantId, tenantId);
+        }
+        List<AlertEventEntity> events = alertEventMapper.selectList(qw);
         for (AlertEventEntity event : events) {
             try {
                 if (AlertEventStatus.SILENCED.name().equals(event.getStatus())) {
@@ -106,9 +115,13 @@ public class MaintenanceWindowService {
      */
     public List<MaintenanceWindowResponse> list(boolean activeOnly) {
         LocalDateTime now = LocalDateTime.now();
-        List<MaintenanceWindowEntity> windows = windowMapper.selectList(
-                new LambdaQueryWrapper<MaintenanceWindowEntity>()
-                        .orderByDesc(MaintenanceWindowEntity::getCreatedAt));
+        LambdaQueryWrapper<MaintenanceWindowEntity> qw = new LambdaQueryWrapper<MaintenanceWindowEntity>()
+                .orderByDesc(MaintenanceWindowEntity::getCreatedAt);
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(tenantId)) {
+            qw.eq(MaintenanceWindowEntity::getTenantId, tenantId);
+        }
+        List<MaintenanceWindowEntity> windows = windowMapper.selectList(qw);
         return windows.stream()
                 .filter(w -> !activeOnly || isWindowActive(w, now))
                 .map(this::toResponse)
@@ -120,7 +133,7 @@ public class MaintenanceWindowService {
      */
     public MaintenanceWindowResponse end(Long id) {
         MaintenanceWindowEntity window = windowMapper.selectById(id);
-        if (window == null) {
+        if (window == null || !canAccess(window)) {
             throw new BusinessException(ErrorCode.MAINTENANCE_WINDOW_NOT_FOUND, "维护窗口不存在: " + id);
         }
         if (window.getEndedAt() != null) {
@@ -135,12 +148,27 @@ public class MaintenanceWindowService {
      * 判断服务当前是否处于有效维护窗口（未结束且未到期）
      */
     public boolean isServiceInWindow(String service, LocalDateTime now) {
-        List<MaintenanceWindowEntity> windows = windowMapper.selectList(
-                new LambdaQueryWrapper<MaintenanceWindowEntity>()
-                        .eq(MaintenanceWindowEntity::getService, service)
-                        .isNull(MaintenanceWindowEntity::getEndedAt)
-                        .gt(MaintenanceWindowEntity::getUntil, now)
-                        .last("LIMIT 1"));
+        return isServiceInWindow(null, service, now);
+    }
+
+    /**
+     * 判断服务在指定租户下是否处于有效维护窗口。
+     *
+     * @param tenantId 租户 ID；为空时保持旧全局查询
+     * @param service  服务名
+     * @param now      当前时间
+     * @return true=维护中
+     */
+    public boolean isServiceInWindow(String tenantId, String service, LocalDateTime now) {
+        LambdaQueryWrapper<MaintenanceWindowEntity> qw = new LambdaQueryWrapper<MaintenanceWindowEntity>()
+                .eq(MaintenanceWindowEntity::getService, service)
+                .isNull(MaintenanceWindowEntity::getEndedAt)
+                .gt(MaintenanceWindowEntity::getUntil, now)
+                .last("LIMIT 1");
+        if (StringUtils.hasText(tenantId)) {
+            qw.eq(MaintenanceWindowEntity::getTenantId, tenantId);
+        }
+        List<MaintenanceWindowEntity> windows = windowMapper.selectList(qw);
         return !windows.isEmpty();
     }
 
@@ -165,10 +193,24 @@ public class MaintenanceWindowService {
         return window.getEndedAt() == null && window.getUntil().isAfter(now);
     }
 
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return StringUtils.hasText(tenantId) ? tenantId : "t-default";
+    }
+
+    private boolean canAccess(MaintenanceWindowEntity window) {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return !StringUtils.hasText(tenantId)
+                || tenantId.equals(window.getTenantId())
+                || "0".equals(tenantId);
+    }
+
     private MaintenanceWindowResponse toResponse(MaintenanceWindowEntity window) {
         return MaintenanceWindowResponse.builder()
                 .id(window.getId())
                 .service(window.getService())
+                .tenantId(window.getTenantId())
+                .deptId(window.getDeptId())
                 .reason(window.getReason())
                 .until(window.getUntil())
                 .note(window.getNote())

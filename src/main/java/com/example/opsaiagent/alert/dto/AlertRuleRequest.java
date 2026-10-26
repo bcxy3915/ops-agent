@@ -15,6 +15,12 @@ public class AlertRuleRequest {
     @NotBlank(message = "规则名称不能为空")
     private String name;
 
+    /** 租户 ID；平台创建时使用，企业用户可空 */
+    private String tenantId;
+
+    /** 归属部门；为空时使用当前部门 */
+    private Long deptId;
+
     private String description;
 
     /** 目标服务名（可为空 = 全部服务） */

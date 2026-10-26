@@ -7,6 +7,7 @@ import com.example.opsaiagent.metrics.dto.MetricHistoryResponse;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import com.example.opsaiagent.registry.ServiceRegistry;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -49,11 +50,12 @@ public class MetricSampleController {
         long startMs = endMs - rangeMs;
 
         Map<String, List<MetricPoint>> series = new LinkedHashMap<>();
+        String tenantId = SecurityUtils.getCurrentTenantId();
         if (metric != null && !metric.isBlank()) {
-            series.put(metric, metricSampleStore.query(service, metric, startMs, endMs));
+            series.put(metric, metricSampleStore.query(tenantId, service, metric, startMs, endMs));
         } else {
             for (String m : List.of("cpu", "memory", "threadCount", "gcPause", "hikariActive")) {
-                series.put(m, metricSampleStore.query(service, m, startMs, endMs));
+                series.put(m, metricSampleStore.query(tenantId, service, m, startMs, endMs));
             }
         }
 

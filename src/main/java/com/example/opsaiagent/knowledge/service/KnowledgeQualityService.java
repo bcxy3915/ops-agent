@@ -62,6 +62,7 @@ public class KnowledgeQualityService {
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeConflictMapper conflictMapper;
     private final HybridRetriever hybridRetriever;
+    private final KnowledgeQueryScope queryScope;
 
     /**
      * 上传质检：冲突检测 + 过时检测 + 敏感信息脱敏预览
@@ -80,7 +81,7 @@ public class KnowledgeQualityService {
 
         // 1. 标题冲突：标题相同/包含的已有文档
         List<KnowledgeDocumentEntity> sameTitleDocs = documentMapper.selectList(
-                new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                queryScope.current().documents()
                         .eq(KnowledgeDocumentEntity::getTitle, title)
                         .orderByDesc(KnowledgeDocumentEntity::getUpdatedAt));
         for (KnowledgeDocumentEntity doc : sameTitleDocs) {
@@ -164,7 +165,7 @@ public class KnowledgeQualityService {
                     "无效的裁定结果（仅支持 KEEP_NEW / KEEP_OLD / MANUAL）");
         }
         KnowledgeConflictEntity conflict = conflictMapper.selectById(conflictId);
-        if (conflict == null) {
+        if (conflict == null || !queryScope.current().canAccess(conflict)) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_CONFLICT_NOT_FOUND, "冲突记录不存在: " + conflictId);
         }
         if (!"PENDING".equals(conflict.getStatus())) {
