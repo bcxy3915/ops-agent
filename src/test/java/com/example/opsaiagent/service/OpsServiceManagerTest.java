@@ -99,7 +99,7 @@ class OpsServiceManagerTest {
 
         assertThat(entity.getId()).isEqualTo("id-a");
         verify(mapper).updateById(entity);
-        verify(mapper, never()).insert(any());
+        verify(mapper, never()).insert(any(OpsServiceEntity.class));
     }
 
     @Test
@@ -110,7 +110,7 @@ class OpsServiceManagerTest {
         manager.saveOrUpdate(service("new"));
 
         verify(mapper).insert(any(OpsServiceEntity.class));
-        verify(mapper, never()).updateById(any());
+        verify(mapper, never()).updateById(any(OpsServiceEntity.class));
     }
 
     // ==================== 删除 ====================

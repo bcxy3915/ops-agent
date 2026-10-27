@@ -460,7 +460,7 @@ class ConversationServiceTest {
 
             assertThat(conversationService.renameConversation("sess-1", "admin", "新标题"))
                     .isFalse();
-            verify(conversationMapper, never()).updateById(any());
+            verify(conversationMapper, never()).updateById(any(ConversationEntity.class));
         }
     }
 }

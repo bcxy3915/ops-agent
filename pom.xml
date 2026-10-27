@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.13</version>
+        <version>4.1.2</version>
         <relativePath/>
     </parent>
     <groupId>com.example</groupId>
@@ -28,9 +28,9 @@
     </scm>
     <properties>
         <java.version>21</java.version>
-        <spring-ai.version>1.1.0</spring-ai.version>
-        <mybatis-plus.version>3.5.5</mybatis-plus.version>
-        <springdoc-openapi.version>2.9.1</springdoc-openapi.version>
+        <spring-ai.version>2.0.2</spring-ai.version>
+        <mybatis-plus.version>3.5.18</mybatis-plus.version>
+        <springdoc-openapi.version>3.2.0</springdoc-openapi.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
 
@@ -105,7 +105,14 @@
 
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+
+        <!-- MyBatis-Plus 3.5.9+ 将分页解析器拆分为独立模块 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-jsqlparser</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
 
@@ -163,7 +170,7 @@
         <!-- Spring AOP -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
 
         <!-- Bucket4j 令牌桶限流 -->

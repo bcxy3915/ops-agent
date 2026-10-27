@@ -413,7 +413,7 @@ class AlertEvaluatorTest {
 
         evaluator.evaluate();
 
-        verify(eventMapper).updateById(argThat(e -> "FIRING".equals(e.getStatus())));
+        verify(eventMapper).updateById(argThat((AlertEventEntity e) -> "FIRING".equals(e.getStatus())));
         verify(notificationCenter, org.mockito.Mockito.atLeastOnce()).sendOnEvent(any(), any());
     }
 
@@ -437,7 +437,7 @@ class AlertEvaluatorTest {
 
         evaluator.evaluate();
 
-        verify(eventMapper).updateById(argThat(e -> "RESOLVED".equals(e.getStatus())));
+        verify(eventMapper).updateById(argThat((AlertEventEntity e) -> "RESOLVED".equals(e.getStatus())));
         verify(notificationCenter, never()).sendOnEvent(any(), any());
     }
 

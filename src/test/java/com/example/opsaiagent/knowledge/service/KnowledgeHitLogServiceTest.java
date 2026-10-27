@@ -64,7 +64,7 @@ class KnowledgeHitLogServiceTest {
     void recordHits_emptyOrNull() {
         assertThat(service.recordHits(null, "q", KnowledgeHitLogService.SOURCE_ASK, "u")).isZero();
         assertThat(service.recordHits(List.of(), "q", KnowledgeHitLogService.SOURCE_ASK, "u")).isZero();
-        verify(hitLogMapper, never()).insert(any());
+        verify(hitLogMapper, never()).insert(any(KnowledgeHitLogEntity.class));
     }
 
     @Test
@@ -72,7 +72,7 @@ class KnowledgeHitLogServiceTest {
     void recordHits_skipNullDocId() {
         int n = service.recordHits(List.of(hit(null), hit(null)), "q", KnowledgeHitLogService.SOURCE_ASK, "u");
         assertThat(n).isZero();
-        verify(hitLogMapper, never()).insert(any());
+        verify(hitLogMapper, never()).insert(any(KnowledgeHitLogEntity.class));
         verify(documentMapper, never()).update(any(), any());
     }
 
@@ -81,7 +81,7 @@ class KnowledgeHitLogServiceTest {
     void recordHits_ok() {
         int n = service.recordHits(List.of(hit(1L), hit(2L)), "数据库连接失败", KnowledgeHitLogService.SOURCE_ASK, "admin");
         assertThat(n).isEqualTo(2);
-        verify(hitLogMapper, times(2)).insert(any());
+        verify(hitLogMapper, times(2)).insert(any(KnowledgeHitLogEntity.class));
         verify(documentMapper, times(2)).update(eq(null), any());
         verify(documentMapper, times(2)).selectById(any());
     }
@@ -135,7 +135,7 @@ class KnowledgeHitLogServiceTest {
     @Test
     @DisplayName("单条写入失败：跳过该条，其余命中仍记录")
     void recordHits_partialFailureTolerant() {
-        doThrow(new RuntimeException("db down")).when(hitLogMapper).insert(any());
+        doThrow(new RuntimeException("db down")).when(hitLogMapper).insert(any(KnowledgeHitLogEntity.class));
 
         int n = service.recordHits(List.of(hit(1L), hit(2L)), "q", KnowledgeHitLogService.SOURCE_ASK, "admin");
         assertThat(n).isZero();
@@ -148,7 +148,7 @@ class KnowledgeHitLogServiceTest {
         String longQuery = "长".repeat(800);
         int n = service.recordHits(List.of(hit(1L)), longQuery, KnowledgeHitLogService.SOURCE_ASK, "admin");
         assertThat(n).isEqualTo(1);
-        verify(hitLogMapper).insert(argThat(e -> e.getQuery() != null
+        verify(hitLogMapper).insert(argThat((KnowledgeHitLogEntity e) -> e.getQuery() != null
                 && e.getQuery().length() <= 501
                 && e.getQuery().endsWith("…")));
     }

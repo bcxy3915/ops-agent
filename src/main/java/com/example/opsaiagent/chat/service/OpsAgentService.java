@@ -6,6 +6,7 @@ import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
@@ -19,10 +20,9 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 import java.util.Map;
@@ -131,7 +131,7 @@ public class OpsAgentService {
         // 6.记录命中流水（对话引用来源 ASK），失败不影响主流程
         try {
             knowledgeHitLogService.recordHits(citations, question,
-                    KnowledgeHitLogService.SOURCE_ASK, getCurrentUsername());
+                    KnowledgeHitLogService.SOURCE_ASK, SecurityUtils.getCurrentUsername());
         } catch (Exception e) {
             log.warn("记录问答命中流水失败", e);
         }
@@ -179,7 +179,7 @@ public class OpsAgentService {
      */
     private Flux<ServerSentEvent<String>> doAskStreamWithCitations(String sessionId, String question) {
         // 1. 拿当前用户名
-        String username = getCurrentUsername();
+        String username = SecurityUtils.getCurrentUsername();
 
         // 2. 确保会话存在（同步）
         if (username != null) {
@@ -225,6 +225,7 @@ public class OpsAgentService {
 
         // 答案流式输出完成后，再发送 citations（知识来源），最后 [DONE]
         return Flux.concat(tokenEvents, citationsEvent, doneEvent)
+                .publishOn(Schedulers.boundedElastic())
                 .doFinally(signal -> {
                     // 无论完成、出错、取消，都保存
                     String answer = answerBuffer.toString();
@@ -236,18 +237,6 @@ public class OpsAgentService {
                         }
                     }
                 });
-    }
-
-    /**
-     * 从 SecurityContext 拿当前用户名
-     */
-    private String getCurrentUsername() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated()
-                && !"anonymousUser".equals(auth.getPrincipal())) {
-            return auth.getName();
-        }
-        return null;
     }
 
     /**

@@ -67,7 +67,7 @@ class MaintenanceWindowServiceTest {
 
         assertThatThrownBy(() -> service.create(req))
                 .isInstanceOf(BusinessException.class);
-        verify(windowMapper, never()).insert(any());
+        verify(windowMapper, never()).insert(any(MaintenanceWindowEntity.class));
     }
 
     @Test

@@ -703,7 +703,7 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.rollback(1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_VERSION_NOT_FOUND);
-        verify(documentMapper, never()).updateById(any());
+        verify(documentMapper, never()).updateById(any(KnowledgeDocumentEntity.class));
     }
 
     @Test

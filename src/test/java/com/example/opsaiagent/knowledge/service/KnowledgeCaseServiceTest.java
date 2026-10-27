@@ -504,7 +504,7 @@ class KnowledgeCaseServiceTest {
             int generated = service.generateCandidates(10);
 
             assertThat(generated).isZero();
-            verify(caseMapper, never()).insert(any());
+            verify(caseMapper, never()).insert(any(KnowledgeCaseEntity.class));
         }
 
         @Test
@@ -512,7 +512,7 @@ class KnowledgeCaseServiceTest {
         void generate_noRecords() {
             when(diagnosisRecordMapper.selectList(any())).thenReturn(List.of());
             assertThat(service.generateCandidates(20)).isZero();
-            verify(caseMapper, never()).insert(any());
+            verify(caseMapper, never()).insert(any(KnowledgeCaseEntity.class));
         }
 
         @Test

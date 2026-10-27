@@ -4,6 +4,10 @@ server:
 spring:
   profiles:
     active: local
+  # Spring Boot 4 默认 Jackson 3；项目 DTO/脱敏序列化器仍使用 Jackson 2
+  http:
+    converters:
+      preferred-json-mapper: jackson2
   application:
     name: ops-agent-core
   mvc:
@@ -36,15 +40,13 @@ spring:
       api-key: ${AI_API_KEY:}
       base-url: https://api.deepseek.com
       chat:
-        options:
-          model: deepseek-chat
-          temperature: 0.7
-          timeout: 60s # LLM 调用超时（第三方容错）
+        model: deepseek-chat
+        temperature: 0.7
+        timeout: 60s # LLM 调用超时（第三方容错）
       embedding:
         base-url: https://dashscope.aliyuncs.com/compatible-mode
         api-key: ${DASHSCOPE_API_KEY:}
-        options:
-          model: text-embedding-v3
+        model: text-embedding-v3
     vectorstore:
       pgvector:
         initialize-schema: true

@@ -236,8 +236,7 @@ class KnowledgeQualityServiceTest {
         assertThat(resp.getDecision()).isEqualTo("MANUAL");
         assertThat(newDoc.getTrustStatus()).isNotEqualTo("EXPIRED");
         assertThat(newDoc.getConflictStatus()).isEqualTo("MANUAL");
-        verify(documentMapper, never()).updateById(org.mockito.ArgumentMatchers.argThat(d -> {
-            KnowledgeDocumentEntity e = (KnowledgeDocumentEntity) d;
+        verify(documentMapper, never()).updateById(org.mockito.ArgumentMatchers.argThat((KnowledgeDocumentEntity e) -> {
             return "EXPIRED".equals(e.getTrustStatus());
         }));
     }
