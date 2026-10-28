@@ -1,12 +1,12 @@
 package com.example.opsaiagent.loader;
 
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
+import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -50,7 +50,8 @@ class DocumentLoaderTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
-    @InjectMocks
+    private VectorIndexer vectorIndexer;
+
     private DocumentLoader loader;
 
     @Mock
@@ -64,6 +65,8 @@ class DocumentLoaderTest {
 
     @BeforeEach
     void setUp() throws IOException {
+        vectorIndexer = new VectorIndexer(vectorStore);
+        loader = new DocumentLoader(vectorIndexer, resourcePatternResolver, jdbcTemplate);
         lenient().when(mockMdResource.getFilename()).thenReturn("test.md");
         lenient().when(mockNewResource.getFilename()).thenReturn("new.md");
         lenient().when(mockMdResource.getInputStream())

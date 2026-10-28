@@ -12,6 +12,7 @@ import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
@@ -69,6 +70,8 @@ class KnowledgeDocumentServiceTest {
     @Mock
     private VectorStore vectorStore;
     @Mock
+    private DocumentParserStrategyFactory parserStrategyFactory;
+    @Mock
     private JdbcTemplate jdbcTemplate;
     @Mock
     private KnowledgeVersionService versionService;
@@ -81,12 +84,14 @@ class KnowledgeDocumentServiceTest {
     private KnowledgeQueryScope queryScope = new KnowledgeQueryScope(null);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private VectorIndexer vectorIndexer;
     private KnowledgeDocumentService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorStore, jdbcTemplate, objectMapper,
-                versionService, tenantService, deptService, queryScope);
+        vectorIndexer = new VectorIndexer(vectorStore);
+        service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorIndexer, parserStrategyFactory,
+                jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 

@@ -69,10 +69,13 @@ class KnowledgeCaseServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    private VectorIndexer vectorIndexer;
+
     @BeforeEach
     void setUp() {
+        vectorIndexer = new VectorIndexer(vectorStore);
         service = new KnowledgeCaseService(caseMapper, diagnosisRecordMapper, alertEventMapper,
-                failureSnapshotMapper, documentMapper, chunkMapper, vectorStore, objectMapper,
+                failureSnapshotMapper, documentMapper, chunkMapper, vectorIndexer, objectMapper,
                 new KnowledgeQueryScope(null));
     }
 
