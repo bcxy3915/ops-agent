@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.loader;
 
+import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,8 +9,6 @@ import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
 import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -49,8 +48,8 @@ public class DocumentLoader {
     /** 向量 metadata 中保存内容指纹的字段名 */
     public static final String HASH_METADATA_KEY = "contentHash";
 
-    // 向量存储
-    private final VectorStore vectorStore;
+    // 向量入库公共组件（切分 + 分批写入）
+    private final VectorIndexer vectorIndexer;
 
     // 资源加载器
     private final ResourcePatternResolver resourcePatternResolver;
@@ -298,33 +297,20 @@ public class DocumentLoader {
             }
 
             // 4. 文本切分
-            TokenTextSplitter splitter = TokenTextSplitter.builder()
-                    .withChunkSize(500)
-                    .withMinChunkSizeChars(200)
-                    .withMaxNumChunks(10000)
-                    .withKeepSeparator(true)
-                    .build();
-            List<Document> chunks = splitter.apply(allDocs);
+            List<Document> chunks = vectorIndexer.split(allDocs);
             log.info("文档切分完成，共 {} 块", chunks.size());
 
-            // 5. 分批存入向量库（外部 embedding API batch <= 10）
-            int batchSize = 10;
-            for (int i = 0; i < chunks.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, chunks.size());
-                List<Document> batch = chunks.subList(i, end);
-                for (Document doc : batch) {
-                    // 内置知识统一归属平台公共知识，供检索范围过滤使用
-                    doc.getMetadata().putIfAbsent("tenantId", "0");
-                    doc.getMetadata().putIfAbsent("deptId", "");
-                    doc.getMetadata().putIfAbsent("visibility", "PUBLIC");
-                    doc.getMetadata().putIfAbsent("reviewStatus", "APPROVED");
-                    doc.getMetadata().putIfAbsent("owner", "system");
-                    doc.getMetadata().putIfAbsent("layer", "BUILTIN");
-                }
-                vectorStore.add(batch);
-                indexed += batch.size();
-                log.info("向量入库批次: {}-{}, 共 {} 条", i + 1, end, chunks.size());
+            // 5. 填充内置知识元数据后分批写入向量库
+            for (Document doc : chunks) {
+                // 内置知识统一归属平台公共知识，供检索范围过滤使用
+                doc.getMetadata().putIfAbsent("tenantId", "0");
+                doc.getMetadata().putIfAbsent("deptId", "");
+                doc.getMetadata().putIfAbsent("visibility", "PUBLIC");
+                doc.getMetadata().putIfAbsent("reviewStatus", "APPROVED");
+                doc.getMetadata().putIfAbsent("owner", "system");
+                doc.getMetadata().putIfAbsent("layer", "BUILTIN");
             }
+            indexed = vectorIndexer.write(chunks);
             log.info("向量入库完成，共 {} 条", indexed);
         } catch (Exception e) {
             log.error("文档加载失败", e);

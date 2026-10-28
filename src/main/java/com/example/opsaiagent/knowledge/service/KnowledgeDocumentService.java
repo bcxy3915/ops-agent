@@ -13,6 +13,8 @@ import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
@@ -24,16 +26,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
-import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
-import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
-import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,8 +36,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -109,7 +102,8 @@ public class KnowledgeDocumentService {
 
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
-    private final VectorStore vectorStore;
+    private final VectorIndexer vectorIndexer;
+    private final DocumentParserStrategyFactory parserStrategyFactory;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final KnowledgeVersionService versionService;
@@ -750,7 +744,13 @@ public class KnowledgeDocumentService {
                     "不支持的文件类型，仅支持 md/pdf/txt/docx: " + fileName);
         }
         try {
-            return new ParsedDocument(docType, extractText(file, docType), fileName);
+            DocumentParserStrategy strategy = parserStrategyFactory.getStrategy(docType);
+            List<Document> docs = strategy.parse(new InputStreamResource(file.getInputStream()));
+            String text = docs.stream()
+                    .map(Document::getText)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.joining("\n"));
+            return new ParsedDocument(docType, text, fileName);
         } catch (IOException e) {
             log.error("文档解析失败: {}", fileName, e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_UPLOAD_FAILED, "文档解析失败: " + e.getMessage());
@@ -760,66 +760,6 @@ public class KnowledgeDocumentService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_UPLOAD_FAILED,
                     "文档解析失败: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
-    }
-
-    /**
-     * 按类型抽取文本
-     */
-    private String extractText(MultipartFile file, String docType) throws IOException {
-        switch (docType) {
-            case "MARKDOWN": {
-                MarkdownDocumentReaderConfig config = MarkdownDocumentReaderConfig.builder()
-                        .withHorizontalRuleCreateDocument(false)
-                        .withIncludeCodeBlock(true)
-                        .withIncludeBlockquote(true)
-                        .build();
-                MarkdownDocumentReader reader = new MarkdownDocumentReader(
-                        new org.springframework.core.io.ByteArrayResource(file.getBytes()),
-                        config);
-                return reader.get().stream()
-                        .map(Document::getText)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.joining("\n"));
-            }
-            case "PDF": {
-                PdfDocumentReaderConfig config = PdfDocumentReaderConfig.builder()
-                        .withPageTopMargin(0)
-                        .withPageBottomMargin(0)
-                        .withPagesPerDocument(1)
-                        .build();
-                PagePdfDocumentReader reader = new PagePdfDocumentReader(
-                        new org.springframework.core.io.ByteArrayResource(file.getBytes()),
-                        config);
-                return reader.get().stream()
-                        .map(Document::getText)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.joining("\n"));
-            }
-            case "TXT": {
-                return new String(file.getBytes(), StandardCharsets.UTF_8);
-            }
-            case "DOCX": {
-                return extractDocx(file.getInputStream());
-            }
-            default:
-                throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "不支持的文件类型: " + docType);
-        }
-    }
-
-    /**
-     * 抽取 docx 段落文本
-     */
-    private String extractDocx(InputStream in) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        try (XWPFDocument doc = new XWPFDocument(in)) {
-            for (XWPFParagraph p : doc.getParagraphs()) {
-                String text = p.getText();
-                if (text != null && !text.isBlank()) {
-                    sb.append(text).append('\n');
-                }
-            }
-        }
-        return sb.toString();
     }
 
     /**
@@ -833,17 +773,7 @@ public class KnowledgeDocumentService {
             documentMapper.updateById(entity);
             return;
         }
-        TokenTextSplitter splitter = TokenTextSplitter.builder()
-                .withChunkSize(500)
-                .withMinChunkSizeChars(200)
-                .withMaxNumChunks(10000)
-                .withKeepSeparator(true)
-                .build();
-        List<Document> chunks = splitter.apply(List.of(new Document(content)));
-        if (chunks.isEmpty()) {
-            // 短文本可能被切分器丢弃，至少保留一个块，保证可检索
-            chunks = List.of(new Document(content));
-        }
+        List<Document> chunks = vectorIndexer.split(content);
 
         List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
         List<Document> vectorDocs = new ArrayList<>();
@@ -883,10 +813,7 @@ public class KnowledgeDocumentService {
             ordinal++;
         }
         // 分批向量化（外部 API batch <= 10）
-        int batchSize = 10;
-        for (int i = 0; i < vectorDocs.size(); i += batchSize) {
-            vectorStore.add(vectorDocs.subList(i, Math.min(i + batchSize, vectorDocs.size())));
-        }
+        vectorIndexer.write(vectorDocs);
         entity.setChunkCount(chunkEntities.size());
         documentMapper.updateById(entity);
         log.info("文档分块完成: docId={}, chunks={}", entity.getId(), chunkEntities.size());

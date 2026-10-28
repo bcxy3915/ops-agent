@@ -29,8 +29,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -75,7 +73,7 @@ public class KnowledgeCaseService {
     private final FailureSnapshotMapper failureSnapshotMapper;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
-    private final VectorStore vectorStore;
+    private final VectorIndexer vectorIndexer;
     private final ObjectMapper objectMapper;
     private final KnowledgeQueryScope queryScope;
 
@@ -307,13 +305,7 @@ public class KnowledgeCaseService {
         doc.setChunkCount(0);
         documentMapper.insert(doc);
 
-        TokenTextSplitter splitter = TokenTextSplitter.builder()
-                .withChunkSize(500)
-                .withMinChunkSizeChars(200)
-                .withMaxNumChunks(10000)
-                .withKeepSeparator(true)
-                .build();
-        List<Document> chunks = splitter.apply(List.of(new Document(content)));
+        List<Document> chunks = vectorIndexer.split(content);
         List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
         List<Document> vectorDocs = new ArrayList<>();
         String tenantId = doc.getTenantId() == null ? "" : doc.getTenantId();
@@ -348,10 +340,7 @@ public class KnowledgeCaseService {
             vectorDocs.add(vectorDoc);
             ordinal++;
         }
-        int batchSize = 10;
-        for (int i = 0; i < vectorDocs.size(); i += batchSize) {
-            vectorStore.add(vectorDocs.subList(i, Math.min(i + batchSize, vectorDocs.size())));
-        }
+        vectorIndexer.write(vectorDocs);
         doc.setChunkCount(chunkEntities.size());
         documentMapper.updateById(doc);
         log.info("案例知识沉淀完成: caseId={}, docId={}, chunks={}", entity.getId(), doc.getId(), chunkEntities.size());
