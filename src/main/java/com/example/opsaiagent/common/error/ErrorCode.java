@@ -44,7 +44,8 @@ public enum ErrorCode {
     ROLE_PERMISSION_INVALID(1035, "角色权限参数不合法"),
     TENANT_REQUIRED(1036, "缺少租户上下文"),
     KNOWLEDGE_REVIEW_INVALID(1037, "知识审核状态不合法"),
-    KNOWLEDGE_OPERATION_FORBIDDEN(1038, "无权操作该知识文档");
+    KNOWLEDGE_OPERATION_FORBIDDEN(1038, "无权操作该知识文档"),
+    NOT_SUPPORTED_FILE_TYPE(1039, "不支持的文件类型");
 
     private final int code;
     private final String message;
