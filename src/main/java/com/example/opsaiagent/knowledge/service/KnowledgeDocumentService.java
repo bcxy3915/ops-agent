@@ -22,6 +22,7 @@ import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
 import com.example.opsaiagent.rbac.service.DeptService;
 import com.example.opsaiagent.rbac.service.TenantService;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -30,10 +31,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.document.Document;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -117,6 +121,7 @@ public class KnowledgeDocumentService {
     private final DeptService deptService;
     private final KnowledgeQueryScope queryScope;
     private final KnowledgeIndexTaskService indexTaskService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 上传文件大小上限（MB） */
     @Value("${ops-agent.knowledge.upload.max-size-mb:50}")
@@ -619,7 +624,9 @@ public class KnowledgeDocumentService {
         entity.setTrustStatus(TRUST_VERIFIED);
         entity.setReviewStatus(REVIEW_APPROVED);
         entity.setReviewLevel(level);
-        entity.setVisibility(REVIEW_LEVEL_TENANT.equals(level) ? VISIBILITY_TENANT : VISIBILITY_DEPT);
+        // 无部门归属的文档没有 DEPT 语义，回退为企业可见，否则审核通过后两条检索路径都命中不到
+        boolean tenantVisible = REVIEW_LEVEL_TENANT.equals(level) || entity.getDeptId() == null;
+        entity.setVisibility(tenantVisible ? VISIBILITY_TENANT : VISIBILITY_DEPT);
         entity.setReviewedBy(currentUsername());
         entity.setReviewedAt(now);
         entity.setLastReviewAt(now);
@@ -653,7 +660,7 @@ public class KnowledgeDocumentService {
         entity.setPublishError(null);
         entity.setPublishedAt(null);
         documentMapper.updateById(entity);
-        deleteVectors(vectorSourceOf(entity));
+        deleteVectors(entity);
     }
 
     /**
@@ -921,19 +928,44 @@ public class KnowledgeDocumentService {
     private void deleteChunksAndVectors(KnowledgeDocumentEntity entity) {
         chunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunkEntity>()
                 .eq(KnowledgeChunkEntity::getDocId, entity.getId()));
-        deleteVectors(vectorSourceOf(entity));
+        deleteVectors(entity);
     }
 
     /**
      * 按向量 source 删除向量（FAILED/SKIPPED 无向量时为空操作）。
+     * 向量删除后内存 BM25 索引仍是旧快照，需在事务提交后触发重建，
+     * 否则驳回/删除/改版的内容仍会被关键词检索命中。
      *
-     * @param source 向量 source
+     * @param entity 文档
      */
-    private void deleteVectors(String source) {
+    private void deleteVectors(KnowledgeDocumentEntity entity) {
+        int deleted = 0;
         try {
-            jdbcTemplate.update("DELETE FROM vector_store WHERE metadata->>'source' = ?", source);
+            deleted = jdbcTemplate.update("DELETE FROM vector_store WHERE metadata->>'source' = ?",
+                    vectorSourceOf(entity));
         } catch (Exception e) {
-            log.warn("删除文档向量失败（表可能不存在）: source={}, err={}", source, e.getMessage());
+            log.warn("删除文档向量失败（表可能不存在）: docId={}, err={}", entity.getId(), e.getMessage());
+        }
+        if (deleted > 0) {
+            publishIndexRefreshAfterCommit(entity.getId());
+        }
+    }
+
+    /**
+     * 事务提交后发布索引刷新事件；无事务上下文时立即发布。
+     *
+     * @param docId 文档 ID
+     */
+    private void publishIndexRefreshAfterCommit(Long docId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    eventPublisher.publishEvent(new KnowledgeIndexUpdatedEvent(docId));
+                }
+            });
+        } else {
+            eventPublisher.publishEvent(new KnowledgeIndexUpdatedEvent(docId));
         }
     }
 

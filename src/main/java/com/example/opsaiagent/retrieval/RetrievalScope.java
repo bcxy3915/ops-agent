@@ -63,6 +63,10 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
         if (dataScope.deptId() != null) {
             List<Long> visible = dataScope.visibleDeptIds();
             deptIds = visible == null ? Set.of() : new LinkedHashSet<>(visible);
+        } else if (!SecurityUtils.hasRole("TENANT_ADMIN")
+                && !SecurityUtils.hasPermission("knowledge:admin")) {
+            // 无部门的普通用户不能把 null 解释成“同租户全部部门”，与列表口径保持一致
+            deptIds = Set.of();
         }
         return new RetrievalScope(tenantId, deptIds, userId);
     }

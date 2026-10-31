@@ -1,18 +1,65 @@
 package com.example.opsaiagent.retrieval;
 
+import com.example.opsaiagent.rbac.service.DataScope;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
 import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 /**
  * RetrievalScope 单元测试。
  */
 @DisplayName("检索数据范围")
 class RetrievalScopeTest {
+
+    @Test
+    @DisplayName("current：无部门普通用户不可见部门知识")
+    void current_noDeptOrdinaryUser() {
+        DataScope dataScope = mock(DataScope.class);
+        when(dataScope.tenantId()).thenReturn("t1");
+        when(dataScope.isPlatformTenant()).thenReturn(false);
+        when(dataScope.deptId()).thenReturn(null);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("u1");
+            sec.when(() -> SecurityUtils.hasRole("TENANT_ADMIN")).thenReturn(false);
+            sec.when(() -> SecurityUtils.hasPermission("knowledge:admin")).thenReturn(false);
+
+            RetrievalScope scope = RetrievalScope.current(dataScope);
+            assertThat(scope.deptIds()).isEmpty();
+            assertThat(scope.matches(Map.of(
+                    "visibility", "DEPT", "tenantId", "t1", "deptId", "5",
+                    "reviewStatus", "APPROVED"))).isFalse();
+        }
+    }
+
+    @Test
+    @DisplayName("current：租户管理员无部门时可检索全部部门")
+    void current_noDeptTenantAdmin() {
+        DataScope dataScope = mock(DataScope.class);
+        when(dataScope.tenantId()).thenReturn("t1");
+        when(dataScope.isPlatformTenant()).thenReturn(false);
+        when(dataScope.deptId()).thenReturn(null);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("admin");
+            sec.when(() -> SecurityUtils.hasRole("TENANT_ADMIN")).thenReturn(true);
+
+            RetrievalScope scope = RetrievalScope.current(dataScope);
+            assertThat(scope.deptIds()).isNull();
+            assertThat(scope.matches(Map.of(
+                    "visibility", "DEPT", "tenantId", "t1", "deptId", "5",
+                    "reviewStatus", "APPROVED"))).isTrue();
+        }
+    }
 
     @Test
     @DisplayName("matches：PUBLIC 对所有租户可见")

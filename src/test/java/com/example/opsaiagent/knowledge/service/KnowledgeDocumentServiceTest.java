@@ -24,6 +24,7 @@ import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
 import com.example.opsaiagent.rbac.service.DeptService;
 import com.example.opsaiagent.rbac.service.TenantService;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
@@ -37,6 +38,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
@@ -87,6 +89,8 @@ class KnowledgeDocumentServiceTest {
     private DeptService deptService;
     @Mock
     private KnowledgeIndexTaskService indexTaskService;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @Spy
     private KnowledgeQueryScope queryScope = new KnowledgeQueryScope(null);
@@ -106,7 +110,7 @@ class KnowledgeDocumentServiceTest {
                 new TxtDocumentParserStrategy(), new DocxDocumentParserStrategy()));
         service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorIndexer, parserStrategyFactory,
                 jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope,
-                indexTaskService);
+                indexTaskService, eventPublisher);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 
@@ -472,6 +476,8 @@ class KnowledgeDocumentServiceTest {
         entity.setReviewedBy("dept-reviewer");
         when(documentMapper.selectById(1L)).thenReturn(entity);
         when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
+        when(jdbcTemplate.update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1")))
+                .thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
@@ -487,6 +493,8 @@ class KnowledgeDocumentServiceTest {
             verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
             // 驳回必须物理删除旧向量：向量 metadata 是快照，仅改 DB 不足以让内容下线
             verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1"));
+            // 驳回删除向量后必须刷新内存关键词索引，否则旧内容仍可被 BM25 命中
+            verify(eventPublisher).publishEvent(any(KnowledgeIndexUpdatedEvent.class));
         }
     }
 
