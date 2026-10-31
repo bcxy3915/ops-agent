@@ -73,13 +73,25 @@ class RetrievalScopeTest {
                 .contains("visibility == 'DEPT'")
                 .contains("deptId == '5'")
                 .contains("visibility == 'PERSONAL'")
-                .contains("owner == 'u1'");
+                .contains("owner == 'u1'")
+                .contains("reviewStatus == 'APPROVED'");
     }
 
     @Test
-    @DisplayName("filterExpression：无租户时仅 PUBLIC")
+    @DisplayName("filterExpression：每个分支都必须限制 reviewStatus=APPROVED")
+    void filterExpression_requiresApproved() {
+        RetrievalScope scope = new RetrievalScope("t1", Set.of(5L), "u1");
+
+        String expression = scope.filterExpression();
+
+        // 4 个 visibility 分支各自带审核通过条件，草稿/待审核内容不可命中
+        assertThat(expression.split("reviewStatus == 'APPROVED'", -1)).hasSize(5);
+    }
+
+    @Test
+    @DisplayName("filterExpression：无租户时仅 PUBLIC 且已审核")
     void filterExpression_publicOnly() {
         assertThat(RetrievalScope.publicOnly().filterExpression())
-                .isEqualTo("visibility == 'PUBLIC'");
+                .isEqualTo("visibility == 'PUBLIC' && reviewStatus == 'APPROVED'");
     }
 }

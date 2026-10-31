@@ -4,6 +4,7 @@ import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeIndexStatusResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgePublishRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
@@ -244,6 +245,56 @@ class KnowledgeDocumentControllerTest {
         verify(documentService).delete(1L);
     }
 
+    // ==================== GET /api/knowledge/documents/{id}/index-status ====================
+
+    @Test
+    @DisplayName("GET 索引状态：返回 publishStatus 与任务重试信息")
+    void indexStatus() throws Exception {
+        when(documentService.indexStatus(1L)).thenReturn(KnowledgeIndexStatusResponse.builder()
+                .docId(1L)
+                .publishStatus("BUILDING")
+                .chunkCount(0)
+                .taskAttempts(1)
+                .taskMaxAttempts(3)
+                .build());
+
+        mvc.perform(get("/api/knowledge/documents/1/index-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.docId").value(1))
+                .andExpect(jsonPath("$.data.publishStatus").value("BUILDING"))
+                .andExpect(jsonPath("$.data.taskAttempts").value(1))
+                .andExpect(jsonPath("$.data.taskMaxAttempts").value(3));
+        verify(documentService).indexStatus(1L);
+    }
+
+    @Test
+    @DisplayName("GET 索引状态：入库失败时返回 publishError")
+    void indexStatus_failed() throws Exception {
+        when(documentService.indexStatus(1L)).thenReturn(KnowledgeIndexStatusResponse.builder()
+                .docId(1L)
+                .publishStatus("FAILED")
+                .publishError("embedding 调用失败")
+                .build());
+
+        mvc.perform(get("/api/knowledge/documents/1/index-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.publishStatus").value("FAILED"))
+                .andExpect(jsonPath("$.data.publishError").value("embedding 调用失败"));
+    }
+
+    // ==================== POST /api/knowledge/documents/{id}/reindex ====================
+
+    @Test
+    @DisplayName("POST 重建索引：触发 reindex 并返回文档详情")
+    void reindex() throws Exception {
+        when(documentService.reindex(1L)).thenReturn(response(1L, "手册", "VERIFIED"));
+
+        mvc.perform(post("/api/knowledge/documents/1/reindex"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(1));
+        verify(documentService).reindex(1L);
+    }
+
     // ==================== P1-⑤ 在线编写 / 超期扫描 ====================
 
     @Test
@@ -291,6 +342,16 @@ class KnowledgeDocumentControllerTest {
         assertAuthority("list", "knowledge:read",
                 String.class, String.class, String.class, String.class, int.class, int.class);
         assertAuthority("detail", "knowledge:read", Long.class);
+        assertAuthority("indexStatus", "knowledge:read", Long.class);
+    }
+
+    @Test
+    @DisplayName("鉴权：重建索引允许写权限或审核权限")
+    void reindex_requireWriteOrReviewPermission() throws Exception {
+        java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod("reindex", Long.class);
+        PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
+        assertThat(pa).isNotNull();
+        assertThat(pa.value()).contains("hasAnyAuthority('knowledge:write', 'knowledge:review')");
     }
 
     private void assertAuthority(String methodName, String authority, Class<?>... params) throws NoSuchMethodException {

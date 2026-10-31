@@ -114,21 +114,26 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
     /**
      * 生成 Spring AI 向量检索 filterExpression。
      *
+     * 所有分支都必须带 reviewStatus == 'APPROVED'：审核结论是检索可见性的硬条件，
+     * 草稿 / 待审核 / 已驳回内容即使残留向量也不得命中。
+     *
      * @return filterExpression；无租户时仅 PUBLIC
      */
     public String filterExpression() {
         if (!StringUtils.hasText(tenantId)) {
-            return "visibility == '" + VISIBILITY_PUBLIC + "'";
+            return "visibility == '" + VISIBILITY_PUBLIC + "' && " + approvedClause();
         }
         List<String> clauses = new ArrayList<>();
-        clauses.add("visibility == '" + VISIBILITY_PUBLIC + "'");
-        clauses.add("(visibility == '" + VISIBILITY_TENANT + "' && tenantId == '" + escape(tenantId) + "')");
+        clauses.add("(visibility == '" + VISIBILITY_PUBLIC + "' && " + approvedClause() + ")");
+        clauses.add("(visibility == '" + VISIBILITY_TENANT + "' && tenantId == '"
+                + escape(tenantId) + "' && " + approvedClause() + ")");
 
         // null 表示同租户全部部门；空集合表示无部门可见，不生成 DEPT 分支
         if (deptIds == null || !deptIds.isEmpty()) {
             StringBuilder deptClause = new StringBuilder()
                     .append("(visibility == '").append(VISIBILITY_DEPT).append("'")
-                    .append(" && tenantId == '").append(escape(tenantId)).append("'");
+                    .append(" && tenantId == '").append(escape(tenantId)).append("'")
+                    .append(" && ").append(approvedClause());
             if (deptIds != null) {
                 deptClause.append(" && (");
                 int i = 0;
@@ -146,9 +151,13 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
 
         if (StringUtils.hasText(userId)) {
             clauses.add("(visibility == '" + VISIBILITY_PERSONAL
-                    + "' && owner == '" + escape(userId) + "')");
+                    + "' && owner == '" + escape(userId) + "' && " + approvedClause() + ")");
         }
         return String.join(" || ", clauses);
+    }
+
+    private String approvedClause() {
+        return "reviewStatus == '" + REVIEW_APPROVED + "'";
     }
 
     private boolean isApproved(Map<String, Object> md) {

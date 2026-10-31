@@ -8,11 +8,13 @@ import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeChunkResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeIndexStatusResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategy;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
@@ -29,7 +31,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.document.Document;
 import org.springframework.core.io.InputStreamResource;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,11 +39,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -99,7 +97,14 @@ public class KnowledgeDocumentService {
     /** 审核模式：无需审核 */
     public static final String REVIEW_MODE_NONE = "NONE";
 
-    private static final Pattern MD_HEADING = Pattern.compile("^#{1,6}\\s+(.+)$", Pattern.MULTILINE);
+    /** 索引发布状态：未发布（草稿 / 待审核 / 驳回 / 内容变更后） */
+    public static final String PUBLISH_UNPUBLISHED = "UNPUBLISHED";
+    /** 索引发布状态：入库中（审核已通过，后台索引任务执行中） */
+    public static final String PUBLISH_BUILDING = "BUILDING";
+    /** 索引发布状态：入库失败（可重试） */
+    public static final String PUBLISH_FAILED = "FAILED";
+    /** 索引发布状态：已生效（分块与向量已完整写入，可被检索命中） */
+    public static final String PUBLISH_PUBLISHED = "PUBLISHED";
 
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
@@ -111,13 +116,11 @@ public class KnowledgeDocumentService {
     private final TenantService tenantService;
     private final DeptService deptService;
     private final KnowledgeQueryScope queryScope;
+    private final KnowledgeIndexTaskService indexTaskService;
 
     /** 上传文件大小上限（MB） */
     @Value("${ops-agent.knowledge.upload.max-size-mb:50}")
     private long maxUploadMb = 50;
-
-    /** knowledge_chunk 批量插入的每批条数 */
-    private static final int CHUNK_INSERT_BATCH_SIZE = 500;
 
     /**
      * 分页查询文档列表
@@ -222,6 +225,7 @@ public class KnowledgeDocumentService {
         entity.setFilePath("upload:" + parsed.fileName());
         entity.setRawContent(parsed.rawContent());
         entity.setChunkCount(0);
+        entity.setPublishStatus(PUBLISH_UNPUBLISHED);
         entity.setSubmittedAt(LocalDateTime.now());
         documentMapper.insert(entity);
         log.info("知识文档上传成功: id={}, title={}, type={}", entity.getId(), entity.getTitle(), parsed.docType());
@@ -257,6 +261,7 @@ public class KnowledgeDocumentService {
         entity.setFilePath(ONLINE_SOURCE_PREFIX + title);
         entity.setRawContent(request.getContent());
         entity.setChunkCount(0);
+        entity.setPublishStatus(PUBLISH_UNPUBLISHED);
         entity.setEffectiveAt(LocalDateTime.now());
         entity.setSubmittedAt(LocalDateTime.now());
         documentMapper.insert(entity);
@@ -584,7 +589,11 @@ public class KnowledgeDocumentService {
     }
 
     /**
-     * 审核通过：更新可见性/审核字段，并重新分块向量化入库。
+     * 审核通过：更新可见性/审核字段，并把索引任务交给后台异步执行。
+     *
+     * <p>审核结论立即生效（review_status=APPROVED），可检索性由 publish_status 表达：
+     * 入队后置 BUILDING，由后台任务成功时改 PUBLISHED、失败时改 FAILED。
+     * 审核通过不预删旧索引，新索引成功后整体覆盖，索引失败时旧内容仍可命中。</p>
      *
      * @param entity 文档
      * @param level  审核层级
@@ -600,14 +609,21 @@ public class KnowledgeDocumentService {
         entity.setReviewedAt(now);
         entity.setLastReviewAt(now);
         entity.setReviewNote(note);
-        // 重新审核通过前先清理旧分块/向量，避免重复
-        deleteChunksAndVectors(entity.getId());
+        entity.setPublishStatus(PUBLISH_BUILDING);
+        entity.setPublishError(null);
+        entity.setPublishedAt(null);
         documentMapper.updateById(entity);
-        chunkAndIndex(entity);
+        // 分块与向量化含外部 embedding 调用、耗时不可控，交给后台任务在独立事务中执行，
+        // 避免长时间占用数据库事务与连接；审核结果立即生效，索引稍后完成
+        indexTaskService.enqueue(entity.getId(), entity.getVersion(),
+                UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId());
     }
 
     /**
      * 审核驳回：退回个人可见，不进入检索。
+     *
+     * <p>旧分块与向量保留（重新提交审核后可被新索引覆盖），检索侧按 reviewStatus 过滤，
+     * 因此驳回内容不会被命中。</p>
      *
      * @param entity 文档
      * @param note   驳回原因
@@ -621,7 +637,9 @@ public class KnowledgeDocumentService {
         entity.setReviewedAt(LocalDateTime.now());
         entity.setLastReviewAt(LocalDateTime.now());
         entity.setReviewNote(note);
-        deleteChunksAndVectors(entity.getId());
+        entity.setPublishStatus(PUBLISH_UNPUBLISHED);
+        entity.setPublishError(null);
+        entity.setPublishedAt(null);
         documentMapper.updateById(entity);
     }
 
@@ -659,6 +677,9 @@ public class KnowledgeDocumentService {
             entity.setDeptReviewedBy(null);
             entity.setDeptReviewedAt(null);
             entity.setReviewNote(null);
+            entity.setPublishStatus(PUBLISH_UNPUBLISHED);
+            entity.setPublishError(null);
+            entity.setPublishedAt(null);
             entity.setSubmittedAt(LocalDateTime.now());
             // 内容变更后必须重新审核，先下线旧分块与向量，审核通过后再入库
             deleteChunksAndVectors(id);
@@ -702,6 +723,9 @@ public class KnowledgeDocumentService {
         entity.setDeptReviewedBy(null);
         entity.setDeptReviewedAt(null);
         entity.setReviewNote(null);
+        entity.setPublishStatus(PUBLISH_UNPUBLISHED);
+        entity.setPublishError(null);
+        entity.setPublishedAt(null);
         entity.setSubmittedAt(LocalDateTime.now());
 
         // 3. 下线旧分块与向量，审核通过后再入库
@@ -722,6 +746,98 @@ public class KnowledgeDocumentService {
         deleteChunksAndVectors(id);
         documentMapper.deleteById(id);
         log.info("知识文档已删除: id={}, title={}", entity.getId(), entity.getTitle());
+    }
+
+    /**
+     * 重建文档索引：仅已通过审核且已发布/已失败的文档可重试。
+     *
+     * <p>审核结论不变，只把 publish_status 置回 BUILDING 并重新入队，
+     * 便于索引失败后由作者或审核人手动重试，无需重新审核。</p>
+     *
+     * @param id 文档 ID
+     * @return 文档响应（publishStatus=BUILDING）
+     */
+    @Transactional
+    public KnowledgeDocumentResponse reindex(Long id) {
+        KnowledgeDocumentEntity entity = requireDocument(id);
+        checkReindexPermission(entity);
+        if (!REVIEW_APPROVED.equals(entity.getReviewStatus())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID, "当前文档未通过审核，无法入库");
+        }
+        if (!PUBLISH_FAILED.equals(entity.getPublishStatus())
+                && !PUBLISH_PUBLISHED.equals(entity.getPublishStatus())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                    "当前文档正在入库中，无需重复重建");
+        }
+        entity.setPublishStatus(PUBLISH_BUILDING);
+        entity.setPublishError(null);
+        entity.setPublishedAt(null);
+        documentMapper.updateById(entity);
+        // enqueue 内部 UPSERT 会把任务 attempts 重置为 0
+        indexTaskService.enqueue(id, entity.getVersion(), vectorSourceOf(entity));
+        log.info("知识文档重建索引已入队: id={}, version={}", id, entity.getVersion());
+        return toResponse(requireDocument(id), true);
+    }
+
+    /**
+     * 查询文档索引状态（轻量，供前端轮询"入库中"是否完成）。
+     *
+     * @param id 文档 ID
+     * @return 索引状态
+     */
+    public KnowledgeIndexStatusResponse indexStatus(Long id) {
+        KnowledgeDocumentEntity entity = requireDocument(id);
+        if (!queryScope.current().canAccess(entity)) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND, "知识文档不存在: " + id);
+        }
+        KnowledgeIndexTaskEntity task = indexTaskService.findLatest(id);
+        return KnowledgeIndexStatusResponse.builder()
+                .docId(entity.getId())
+                .publishStatus(entity.getPublishStatus())
+                .publishError(entity.getPublishError())
+                .publishedAt(entity.getPublishedAt())
+                .chunkCount(entity.getChunkCount())
+                .taskAttempts(task == null ? null : task.getAttempts())
+                .taskMaxAttempts(task == null ? null : task.getMaxAttempts())
+                .build();
+    }
+
+    /**
+     * 重建索引权限：作者、知识管理员或审核人。
+     *
+     * @param entity 文档
+     */
+    private void checkReindexPermission(KnowledgeDocumentEntity entity) {
+        String current = SecurityUtils.getCurrentUsername();
+        if (!StringUtils.hasText(current)) {
+            // 单元测试 / 系统任务无登录上下文时不做权限校验
+            return;
+        }
+        String currentTenant = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(currentTenant) && !"0".equals(currentTenant)
+                && !currentTenant.equals(entity.getTenantId())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND,
+                    "知识文档不存在: " + entity.getId());
+        }
+        if (current.equals(entity.getOwner())
+                || SecurityUtils.hasPermission("knowledge:admin")
+                || SecurityUtils.hasPermission("knowledge:review")) {
+            return;
+        }
+        throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                "无权操作该知识文档: " + entity.getId());
+    }
+
+    /**
+     * 文档对应的向量 source：案例文档使用 case: 前缀，其余使用 upload: 前缀。
+     *
+     * @param entity 文档
+     * @return 向量 source
+     */
+    private String vectorSourceOf(KnowledgeDocumentEntity entity) {
+        return "CASE".equals(entity.getLayer())
+                ? KnowledgeCaseService.CASE_VECTOR_SOURCE_PREFIX + entity.getId()
+                : UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId();
     }
 
     /**
@@ -764,99 +880,11 @@ public class KnowledgeDocumentService {
     }
 
     /**
-     * 将文档全文切块并保存到 knowledge_chunk，同时向量化写入 vector_store
-     * @param entity 文档实体（含 raw_content）
-     */
-    private void chunkAndIndex(KnowledgeDocumentEntity entity) {
-        String content = entity.getRawContent();
-        if (!StringUtils.hasText(content)) {
-            entity.setChunkCount(0);
-            documentMapper.updateById(entity);
-            return;
-        }
-        List<Document> chunks;
-        if ("MARKDOWN".equals(entity.getDocType())) {
-            // Markdown 按标题层级重新解析后结构化切分，与内置知识库切分行为一致，保留章节边界
-            List<Document> structured = parserStrategyFactory.getStrategy("MARKDOWN")
-                    .parse(new ByteArrayResource(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-            chunks = structured.isEmpty() ? List.of() : vectorIndexer.split(structured);
-            if (chunks.isEmpty()) {
-                // 短文本可能被切分器全部丢弃，退化为整段切分（内部有单块兜底）
-                chunks = vectorIndexer.split(content);
-            }
-        } else {
-            chunks = vectorIndexer.split(content);
-        }
-
-        List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
-        int ordinal = 1;
-        for (Document chunk : chunks) {
-            KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
-            chunkEntity.setDocId(entity.getId());
-            chunkEntity.setTenantId(entity.getTenantId());
-            chunkEntity.setDeptId(entity.getDeptId());
-            chunkEntity.setOrdinal(ordinal);
-            chunkEntity.setContent(chunk.getText());
-            chunkEntity.setSection(extractSection(chunk.getText(), entity.getDocType()));
-            chunkEntities.add(chunkEntity);
-            ordinal++;
-        }
-        // 批量写入分块（每 500 条一批，避免大文档产生数万次单条 INSERT），主键回填后供向量 metadata 引用
-        for (int i = 0; i < chunkEntities.size(); i += CHUNK_INSERT_BATCH_SIZE) {
-            chunkMapper.insertBatch(
-                    chunkEntities.subList(i, Math.min(i + CHUNK_INSERT_BATCH_SIZE, chunkEntities.size())));
-        }
-
-        List<Document> vectorDocs = new ArrayList<>();
-        String tenantId = entity.getTenantId() == null ? "" : entity.getTenantId();
-        String deptId = entity.getDeptId() == null ? "" : String.valueOf(entity.getDeptId());
-        String visibility = entity.getVisibility() == null ? VISIBILITY_PERSONAL : entity.getVisibility();
-        String trustStatus = entity.getTrustStatus() == null ? "" : entity.getTrustStatus();
-        String owner = entity.getOwner() == null ? "" : entity.getOwner();
-        String reviewStatus = entity.getReviewStatus() == null ? "" : entity.getReviewStatus();
-        ordinal = 1;
-        for (Document chunk : chunks) {
-            KnowledgeChunkEntity chunkEntity = chunkEntities.get(ordinal - 1);
-            java.util.Map<String, Object> metadata = new java.util.HashMap<>();
-            metadata.put("source", UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId());
-            metadata.put("docId", String.valueOf(entity.getId()));
-            metadata.put("title", entity.getTitle() == null ? "" : entity.getTitle());
-            metadata.put("layer", entity.getLayer() == null ? "" : entity.getLayer());
-            metadata.put("trustStatus", trustStatus);
-            metadata.put("tenantId", tenantId);
-            metadata.put("deptId", deptId);
-            metadata.put("visibility", visibility);
-            metadata.put("reviewStatus", reviewStatus);
-            metadata.put("owner", owner);
-            metadata.put("ordinal", String.valueOf(ordinal));
-            metadata.put("chunkId", String.valueOf(chunkEntity.getId()));
-            Document vectorDoc = new Document(chunk.getText(), metadata);
-            vectorDocs.add(vectorDoc);
-            ordinal++;
-        }
-        // 分批向量化（外部 API batch <= 10）
-        vectorIndexer.write(vectorDocs);
-        entity.setChunkCount(chunkEntities.size());
-        documentMapper.updateById(entity);
-        log.info("文档分块完成: docId={}, chunks={}", entity.getId(), chunkEntities.size());
-    }
-
-    /**
      * 从块文本提取章节标题（markdown 取首个标题行；其他类型取首个非空行截断）
+     * 切分与索引逻辑已收敛到 KnowledgeDocumentIndexer，此处保留包内可见入口供测试与兼容调用。
      */
     String extractSection(String text, String docType) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        if ("MARKDOWN".equals(docType)) {
-            Matcher m = MD_HEADING.matcher(text);
-            if (m.find()) {
-                String heading = m.group(1).trim();
-                return heading.length() > 100 ? heading.substring(0, 100) : heading;
-            }
-        }
-        String firstLine = text.lines().filter(StringUtils::hasText).findFirst().orElse("");
-        return firstLine.length() > 100 ? firstLine.substring(0, 100) : firstLine;
+        return KnowledgeDocumentIndexer.extractSection(text, docType);
     }
 
     /**
@@ -909,6 +937,9 @@ public class KnowledgeDocumentService {
                 .deptReviewedBy(entity.getDeptReviewedBy())
                 .deptReviewedAt(entity.getDeptReviewedAt())
                 .reviewNote(entity.getReviewNote())
+                .publishStatus(entity.getPublishStatus())
+                .publishError(entity.getPublishError())
+                .publishedAt(entity.getPublishedAt())
                 .version(entity.getVersion())
                 .owner(entity.getOwner())
                 .serviceIds(fromJson(entity.getServiceIds()))

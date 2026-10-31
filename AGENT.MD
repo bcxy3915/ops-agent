@@ -93,7 +93,18 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 文件扩展名 → docType 的唯一映射源是 `DocumentParserStrategyFactory.resolveDocType()`；新增文件类型时在映射表和对应解析策略中同步登记。
 - 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略，不单独引入其他 Reader；Markdown 一律先做结构化切分（`MarkdownDocumentParserStrategy`），短文本被全部丢弃时再用纯文本切分兜底。
 - 切分由 `VectorIndexer` 统一收口；解析后文本受 `ops-agent.knowledge.ingest.max-chars`（默认 1000 万字符）限制，超长必须显式拒绝，禁止用 `maxNumChunks` 之类参数静默截断。
-- chunk 落库使用 `KnowledgeChunkMapper.insertBatch`（500 条/批），禁止逐条 `insert`；向量写入与 metadata 组装统一走 `VectorIndexer`。
+- chunk 落库使用 `KnowledgeChunkMapper.insertBatch`（500 条/批），禁止逐条 `insert`；索引编排（清旧数据 → 切分 → 写分块 → 写向量）统一由 `KnowledgeDocumentIndexer` 完成，底层向量写入走 `VectorIndexer`。
+- 索引必须异步执行：审核通过、案例确认等业务事务只调用 `KnowledgeIndexTaskService.enqueue()` 写入 `knowledge_index_task`，**禁止在业务事务内直接调用切分/embedding/向量写入**。分块与向量化由 `KnowledgeIndexTaskService` 的定时 worker 在独立事务中完成。
+- 任务表并发约定：worker 用 `FOR UPDATE SKIP LOCKED` + 租约（默认 30 分钟，需覆盖大文档完整索引耗时）领取任务，多实例安全；同一文档只保留一条未完成任务（部分唯一索引 + UPSERT）；执行前校验文档 `reviewStatus=APPROVED` 且 `docVersion` 与入队时一致，否则跳过，执行后再次复核并回滚过期写入。
+- 索引对同一 `vector_source` 幂等：每次执行先清空该文档旧分块与旧向量再重建；失败自动重试，默认 3 次后标记 FAILED，可通过任务表 `error_msg` 排查。
+- 索引调度配置位于 `ops-agent.knowledge.index.poll-interval-ms`（默认 5000）与 `max-per-round`（默认 3）。
+- 向量 source 口径：上传文档为 `upload:<docId>`，案例文档为 `case:<docId>`，内置文档为文件名；`DocumentLoader` 只清理内置文档，不得触碰 `upload:` / `case:` 前缀。
+- 审核结论与索引可用性分离：`review_status` 只记录审核结论（DRAFT/PENDING_DEPT/PENDING_TENANT/APPROVED/REJECTED），`publish_status` 记录索引是否生效（UNPUBLISHED/BUILDING/FAILED/PUBLISHED）。审核通过仅置 `APPROVED + BUILDING` 并立即返回，worker 成功回写 `PUBLISHED + published_at`，重试耗尽置 `FAILED + publish_error`；索引失败不得回退 `review_status`。
+- 审核通过 / 驳回事务内不再预删旧分块与旧向量；索引替换由 worker 的 `reindex` 整体幂等"先删后建"完成，避免失败后不可恢复。
+- 检索过滤必须同时带 `reviewStatus == 'APPROVED'`（由 `RetrievalScope.filterExpression()` 统一追加），未通过 / 驳回文档即使存在残留向量也不可被命中。
+- 索引状态运维接口：`GET /api/knowledge/documents/{id}/index-status` 轻量返回 publishStatus / publishError / 任务尝试次数供前端轮询；`POST /api/knowledge/documents/{id}/reindex` 仅对 `APPROVED` 且 `publish_status ∈ {FAILED, PUBLISHED}` 的文档重建索引，不改变审核结论。
+- 新增环境需执行 `init-scripts/schema.sql` 中的 `knowledge_index_task` 建表语句；已运行环境升级时需单独执行该段增量 DDL（含部分唯一索引）。
+- 已运行环境升级 `publish_status`：执行 `schema.sql` 中的幂等 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（publish_status / publish_error / published_at）、存量 `publish_status='PUBLISHED'` 回填，以及 `vector_store.metadata.reviewStatus` 回填段（`DO $$` + `to_regclass('vector_store')` 保护，新库初始化时可安全执行）。
 - 解析健壮性：PDF 先落地临时文件再用 PDFBox 按页读取（不整份载入堆内存，临时文件必须 finally 删除）；TXT 按 UTF-8 BOM → UTF-16 BOM → 严格 UTF-8 → GB18030 的顺序探测编码；DOCX 解析已启用 zip bomb 防护（`ZipSecureFile.setMinInflateRatio`），调整 POI 相关配置时不得移除。
 - 大文件演进方向：文件上限扩大到 100MB+ 前，需先将 `DocumentParserStrategy.parse(Resource): List<Document>` 升级为流式签名（产出端逐段产出、消费端逐段切分入库），趁实现与调用方较少时改造成本最低。
 
