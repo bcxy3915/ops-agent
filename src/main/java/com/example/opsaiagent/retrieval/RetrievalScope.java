@@ -150,7 +150,9 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
         }
 
         if (StringUtils.hasText(userId)) {
+            // 个人知识必须限定租户：用户名只在租户内唯一，跨租户可能重名
             clauses.add("(visibility == '" + VISIBILITY_PERSONAL
+                    + "' && tenantId == '" + escape(tenantId)
                     + "' && owner == '" + escape(userId) + "' && " + approvedClause() + ")");
         }
         return String.join(" || ", clauses);

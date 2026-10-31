@@ -27,26 +27,27 @@ public interface KnowledgeIndexTaskMapper extends BaseMapper<KnowledgeIndexTaskE
      * @return 影响行数
      */
     @Insert("INSERT INTO knowledge_index_task "
-            + "(doc_id, doc_version, vector_source, task_type, status, attempts, max_attempts, created_at) "
-            + "VALUES (#{docId}, #{docVersion}, #{vectorSource}, 'INDEX', 'PENDING', 0, 3, NOW()) "
+            + "(doc_id, doc_version, vector_source, task_type, status, attempts, max_attempts, created_at, next_retry_at) "
+            + "VALUES (#{docId}, #{docVersion}, #{vectorSource}, 'INDEX', 'PENDING', 0, 3, NOW(), NOW()) "
             + "ON CONFLICT (doc_id) WHERE status IN ('PENDING', 'RUNNING') DO UPDATE SET "
             + "doc_version = EXCLUDED.doc_version, vector_source = EXCLUDED.vector_source, "
-            + "status = 'PENDING', attempts = 0, error_msg = NULL, "
+            + "status = 'PENDING', attempts = 0, error_msg = NULL, next_retry_at = NOW(), "
             + "started_at = NULL, finished_at = NULL, lease_until = NULL")
     int enqueue(@Param("docId") Long docId,
                 @Param("docVersion") Integer docVersion,
                 @Param("vectorSource") String vectorSource);
 
     /**
-     * 领取一条待执行任务并加租约。
-     * 租约需覆盖单个大文档的完整索引耗时，过短会导致多实例重复执行。
+     * 领取一条到期待执行的任务并加租约。
+     * 租约需覆盖单个大文档的完整索引耗时，过短会导致多实例重复执行；
+     * next_retry_at 用于失败退避，未到期的任务不会被提前领取。
      *
      * @param leaseMinutes 租约时长（分钟）
      * @return 领取到的任务；无任务时返回 null
      */
     @Update("WITH picked AS ("
-            + "SELECT id FROM knowledge_index_task WHERE status = 'PENDING' "
-            + "ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) "
+            + "SELECT id FROM knowledge_index_task WHERE status = 'PENDING' AND next_retry_at <= NOW() "
+            + "ORDER BY next_retry_at, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) "
             + "UPDATE knowledge_index_task t SET status = 'RUNNING', started_at = NOW(), "
             + "lease_until = NOW() + (INTERVAL '1 minute' * #{leaseMinutes}), attempts = attempts + 1 "
             + "FROM picked WHERE t.id = picked.id RETURNING t.*")
@@ -58,7 +59,7 @@ public interface KnowledgeIndexTaskMapper extends BaseMapper<KnowledgeIndexTaskE
      * @return 回收条数
      */
     @Update("UPDATE knowledge_index_task SET status = 'PENDING', started_at = NULL, "
-            + "lease_until = NULL, error_msg = '租约超时，由调度回收' "
+            + "lease_until = NULL, next_retry_at = NOW(), error_msg = '租约超时，由调度回收' "
             + "WHERE status = 'RUNNING' AND lease_until < NOW()")
     int recoverStale();
 
@@ -79,14 +80,18 @@ public interface KnowledgeIndexTaskMapper extends BaseMapper<KnowledgeIndexTaskE
                @Param("errorMsg") String errorMsg);
 
     /**
-     * 失败重试：清空租约并回到待执行，保留 attempts 计数。
+     * 失败重试：清空租约并回到待执行，保留 attempts 计数，按退避时间延后领取。
      *
-     * @param id       任务 ID
-     * @param errorMsg 本次失败原因
+     * @param id           任务 ID
+     * @param errorMsg     本次失败原因
+     * @param delaySeconds 退避秒数
      * @return 影响行数
      */
     @Update("UPDATE knowledge_index_task SET status = 'PENDING', started_at = NULL, "
-            + "lease_until = NULL, error_msg = #{errorMsg} "
+            + "lease_until = NULL, error_msg = #{errorMsg}, "
+            + "next_retry_at = NOW() + (INTERVAL '1 second' * #{delaySeconds}) "
             + "WHERE id = #{id} AND status = 'RUNNING'")
-    int retry(@Param("id") Long id, @Param("errorMsg") String errorMsg);
+    int retry(@Param("id") Long id,
+              @Param("errorMsg") String errorMsg,
+              @Param("delaySeconds") int delaySeconds);
 }

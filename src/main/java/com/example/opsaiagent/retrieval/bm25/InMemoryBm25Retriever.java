@@ -2,6 +2,7 @@ package com.example.opsaiagent.retrieval.bm25;
 
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import com.example.opsaiagent.retrieval.RetrievalScope;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,6 +39,17 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void initIndex() {
+        rebuild();
+    }
+
+    /**
+     * 文档向量入库后刷新索引，避免新文档在关键词检索路径长期缺席。
+     *
+     * @param event 索引更新事件
+     */
+    @EventListener
+    public void onIndexUpdated(KnowledgeIndexUpdatedEvent event) {
+        log.info("检测到知识索引更新，刷新 BM25 索引: docId={}", event.docId());
         rebuild();
     }
 

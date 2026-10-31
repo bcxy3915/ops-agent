@@ -926,11 +926,16 @@ CREATE TABLE IF NOT EXISTS knowledge_index_task (
     max_attempts INTEGER DEFAULT 3 NOT NULL,
     error_msg text,
     created_at TIMESTAMP DEFAULT NOW(),
+    next_retry_at TIMESTAMP DEFAULT NOW(),
     started_at TIMESTAMP,
     finished_at TIMESTAMP,
     lease_until TIMESTAMP,
     CONSTRAINT knowledge_index_task_pkey PRIMARY KEY (id)
 );
+
+-- 存量升级：新增失败退避时间
+ALTER TABLE knowledge_index_task
+    ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP DEFAULT NOW();
 
 -- 同一文档同时只允许一条未完成任务
 CREATE UNIQUE INDEX IF NOT EXISTS uk_knowledge_index_task_active_doc

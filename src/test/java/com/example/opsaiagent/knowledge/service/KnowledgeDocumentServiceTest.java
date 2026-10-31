@@ -277,6 +277,23 @@ class KnowledgeDocumentServiceTest {
     }
 
     @Test
+    @DisplayName("getById：跨租户同名作者的个人文档不可见")
+    void getById_crossTenantSameOwnerForbidden() {
+        KnowledgeQueryScope.Scope scope = queryScope.user("t1", Set.of(5L), "alice");
+        when(queryScope.current()).thenReturn(scope);
+
+        KnowledgeDocumentEntity other = doc(9L, "同名他人草稿", "PENDING", "PRIVATE", "内容");
+        other.setTenantId("t2");
+        other.setOwner("alice");
+        other.setVisibility("PERSONAL");
+        when(documentMapper.selectById(9L)).thenReturn(other);
+
+        assertThatThrownBy(() -> service.getById(9L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    @Test
     @DisplayName("upload：超过大小限制拒绝")
     void upload_oversizedRejected() {
         MultipartFile file = mock(MultipartFile.class);
@@ -468,6 +485,8 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
             verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
             verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
+            // 驳回必须物理删除旧向量：向量 metadata 是快照，仅改 DB 不足以让内容下线
+            verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1"));
         }
     }
 
@@ -630,6 +649,20 @@ class KnowledgeDocumentServiceTest {
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
         verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
+    }
+
+    @Test
+    @DisplayName("update：内容为空拒绝并保持原状态")
+    void update_emptyContentRejected() {
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "旧内容"));
+
+        KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
+        req.setTitle("手册");
+        req.setRawContent("   ");
+
+        assertThatThrownBy(() -> service.update(1L, req))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
     }
 
     @Test
@@ -925,6 +958,24 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getVisibility()).isEqualTo("DEPT");
             assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
             verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
+        }
+    }
+
+    @Test
+    @DisplayName("review：跨租户部门审核被拦截")
+    void review_deptCrossTenantForbidden() {
+        when(documentMapper.selectById(1L)).thenReturn(reviewDoc());
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("other-admin");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t2");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(9L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
+            sec.when(() -> SecurityUtils.hasPermission(anyString())).thenReturn(true);
+
+            assertThatThrownBy(() -> service.review(1L, reviewRequest("DEPT", true)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
         }
     }
 

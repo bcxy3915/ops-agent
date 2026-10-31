@@ -4,6 +4,7 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeIndexTaskMapper;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -41,12 +43,15 @@ class KnowledgeIndexTaskServiceTest {
     private KnowledgeDocumentIndexer indexer;
     @Mock
     private PlatformTransactionManager transactionManager;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     private KnowledgeIndexTaskService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeIndexTaskService(taskMapper, documentMapper, indexer, transactionManager);
+        service = new KnowledgeIndexTaskService(taskMapper, documentMapper, indexer, transactionManager,
+                eventPublisher);
         org.mockito.Mockito.lenient().when(transactionManager.getTransaction(any()))
                 .thenReturn(new SimpleTransactionStatus());
     }
@@ -99,6 +104,8 @@ class KnowledgeIndexTaskServiceTest {
                 .isEqualTo(KnowledgeDocumentService.PUBLISH_PUBLISHED);
         assertThat(captor.getValue().getPublishedAt()).isNotNull();
         assertThat(captor.getValue().getPublishError()).isNull();
+        // 入库成功后通知关键词索引刷新
+        verify(eventPublisher).publishEvent(any(KnowledgeIndexUpdatedEvent.class));
     }
 
     @Test
@@ -135,7 +142,7 @@ class KnowledgeIndexTaskServiceTest {
 
         service.runTask(t);
 
-        verify(taskMapper).retry(eq(10L), anyString());
+        verify(taskMapper).retry(eq(10L), anyString(), eq(30));
         verify(taskMapper, never()).finish(eq(10L), anyString(), any());
     }
 
@@ -150,7 +157,7 @@ class KnowledgeIndexTaskServiceTest {
         service.runTask(t);
 
         verify(taskMapper).finish(eq(10L), eq(KnowledgeIndexTaskService.STATUS_FAILED), anyString());
-        verify(taskMapper, never()).retry(anyLong(), anyString());
+        verify(taskMapper, never()).retry(anyLong(), anyString(), anyInt());
         ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
         verify(documentMapper).updateById(captor.capture());
         assertThat(captor.getValue().getPublishStatus())

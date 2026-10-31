@@ -44,6 +44,9 @@ public class KnowledgeIndexTaskEntity {
 
     private LocalDateTime createdAt;
 
+    /** 最早可领取时间，用于失败重试退避 */
+    private LocalDateTime nextRetryAt;
+
     private LocalDateTime startedAt;
 
     private LocalDateTime finishedAt;

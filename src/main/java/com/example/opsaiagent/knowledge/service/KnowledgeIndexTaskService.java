@@ -5,9 +5,11 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeIndexTaskMapper;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -49,10 +51,14 @@ public class KnowledgeIndexTaskService {
     /** 失败原因落库前的截断长度 */
     private static final int ERROR_MSG_MAX_LENGTH = 1000;
 
+    /** 重试退避上限（秒），避免大间隔影响失败文档的恢复速度 */
+    private static final int MAX_RETRY_BACKOFF_SECONDS = 300;
+
     private final KnowledgeIndexTaskMapper taskMapper;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeDocumentIndexer indexer;
     private final PlatformTransactionManager transactionManager;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 每轮调度的最多处理任务数 */
     @Value("${ops-agent.knowledge.index.max-per-round:3}")
@@ -61,6 +67,10 @@ public class KnowledgeIndexTaskService {
     /** 任务租约时长（分钟），需覆盖单个大文档的完整索引耗时 */
     @Value("${ops-agent.knowledge.index.lease-minutes:30}")
     private int leaseMinutes = 30;
+
+    /** 首次重试退避（秒），按 attempts 线性递增 */
+    @Value("${ops-agent.knowledge.index.retry-backoff-seconds:30}")
+    private int retryBackoffSeconds = 30;
 
     /**
      * 入队索引任务（在调用方事务内执行，随业务状态一起提交）。
@@ -141,6 +151,10 @@ public class KnowledgeIndexTaskService {
         taskMapper.finish(task.getId(), result, null);
         log.info("知识索引任务{}: id={}, docId={}, source={}", result, task.getId(),
                 task.getDocId(), task.getVectorSource());
+        if (STATUS_SUCCESS.equals(result)) {
+            // 向量已写入，通知关键词索引刷新，避免新文档在 BM25 路径长期缺席
+            eventPublisher.publishEvent(new KnowledgeIndexUpdatedEvent(task.getDocId()));
+        }
     }
 
     /**
@@ -193,10 +207,22 @@ public class KnowledgeIndexTaskService {
             log.error("知识索引任务失败（已达最大重试 {} 次）: id={}, docId={}", maxAttempts,
                     task.getId(), task.getDocId(), e);
         } else {
-            taskMapper.retry(task.getId(), errorMsg);
-            log.warn("知识索引任务失败，稍后重试: id={}, docId={}, attempts={}/{}", task.getId(),
-                    task.getDocId(), attempts, maxAttempts, e);
+            int delaySeconds = backoffSeconds(attempts);
+            taskMapper.retry(task.getId(), errorMsg, delaySeconds);
+            log.warn("知识索引任务失败，{}s 后重试: id={}, docId={}, attempts={}/{}", delaySeconds,
+                    task.getId(), task.getDocId(), attempts, maxAttempts, e);
         }
+    }
+
+    /**
+     * 重试退避：按已尝试次数线性递增，并限制上限。
+     *
+     * @param attempts 已尝试次数
+     * @return 退避秒数
+     */
+    private int backoffSeconds(int attempts) {
+        long seconds = (long) retryBackoffSeconds * Math.max(attempts, 1);
+        return (int) Math.min(seconds, MAX_RETRY_BACKOFF_SECONDS);
     }
 
     /**

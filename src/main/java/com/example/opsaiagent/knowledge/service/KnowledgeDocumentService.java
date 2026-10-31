@@ -290,11 +290,16 @@ public class KnowledgeDocumentService {
     @Transactional
     public int expireOverdueDocuments() {
         LocalDateTime now = LocalDateTime.now();
-        List<KnowledgeDocumentEntity> overdue = documentMapper.selectList(
-                new LambdaQueryWrapper<KnowledgeDocumentEntity>()
-                        .eq(KnowledgeDocumentEntity::getTrustStatus, TRUST_VERIFIED)
-                        .isNotNull(KnowledgeDocumentEntity::getReviewAt)
-                        .lt(KnowledgeDocumentEntity::getReviewAt, now));
+        LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                .eq(KnowledgeDocumentEntity::getTrustStatus, TRUST_VERIFIED)
+                .isNotNull(KnowledgeDocumentEntity::getReviewAt)
+                .lt(KnowledgeDocumentEntity::getReviewAt, now);
+        // 租户管理员只能判定本租户；平台上下文才允许全量扫描
+        String currentTenant = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(currentTenant) && !"0".equals(currentTenant)) {
+            wrapper.eq(KnowledgeDocumentEntity::getTenantId, currentTenant);
+        }
+        List<KnowledgeDocumentEntity> overdue = documentMapper.selectList(wrapper);
         int count = 0;
         for (KnowledgeDocumentEntity doc : overdue) {
             doc.setTrustStatus(TRUST_EXPIRED);
@@ -535,7 +540,17 @@ public class KnowledgeDocumentService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
                     "仅部门管理员可执行部门审核");
         }
+        // 审核人必须属于文档租户，避免 knowledge:admin 跨租户审核
+        String currentTenant = SecurityUtils.getCurrentTenantId();
+        if (StringUtils.hasText(currentTenant) && !currentTenant.equals(entity.getTenantId())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "无权审核该租户知识文档: " + entity.getId());
+        }
         if (entity.getDeptId() == null) {
+            // 无部门归属的文档（如租户级用户上传）只能由知识管理员兜底审核
+            if (SecurityUtils.hasPermission("knowledge:admin")) {
+                return;
+            }
             throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID, "文档未归属部门，无法部门审核");
         }
         Long currentDept = currentDeptId();
@@ -615,15 +630,12 @@ public class KnowledgeDocumentService {
         documentMapper.updateById(entity);
         // 分块与向量化含外部 embedding 调用、耗时不可控，交给后台任务在独立事务中执行，
         // 避免长时间占用数据库事务与连接；审核结果立即生效，索引稍后完成
-        indexTaskService.enqueue(entity.getId(), entity.getVersion(),
-                UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId());
+        indexTaskService.enqueue(entity.getId(), entity.getVersion(), vectorSourceOf(entity));
     }
 
     /**
-     * 审核驳回：退回个人可见，不进入检索。
-     *
-     * <p>旧分块与向量保留（重新提交审核后可被新索引覆盖），检索侧按 reviewStatus 过滤，
-     * 因此驳回内容不会被命中。</p>
+     * 审核驳回：退回个人可见，并删除已入库向量（向量 metadata 是审核时的快照，
+     * 仅改 DB 不会让旧向量失效，必须物理删除才能确保驳回内容不再被检索命中）。
      *
      * @param entity 文档
      * @param note   驳回原因
@@ -641,6 +653,7 @@ public class KnowledgeDocumentService {
         entity.setPublishError(null);
         entity.setPublishedAt(null);
         documentMapper.updateById(entity);
+        deleteVectors(vectorSourceOf(entity));
     }
 
     /**
@@ -666,6 +679,7 @@ public class KnowledgeDocumentService {
         }
 
         if (contentChanged) {
+            validateRawContent(request.getRawContent());
             entity.setRawContent(request.getRawContent());
             entity.setVersion(entity.getVersion() == null ? 1 : entity.getVersion() + 1);
             entity.setTrustStatus(TRUST_PENDING);
@@ -682,7 +696,7 @@ public class KnowledgeDocumentService {
             entity.setPublishedAt(null);
             entity.setSubmittedAt(LocalDateTime.now());
             // 内容变更后必须重新审核，先下线旧分块与向量，审核通过后再入库
-            deleteChunksAndVectors(id);
+            deleteChunksAndVectors(entity);
             documentMapper.updateById(entity);
             // 记录变更后的版本快照，支持历史回滚
             versionService.recordSnapshot(id, request.getRawContent(), currentUsername(),
@@ -706,6 +720,7 @@ public class KnowledgeDocumentService {
         KnowledgeDocumentVersionEntity target = versionService.requireVersion(docId, versionId);
         KnowledgeDocumentEntity entity = requireDocument(docId);
         checkOwnerOrAdmin(entity);
+        validateRawContent(target.getContentSnapshot());
 
         // 1. 备份当前内容为历史版本，保留回滚现场
         versionService.recordSnapshot(docId, entity.getRawContent(), currentUsername(),
@@ -729,7 +744,7 @@ public class KnowledgeDocumentService {
         entity.setSubmittedAt(LocalDateTime.now());
 
         // 3. 下线旧分块与向量，审核通过后再入库
-        deleteChunksAndVectors(docId);
+        deleteChunksAndVectors(entity);
         documentMapper.updateById(entity);
         log.info("知识文档版本回滚: docId={}, versionId={}, version={}", docId, versionId, target.getVersion());
         return toResponse(requireDocument(docId), true);
@@ -743,7 +758,7 @@ public class KnowledgeDocumentService {
     public void delete(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
-        deleteChunksAndVectors(id);
+        deleteChunksAndVectors(entity);
         documentMapper.deleteById(id);
         log.info("知识文档已删除: id={}, title={}", entity.getId(), entity.getTitle());
     }
@@ -888,18 +903,37 @@ public class KnowledgeDocumentService {
     }
 
     /**
-     * 删除文档的分块与向量
-     * @param docId 文档 ID
+     * 校验写入的正文：非空且不超过切分上限，避免审核通过后才在异步任务中失败。
+     *
+     * @param content 正文
      */
-    private void deleteChunksAndVectors(Long docId) {
+    private void validateRawContent(String content) {
+        if (!StringUtils.hasText(content)) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "文档内容不能为空");
+        }
+        vectorIndexer.checkTextLength(content);
+    }
+
+    /**
+     * 删除文档的分块与向量
+     * @param entity 文档
+     */
+    private void deleteChunksAndVectors(KnowledgeDocumentEntity entity) {
         chunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunkEntity>()
-                .eq(KnowledgeChunkEntity::getDocId, docId));
+                .eq(KnowledgeChunkEntity::getDocId, entity.getId()));
+        deleteVectors(vectorSourceOf(entity));
+    }
+
+    /**
+     * 按向量 source 删除向量（FAILED/SKIPPED 无向量时为空操作）。
+     *
+     * @param source 向量 source
+     */
+    private void deleteVectors(String source) {
         try {
-            String source = UPLOAD_VECTOR_SOURCE_PREFIX + docId;
-            String escaped = source.replace("'", "''");
-            jdbcTemplate.update("DELETE FROM vector_store WHERE metadata->>'source' = ?", escaped);
+            jdbcTemplate.update("DELETE FROM vector_store WHERE metadata->>'source' = ?", source);
         } catch (Exception e) {
-            log.warn("删除文档向量失败（表可能不存在）: docId={}, err={}", docId, e.getMessage());
+            log.warn("删除文档向量失败（表可能不存在）: source={}, err={}", source, e.getMessage());
         }
     }
 

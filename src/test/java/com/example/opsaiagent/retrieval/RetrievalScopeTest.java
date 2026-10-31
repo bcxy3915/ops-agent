@@ -57,6 +57,9 @@ class RetrievalScopeTest {
                 "visibility", "PERSONAL", "tenantId", "t1", "owner", "u1"))).isTrue();
         assertThat(scope.matches(Map.of(
                 "visibility", "PERSONAL", "tenantId", "t1", "owner", "u2"))).isFalse();
+        // 用户名租户内唯一，跨租户同名不得互相可见
+        assertThat(scope.matches(Map.of(
+                "visibility", "PERSONAL", "tenantId", "t2", "owner", "u1"))).isFalse();
     }
 
     @Test

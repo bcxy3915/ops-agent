@@ -316,7 +316,8 @@ public class KnowledgeQueryScope {
                 return tenantId.equals(doc.getTenantId());
             }
             if (VISIBILITY_PERSONAL.equalsIgnoreCase(visibility)) {
-                return StringUtils.hasText(userId) && userId.equals(doc.getOwner());
+                return tenantId.equals(doc.getTenantId())
+                        && StringUtils.hasText(userId) && userId.equals(doc.getOwner());
             }
             // 审核人可见本部门子树 / 本企业内待审核文档
             if (canDeptReview() && REVIEW_PENDING_DEPT.equalsIgnoreCase(doc.getReviewStatus())) {
