@@ -96,6 +96,14 @@ ops-agent:
     ingest:
       # 解析后文本字符上限（超出显式拒绝，避免 maxNumChunks 静默截断）
       max-chars: 10000000
+    # 异步索引任务：审核/确认只写任务，分块与向量化由后台 worker 在独立事务中执行
+    index:
+      # 调度轮询间隔（毫秒）
+      poll-interval-ms: 5000
+      # 每轮最多处理任务数
+      max-per-round: 3
+      # 任务租约时长（分钟），需覆盖大文档完整索引耗时，过短会导致多实例重复执行
+      lease-minutes: 30
 
   crypto:
     # 密钥从 application-local.yml 或环境变量注入，这里只给默认值占位

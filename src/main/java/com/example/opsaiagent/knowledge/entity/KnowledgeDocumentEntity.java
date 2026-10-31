@@ -73,6 +73,18 @@ public class KnowledgeDocumentEntity {
     @TableField("review_note")
     private String reviewNote;
 
+    /** 索引发布状态：UNPUBLISHED / BUILDING / FAILED / PUBLISHED */
+    @TableField("publish_status")
+    private String publishStatus;
+
+    /** 最近一次索引失败原因 */
+    @TableField("publish_error")
+    private String publishError;
+
+    /** 索引发布完成时间 */
+    @TableField("published_at")
+    private LocalDateTime publishedAt;
+
     /** 信任状态：VERIFIED / PENDING / AI_DRAFT / EXPIRED */
     @TableField("trust_status")
     private String trustStatus;

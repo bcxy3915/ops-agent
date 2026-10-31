@@ -33,6 +33,12 @@ public class KnowledgeDocumentResponse {
     private String deptReviewedBy;
     private LocalDateTime deptReviewedAt;
     private String reviewNote;
+    /** 索引发布状态：UNPUBLISHED / BUILDING / FAILED / PUBLISHED */
+    private String publishStatus;
+    /** 最近一次索引失败原因 */
+    private String publishError;
+    /** 索引发布完成时间 */
+    private LocalDateTime publishedAt;
     private Integer version;
     private String owner;
     private List<String> serviceIds;

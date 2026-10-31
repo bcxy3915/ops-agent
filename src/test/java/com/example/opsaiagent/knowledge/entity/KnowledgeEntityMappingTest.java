@@ -62,6 +62,9 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("deptReviewedBy", "dept_reviewed_by")
                 .containsEntry("deptReviewedAt", "dept_reviewed_at")
                 .containsEntry("reviewNote", "review_note")
+                .containsEntry("publishStatus", "publish_status")
+                .containsEntry("publishError", "publish_error")
+                .containsEntry("publishedAt", "published_at")
                 .containsEntry("version", "version")
                 .containsEntry("owner", "owner")
                 .containsEntry("serviceIds", "service_ids")
@@ -78,7 +81,7 @@ class KnowledgeEntityMappingTest {
                 .containsEntry("conflictStatus", "conflict_status")
                 .containsEntry("createdAt", "created_at")
                 .containsEntry("updatedAt", "updated_at");
-        assertThat(map).hasSize(30);
+        assertThat(map).hasSize(33);
     }
 
     @Test

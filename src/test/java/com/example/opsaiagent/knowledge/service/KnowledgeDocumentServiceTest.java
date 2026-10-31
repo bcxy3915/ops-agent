@@ -7,11 +7,13 @@ import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeIndexStatusResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.ingest.parser.DocxDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
@@ -49,6 +51,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -82,6 +85,8 @@ class KnowledgeDocumentServiceTest {
     private TenantService tenantService;
     @Mock
     private DeptService deptService;
+    @Mock
+    private KnowledgeIndexTaskService indexTaskService;
 
     @Spy
     private KnowledgeQueryScope queryScope = new KnowledgeQueryScope(null);
@@ -93,12 +98,15 @@ class KnowledgeDocumentServiceTest {
     @BeforeEach
     void setUp() {
         vectorIndexer = new VectorIndexer(vectorStore);
+        // 审核/发布改为入队异步索引任务，验证任务入队而非同步向量写入
+
         // 使用真实解析策略工厂，覆盖 md/pdf/txt/docx 真实解析路径
         parserStrategyFactory = new DocumentParserStrategyFactory(java.util.List.of(
                 new MarkdownDocumentParserStrategy(), new PdfDocumentParserStrategy(),
                 new TxtDocumentParserStrategy(), new DocxDocumentParserStrategy()));
         service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorIndexer, parserStrategyFactory,
-                jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope);
+                jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope,
+                indexTaskService);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 
@@ -405,7 +413,7 @@ class KnowledgeDocumentServiceTest {
     // ==================== publish ====================
 
     @Test
-    @DisplayName("publish：审核通过后分块并向量化入库")
+    @DisplayName("publish：审核通过后入队索引任务（分块与向量化由后台完成）")
     void publish_approved() {
         String longContent = "故障排查指南。" + "详细步骤说明内容。".repeat(200);
         KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", longContent);
@@ -425,11 +433,16 @@ class KnowledgeDocumentServiceTest {
             KnowledgeDocumentResponse r = service.publish(1L, true);
 
             assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-            verify(vectorStore).add(anyList());
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+            // 审核不再预删旧索引，新索引成功后整体覆盖
+            verify(chunkMapper, never()).delete(any(LambdaQueryWrapper.class));
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
             ArgumentCaptor<KnowledgeDocumentEntity> updateCaptor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
             verify(documentMapper, org.mockito.Mockito.atLeast(1)).updateById(updateCaptor.capture());
             assertThat(updateCaptor.getAllValues().get(0).getLastReviewAt()).isNotNull();
-            assertThat(r.getChunkCount()).isGreaterThan(0);
+            // 索引异步执行，审核返回时分块尚未生成
+            assertThat(r.getChunkCount()).isZero();
         }
     }
 
@@ -452,7 +465,8 @@ class KnowledgeDocumentServiceTest {
 
             assertThat(r.getTrustStatus()).isEqualTo("PENDING");
             assertThat(r.getLastReviewAt()).isNotNull();
-            verify(vectorStore, never()).add(anyList());
+            assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
             verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
         }
     }
@@ -472,6 +486,103 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.publish(99L, true))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    // ==================== reindex / index-status ====================
+
+    @Test
+    @DisplayName("reindex：入库失败文档可重试，重置为入库中并重新入队")
+    void reindex_failedRetry() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_FAILED);
+        entity.setPublishError("embedding 调用超时");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        KnowledgeDocumentResponse r = service.reindex(1L);
+
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        assertThat(r.getPublishError()).isNull();
+        assertThat(r.getPublishedAt()).isNull();
+        verify(indexTaskService).enqueue(eq(1L), eq(1), eq("upload:1"));
+    }
+
+    @Test
+    @DisplayName("reindex：已发布文档可重建")
+    void reindex_publishedAllowed() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        KnowledgeDocumentResponse r = service.reindex(1L);
+
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("reindex：未通过审核拒绝")
+    void reindex_notApproved() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("DRAFT");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.reindex(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("reindex：入库中重复调用拒绝，避免重复任务")
+    void reindex_buildingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.reindex(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("indexStatus：返回发布状态与任务重试次数")
+    void indexStatus_withTask() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        entity.setChunkCount(0);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        KnowledgeIndexTaskEntity task = new KnowledgeIndexTaskEntity();
+        task.setDocId(1L);
+        task.setAttempts(1);
+        task.setMaxAttempts(3);
+        when(indexTaskService.findLatest(1L)).thenReturn(task);
+
+        KnowledgeIndexStatusResponse r = service.indexStatus(1L);
+
+        assertThat(r.getDocId()).isEqualTo(1L);
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        assertThat(r.getChunkCount()).isZero();
+        assertThat(r.getTaskAttempts()).isEqualTo(1);
+        assertThat(r.getTaskMaxAttempts()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("indexStatus：无任务时任务字段为空")
+    void indexStatus_withoutTask() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(indexTaskService.findLatest(1L)).thenReturn(null);
+
+        KnowledgeIndexStatusResponse r = service.indexStatus(1L);
+
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        assertThat(r.getTaskAttempts()).isNull();
+        assertThat(r.getTaskMaxAttempts()).isNull();
     }
 
     // ==================== update ====================
@@ -494,7 +605,7 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getVersion()).isEqualTo(1);
         assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
         assertThat(r.getOwner()).isEqualTo("ops");
-        verify(vectorStore, never()).add(anyList());
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
     }
 
     @Test
@@ -514,9 +625,10 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getReviewStatus()).isEqualTo("DRAFT");
         assertThat(r.getReviewLevel()).isEqualTo("NONE");
         assertThat(r.getVisibility()).isEqualTo("PERSONAL");
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
         assertThat(r.getRawContent()).startsWith("全新内容");
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(vectorStore, never()).add(anyList());
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
     }
 
@@ -702,7 +814,7 @@ class KnowledgeDocumentServiceTest {
         // 回滚前先备份当前内容为历史快照
         verify(versionService).recordSnapshot(eq(1L), eq("当前内容"), any(), eq("ROLLBACK_BACKUP"));
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(vectorStore, never()).add(anyList());
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
     }
 
@@ -757,7 +869,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewStatus()).isEqualTo("PENDING_DEPT");
             assertThat(r.getReviewLevel()).isEqualTo("DEPT");
             assertThat(r.getVisibility()).isEqualTo("DEPT");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -785,7 +897,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
             assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -812,7 +924,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewLevel()).isEqualTo("DEPT");
             assertThat(r.getVisibility()).isEqualTo("DEPT");
             assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -836,7 +948,7 @@ class KnowledgeDocumentServiceTest {
 
             assertThat(r.getReviewStatus()).isEqualTo("PENDING_TENANT");
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -862,7 +974,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
             assertThat(r.getVisibility()).isEqualTo("TENANT");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -928,7 +1040,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewStatus()).isEqualTo("REJECTED");
             assertThat(r.getReviewLevel()).isEqualTo("NONE");
             assertThat(r.getVisibility()).isEqualTo("PERSONAL");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
