@@ -354,6 +354,15 @@ class KnowledgeDocumentControllerTest {
         assertThat(pa.value()).contains("hasAnyAuthority('knowledge:write', 'knowledge:review')");
     }
 
+    @Test
+    @DisplayName("鉴权：直接发布要求 knowledge:publish 或 knowledge:admin")
+    void publishDirect_requirePublishPermission() throws Exception {
+        java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod("publishDirect", Long.class);
+        PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
+        assertThat(pa).isNotNull();
+        assertThat(pa.value()).contains("hasAnyAuthority('knowledge:publish', 'knowledge:admin')");
+    }
+
     private void assertAuthority(String methodName, String authority, Class<?>... params) throws NoSuchMethodException {
         java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod(methodName, params);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);

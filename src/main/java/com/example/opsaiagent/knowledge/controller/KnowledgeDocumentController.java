@@ -108,6 +108,15 @@ public class KnowledgeDocumentController {
         return ApiResponse.success(documentService.publish(id, Boolean.TRUE.equals(request.getApproved())));
     }
 
+    @Operation(summary = "直接发布", description = "管理员上传后跳过审核，直接置为已通过并进入后台异步入库，需 knowledge:publish")
+    @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAnyAuthority('knowledge:publish', 'knowledge:admin')")
+    @AuditLog(operation = "PUBLISH_KNOWLEDGE_DIRECT", description = "直接发布知识文档")
+    @PostMapping("/{id}/publish-direct")
+    public ApiResponse<KnowledgeDocumentResponse> publishDirect(@PathVariable Long id) {
+        return ApiResponse.success(documentService.publishDirect(id));
+    }
+
     @Operation(summary = "提交审核", description = "作者将草稿/已驳回文档提交部门审核，需 knowledge:write")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasAuthority('knowledge:write')")

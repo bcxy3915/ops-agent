@@ -1,8 +1,10 @@
 package com.example.opsaiagent.loader;
 
+import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +54,9 @@ class DocumentLoaderTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private KnowledgeDocumentMapper documentMapper;
+
     private VectorIndexer vectorIndexer;
 
     private DocumentLoader loader;
@@ -69,7 +74,8 @@ class DocumentLoaderTest {
     void setUp() throws IOException {
         vectorIndexer = new VectorIndexer(vectorStore);
         loader = new DocumentLoader(vectorIndexer, new DocumentParserStrategyFactory(
-                java.util.List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, jdbcTemplate);
+                java.util.List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, jdbcTemplate,
+                documentMapper);
         lenient().when(mockMdResource.getFilename()).thenReturn("test.md");
         lenient().when(mockNewResource.getFilename()).thenReturn("new.md");
         lenient().when(mockMdResource.getInputStream())
@@ -90,6 +96,12 @@ class DocumentLoaderTest {
         Map<String, Object> m = new java.util.HashMap<>();
         m.put("src", src);
         m.put("hash", hash);
+        return m;
+    }
+
+    private Map<String, Object> chunkRow(String src, String hash, Object cnt) {
+        Map<String, Object> m = row(src, hash);
+        m.put("cnt", cnt);
         return m;
     }
 
@@ -225,6 +237,73 @@ class DocumentLoaderTest {
         assertThat(result).containsEntry("status", "success");
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
         verify(vectorStore, atLeastOnce()).add(any());
+    }
+
+    // ==================== reload：内置文档元数据同步 ====================
+
+    @Test
+    @DisplayName("reload：内置文档写入 knowledge_document 元数据")
+    void reload_insertsBuiltinDocumentMetadata() throws IOException {
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(chunkRow("test.md", mdHash(), 3L)));
+        when(documentMapper.selectList(any())).thenReturn(List.of());
+
+        loader.reload();
+
+        ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+        verify(documentMapper).insert(captor.capture());
+        KnowledgeDocumentEntity entity = captor.getValue();
+        assertThat(entity.getLayer()).isEqualTo(DocumentLoader.LAYER_BUILTIN);
+        assertThat(entity.getTenantId()).isEqualTo("0");
+        assertThat(entity.getVisibility()).isEqualTo("PUBLIC");
+        assertThat(entity.getReviewStatus()).isEqualTo("APPROVED");
+        assertThat(entity.getPublishStatus()).isEqualTo("PUBLISHED");
+        assertThat(entity.getTrustStatus()).isEqualTo("VERIFIED");
+        assertThat(entity.getOwner()).isEqualTo("system");
+        assertThat(entity.getSource()).isEqualTo("test.md");
+        assertThat(entity.getFilePath()).isEqualTo(DocumentLoader.CLASSPATH_KNOWLEDGE_PREFIX + "test.md");
+        assertThat(entity.getRawContent()).isNotBlank();
+        assertThat(entity.getChunkCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("reload：内置文档内容变化时刷新元数据并递增版本")
+    void reload_updatesBuiltinDocumentMetadata() throws IOException {
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", "old-hash-value")));
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        KnowledgeDocumentEntity old = new KnowledgeDocumentEntity();
+        old.setId(1L);
+        old.setSource("test.md");
+        old.setLayer(DocumentLoader.LAYER_BUILTIN);
+        old.setRawContent("old content");
+        old.setVersion(1);
+        when(documentMapper.selectList(any())).thenReturn(List.of(old));
+
+        loader.reload();
+
+        ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+        verify(documentMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getVersion()).isEqualTo(2);
+        assertThat(captor.getValue().getRawContent()).isNotBlank();
+        assertThat(captor.getValue().getPublishStatus()).isEqualTo("PUBLISHED");
+    }
+
+    @Test
+    @DisplayName("reload：文件已从目录删除时清理内置文档元数据")
+    void reload_removesObsoleteBuiltinMetadata() throws IOException {
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        KnowledgeDocumentEntity obsolete = new KnowledgeDocumentEntity();
+        obsolete.setId(2L);
+        obsolete.setSource("old.md");
+        obsolete.setLayer(DocumentLoader.LAYER_BUILTIN);
+        when(documentMapper.selectList(any())).thenReturn(List.of(obsolete));
+
+        loader.reload();
+
+        verify(documentMapper).deleteById(2L);
     }
 
     // ==================== reload：资源读取失败 ====================

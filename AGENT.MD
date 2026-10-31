@@ -102,10 +102,17 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 索引对同一 `vector_source` 幂等：每次执行先清空该文档旧分块与旧向量再重建；失败自动重试，默认 3 次后标记 FAILED，可通过任务表 `error_msg` 排查。
 - 索引调度配置位于 `ops-agent.knowledge.index.poll-interval-ms`（默认 5000）与 `max-per-round`（默认 3）。
 - 向量 source 口径：上传文档为 `upload:<docId>`，案例文档为 `case:<docId>`，内置文档为文件名；`DocumentLoader` 只清理内置文档，不得触碰 `upload:` / `case:` 前缀。
+- 内置知识必须同时落两层：向量（`vector_store`）+ 元数据（`knowledge_document`，`layer=BUILTIN`、`tenant_id=0`、`visibility=PUBLIC`、`review_status=APPROVED`、`publish_status=PUBLISHED`、`trust_status=VERIFIED`、`owner=system`、`source=文件名`、`file_path=classpath:knowledge/<文件名>`）。`DocumentLoader.syncBuiltinDocuments()` 在每次 reload 时增量新增/刷新/清理这些行；只写向量不写元数据会导致总览、文档列表、层级计数全部为 0。
 - 审核结论与索引可用性分离：`review_status` 只记录审核结论（DRAFT/PENDING_DEPT/PENDING_TENANT/APPROVED/REJECTED），`publish_status` 记录索引是否生效（UNPUBLISHED/BUILDING/FAILED/PUBLISHED）。审核通过仅置 `APPROVED + BUILDING` 并立即返回，worker 成功回写 `PUBLISHED + published_at`，重试耗尽置 `FAILED + publish_error`；索引失败不得回退 `review_status`。
 - 审核通过 / 驳回事务内不再预删旧分块与旧向量；索引替换由 worker 的 `reindex` 整体幂等"先删后建"完成，避免失败后不可恢复。
 - 检索过滤必须同时带 `reviewStatus == 'APPROVED'`（由 `RetrievalScope.filterExpression()` 统一追加），未通过 / 驳回文档即使存在残留向量也不可被命中。
 - 索引状态运维接口：`GET /api/knowledge/documents/{id}/index-status` 轻量返回 publishStatus / publishError / 任务尝试次数供前端轮询；`POST /api/knowledge/documents/{id}/reindex` 仅对 `APPROVED` 且 `publish_status ∈ {FAILED, PUBLISHED}` 的文档重建索引，不改变审核结论。
+- 上传「直接发布」走独立接口 `POST /api/knowledge/documents/{id}/publish-direct`（需 `knowledge:publish` 或 `knowledge:admin`，且限作者或知识管理员）：仅接受 `review_status ∈ {DRAFT, REJECTED}`，跳过审核直接置 `APPROVED + BUILDING` 并入队。旧 `/publish` 只接受 `PENDING_DEPT / PENDING_TENANT`，不得用于草稿，否则会报"当前文档不处于待审核状态"并让文档停留在待审核。
+- 前端展示须以 `publishStatus` 为准：审核通过后 `trustStatus` 立即变为 `VERIFIED`，但索引可能仍为 `BUILDING` 或 `FAILED`；列表必须展示索引状态，`FAILED` 时提供「重试入库」入口，存在 `BUILDING` 行时按 4s 轮询 `index-status`，全部落定后停止。
+- `publishStatus = BUILDING` 期间文档只读：服务端 `update / rollback / delete` 统一经 `ensureNotBuilding` 拒绝（错误码 `KNOWLEDGE_DOCUMENT_INVALID`），前端操作列只保留查看 / 检索命中 / 更新日志；不要为了"元数据不影响索引"放开编辑，版本并发会让索引任务回滚或产生新旧向量重叠。
+- 任务领取 `KnowledgeIndexTaskMapper.claimOne` 使用 `@Select` 而非 `@Update`：MyBatis 的 `@Update` 只允许 `int/void` 返回类型，而该语句通过 `UPDATE ... RETURNING t.*` 返回整行实体；改成 `@Update` 会让调度每轮报 "unsupported return type" 且任务永远停留在 PENDING。
+
+  注意该异常的抛出点在 SQL 执行之后：旧的 `@Update` 版本会先把任务置为 `RUNNING` 提交，再抛异常，留下没有 worker 处理的孤儿任务。`claimOne` 只领取 `PENDING`，孤儿任务要等租约（默认 30 分钟，`ops-agent.knowledge.index.lease-minutes`）到期后由 `recoverStale` 置回 `PENDING`；排查"任务没被执行"时先看 `status` 是否卡在 `RUNNING`、`lease_until` 是否未到期，必要时手工回收。
 - 新增环境需执行 `init-scripts/schema.sql` 中的 `knowledge_index_task` 建表语句；已运行环境升级时需单独执行该段增量 DDL（含部分唯一索引）。
 - 已运行环境升级 `publish_status`：执行 `schema.sql` 中的幂等 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（publish_status / publish_error / published_at）、存量 `publish_status='PUBLISHED'` 回填，以及 `vector_store.metadata.reviewStatus` 回填段（`DO $$` + `to_regclass('vector_store')` 保护，新库初始化时可安全执行）。
 - 解析健壮性：PDF 先落地临时文件再用 PDFBox 按页读取（不整份载入堆内存，临时文件必须 finally 删除）；TXT 按 UTF-8 BOM → UTF-16 BOM → 严格 UTF-8 → GB18030 的顺序探测编码；DOCX 解析已启用 zip bomb 防护（`ZipSecureFile.setMinInflateRatio`），调整 POI 相关配置时不得移除。

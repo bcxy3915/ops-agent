@@ -515,6 +515,70 @@ class KnowledgeDocumentServiceTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
     }
 
+    // ==================== publishDirect ====================
+
+    @Test
+    @DisplayName("publishDirect：草稿跳过审核直接置为已通过并入队")
+    void publishDirect_draft() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("DRAFT");
+        entity.setReviewLevel("NONE");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+
+            KnowledgeDocumentResponse r = service.publishDirect(1L);
+
+            assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getReviewLevel()).isEqualTo("TENANT");
+            assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+            assertThat(r.getPublishError()).isNull();
+            verify(indexTaskService).enqueue(eq(1L), eq(1), eq("upload:1"));
+        }
+    }
+
+    @Test
+    @DisplayName("publishDirect：已提交审核的文档不能绕过审核直接发布")
+    void publishDirect_pendingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("PENDING_DEPT");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+
+            assertThatThrownBy(() -> service.publishDirect(1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        }
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("publishDirect：非作者且非知识管理员禁止直接发布")
+    void publishDirect_otherOwnerForbidden() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("DRAFT");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("other");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasPermission("knowledge:admin")).thenReturn(false);
+
+            assertThatThrownBy(() -> service.publishDirect(1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        }
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
     // ==================== reindex / index-status ====================
 
     @Test
@@ -572,6 +636,19 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.reindex(1L))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("reindex：官方内置知识只读，拒绝重建索引")
+    void reindex_builtinRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "BUILTIN", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_FAILED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.reindex(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
         verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
     }
 
@@ -660,6 +737,36 @@ class KnowledgeDocumentServiceTest {
     }
 
     @Test
+    @DisplayName("update：入库中的文档拒绝修改")
+    void update_buildingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "旧内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
+        req.setTitle("新标题");
+
+        assertThatThrownBy(() -> service.update(1L, req))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+        verify(documentMapper, never()).updateById(any(KnowledgeDocumentEntity.class));
+    }
+
+    @Test
+    @DisplayName("update：官方内置知识只读拒绝修改")
+    void update_builtinRejected() {
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "BUILTIN", "旧内容"));
+
+        KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
+        req.setTitle("新标题");
+
+        assertThatThrownBy(() -> service.update(1L, req))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        verify(documentMapper, never()).updateById(any(KnowledgeDocumentEntity.class));
+    }
+
+    @Test
     @DisplayName("update：内容为空拒绝并保持原状态")
     void update_emptyContentRejected() {
         when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "旧内容"));
@@ -684,6 +791,30 @@ class KnowledgeDocumentServiceTest {
     }
 
     // ==================== delete ====================
+
+    @Test
+    @DisplayName("delete：入库中的文档拒绝删除")
+    void delete_buildingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+        verify(documentMapper, never()).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("delete：官方内置知识只读拒绝删除")
+    void delete_builtinRejected() {
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "BUILTIN", "内容"));
+
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        verify(documentMapper, never()).deleteById(1L);
+    }
 
     @Test
     @DisplayName("delete：删除文档、分块与向量")

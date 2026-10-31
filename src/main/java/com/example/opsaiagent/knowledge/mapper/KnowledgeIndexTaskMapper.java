@@ -5,6 +5,7 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 /**
@@ -45,7 +46,9 @@ public interface KnowledgeIndexTaskMapper extends BaseMapper<KnowledgeIndexTaskE
      * @param leaseMinutes 租约时长（分钟）
      * @return 领取到的任务；无任务时返回 null
      */
-    @Update("WITH picked AS ("
+    // 必须用 @Select：MyBatis 的 @Update 仅允许 int/void 返回类型，
+    // 该语句通过 UPDATE ... RETURNING 返回整行，交给 MyBatis 自动映射为实体。
+    @Select("WITH picked AS ("
             + "SELECT id FROM knowledge_index_task WHERE status = 'PENDING' AND next_retry_at <= NOW() "
             + "ORDER BY next_retry_at, created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) "
             + "UPDATE knowledge_index_task t SET status = 'RUNNING', started_at = NOW(), "

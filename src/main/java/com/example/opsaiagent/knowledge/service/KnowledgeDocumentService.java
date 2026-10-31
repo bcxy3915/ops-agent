@@ -58,6 +58,8 @@ public class KnowledgeDocumentService {
 
     /** 上传文档只允许私有层（BUILTIN 内置 / CASE 案例由其他流程生成） */
     public static final String LAYER_PRIVATE = "PRIVATE";
+    /** 官方内置知识层级（由 DocumentLoader 从 classpath 同步，业务侧只读） */
+    public static final String LAYER_BUILTIN = "BUILTIN";
     /** 审核通过后的信任状态 */
     public static final String TRUST_VERIFIED = "VERIFIED";
     /** 待审核 */
@@ -342,6 +344,29 @@ public class KnowledgeDocumentService {
     }
 
     /**
+     * 直接发布：管理员上传后跳过审核流程，立即置为已通过并交给后台异步入库。
+     *
+     * 仅允许对尚未进入审核流的草稿 / 已驳回文档使用，避免绕过审核人对待审核文档的裁定。
+     * 权限由 Controller 的 {@code knowledge:publish} 限定，数据范围沿用作者或知识管理员校验。
+     *
+     * @param id 文档 ID
+     * @return 文档响应（reviewStatus=APPROVED、publishStatus=BUILDING）
+     */
+    @Transactional
+    public KnowledgeDocumentResponse publishDirect(Long id) {
+        KnowledgeDocumentEntity entity = requireDocument(id);
+        checkOwnerOrAdmin(entity);
+        if (!REVIEW_DRAFT.equals(entity.getReviewStatus())
+                && !REVIEW_REJECTED.equals(entity.getReviewStatus())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID,
+                    "仅草稿或已驳回文档可直接发布，当前状态: " + entity.getReviewStatus());
+        }
+        approveDocument(entity, REVIEW_LEVEL_TENANT, "直接发布");
+        log.info("知识文档直接发布并进入后台入库: id={}, version={}", id, entity.getVersion());
+        return toResponse(requireDocument(id), true);
+    }
+
+    /**
      * 提交知识文档审核。
      *
      * 仅作者或知识管理员可提交；按租户审核模式进入部门审核，
@@ -534,6 +559,36 @@ public class KnowledgeDocumentService {
     }
 
     /**
+     * 入库中禁止写操作。
+     *
+     * 索引任务执行期间修改、删除或回滚会让任务中的文档版本失效，
+     * 甚至产生新旧向量重叠，因此 BUILDING 状态只允许查看，待任务落定后再操作。
+     *
+     * @param entity 文档
+     */
+    private void ensureNotBuilding(KnowledgeDocumentEntity entity) {
+        if (PUBLISH_BUILDING.equals(entity.getPublishStatus())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
+                    "文档正在后台入库，暂不支持修改或删除，请等待入库完成");
+        }
+    }
+
+    /**
+     * 官方内置知识只读。
+     *
+     * <p>内置文档由 DocumentLoader 从 classpath 同步，业务侧修改/删除/重建索引都会在下次 reload 被覆盖，
+     * 且 reindex 会按文档 ID 生成 upload: source，造成内置向量重复，因此统一拒绝。</p>
+     *
+     * @param entity 文档
+     */
+    private void ensureNotBuiltin(KnowledgeDocumentEntity entity) {
+        if (LAYER_BUILTIN.equals(entity.getLayer())) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN,
+                    "官方内置知识由系统同步维护，不支持修改、删除或重建索引");
+        }
+    }
+
+    /**
      * 校验部门审核人：本部门或上级部门（子树包含文档部门）。
      *
      * @param entity 文档
@@ -673,6 +728,8 @@ public class KnowledgeDocumentService {
     public KnowledgeDocumentResponse update(Long id, KnowledgeDocumentUpdateRequest request) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
+        ensureNotBuilding(entity);
+        ensureNotBuiltin(entity);
         boolean contentChanged = request.getRawContent() != null
                 && !Objects.equals(entity.getRawContent(), request.getRawContent());
 
@@ -727,6 +784,8 @@ public class KnowledgeDocumentService {
         KnowledgeDocumentVersionEntity target = versionService.requireVersion(docId, versionId);
         KnowledgeDocumentEntity entity = requireDocument(docId);
         checkOwnerOrAdmin(entity);
+        ensureNotBuilding(entity);
+        ensureNotBuiltin(entity);
         validateRawContent(target.getContentSnapshot());
 
         // 1. 备份当前内容为历史版本，保留回滚现场
@@ -765,6 +824,8 @@ public class KnowledgeDocumentService {
     public void delete(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
+        ensureNotBuilding(entity);
+        ensureNotBuiltin(entity);
         deleteChunksAndVectors(entity);
         documentMapper.deleteById(id);
         log.info("知识文档已删除: id={}, title={}", entity.getId(), entity.getTitle());
@@ -783,6 +844,7 @@ public class KnowledgeDocumentService {
     public KnowledgeDocumentResponse reindex(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkReindexPermission(entity);
+        ensureNotBuiltin(entity);
         if (!REVIEW_APPROVED.equals(entity.getReviewStatus())) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_REVIEW_INVALID, "当前文档未通过审核，无法入库");
         }
