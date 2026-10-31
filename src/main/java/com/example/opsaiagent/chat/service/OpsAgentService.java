@@ -1,6 +1,7 @@
 package com.example.opsaiagent.chat.service;
 
 import com.example.opsaiagent.chat.dto.AskResponse;
+import com.example.opsaiagent.chat.entity.MessageEntity;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
@@ -17,6 +18,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.http.codec.ServerSentEvent;
@@ -39,6 +43,14 @@ public class OpsAgentService {
 
     // 聊天客户端
     private final ChatClient chatClient;
+
+    // 聊天记忆（进程内），用于冷启动时从数据库回填历史
+    private final ChatMemory chatMemory;
+
+    /**
+     * 冷启动回填的历史条数，与 MessageWindowChatMemory 的窗口大小保持一致
+     */
+    private static final int MEMORY_RECALL_LIMIT = 20;
 
     private final HealthCheckTools healthCheckTools;
     private final MetricQueryTools metricQueryTools;
@@ -100,6 +112,9 @@ public class OpsAgentService {
      */
     public AskResponse askWithCitations(String sessionId, String question) {
         log.info("问题: {}", question);
+
+        // 0.冷启动回填聊天记忆（进程重启/多实例切换后内存记忆为空）
+        warmUpMemory(sessionId, SecurityUtils.getCurrentUsername());
 
         // 1.混合检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
@@ -184,6 +199,8 @@ public class OpsAgentService {
         // 2. 确保会话存在（同步）
         if (username != null) {
             try {
+                // 必须在 saveUserMessage 之前回填，避免当前问题被当成历史重复注入
+                warmUpMemory(sessionId, username);
                 conversationService.ensureConversation(sessionId, username, question);
                 conversationService.saveUserMessage(sessionId, question);
             } catch (Exception e) {
@@ -237,6 +254,50 @@ public class OpsAgentService {
                         }
                     }
                 });
+    }
+
+    /**
+     * 冷启动回填聊天记忆。
+     *
+     * 聊天记忆是进程内的（MessageWindowChatMemory + 内存仓库），进程重启或请求落到
+     * 另一个实例时会丢失，而历史消息一直持久化在 ops_message 表中。这里在记忆为空时
+     * 从数据库加载最近若干条消息回填，保证多轮上下文连续。
+     *
+     * @param sessionId 会话 ID
+     * @param username 当前用户名，用于校验会话归属
+     */
+    private void warmUpMemory(String sessionId, String username) {
+        if (username == null) {
+            return;
+        }
+        try {
+            if (!chatMemory.get(sessionId).isEmpty()) {
+                return;
+            }
+            List<Message> history = conversationService
+                    .loadRecentMessages(sessionId, username, MEMORY_RECALL_LIMIT)
+                    .stream()
+                    .filter(m -> m.getContent() != null && !m.getContent().isBlank())
+                    .map(this::toChatMessage)
+                    .toList();
+            if (history.isEmpty()) {
+                return;
+            }
+            chatMemory.add(sessionId, history);
+            log.info("冷启动回填聊天记忆: sessionId={}, 条数={}", sessionId, history.size());
+        } catch (Exception e) {
+            // 回填失败不影响主流程
+            log.warn("冷启动回填聊天记忆失败: sessionId={}", sessionId, e);
+        }
+    }
+
+    /**
+     * 历史消息转 Spring AI 消息
+     */
+    private Message toChatMessage(MessageEntity entity) {
+        return "ASSISTANT".equals(entity.getRole())
+                ? new AssistantMessage(entity.getContent())
+                : new UserMessage(entity.getContent());
     }
 
     /**

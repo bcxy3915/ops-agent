@@ -379,6 +379,54 @@ class ConversationServiceTest {
         }
     }
 
+    // ==================== loadRecentMessages ====================
+
+    @Nested
+    @DisplayName("loadRecentMessages")
+    class LoadRecentMessages {
+
+        @Test
+        @DisplayName("正常返回：倒序取出后还原为 id 正序")
+        void orderByIdAsc() {
+            when(conversationMapper.selectOne(any(Wrapper.class)))
+                    .thenReturn(conv("sess-1", "admin"));
+            // 模拟按 id 倒序查询的结果
+            when(messageMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                    msg(4L, "sess-1", "ASSISTANT", "答2"),
+                    msg(3L, "sess-1", "USER", "问2"),
+                    msg(2L, "sess-1", "ASSISTANT", "答1"),
+                    msg(1L, "sess-1", "USER", "问1")));
+
+            List<MessageEntity> result = conversationService.loadRecentMessages("sess-1", "admin", 20);
+
+            assertThat(result).extracting(MessageEntity::getId)
+                    .containsExactly(1L, 2L, 3L, 4L);
+        }
+
+        @Test
+        @DisplayName("会话不存在：返回空列表，不查消息")
+        void conversationNotFound() {
+            when(conversationMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+
+            List<MessageEntity> result = conversationService.loadRecentMessages("sess-1", "admin", 20);
+
+            assertThat(result).isEmpty();
+            verify(messageMapper, never()).selectList(any(Wrapper.class));
+        }
+
+        @Test
+        @DisplayName("越权访问：返回空列表，不查消息")
+        void otherUser() {
+            when(conversationMapper.selectOne(any(Wrapper.class)))
+                    .thenReturn(conv("sess-1", "lina"));
+
+            List<MessageEntity> result = conversationService.loadRecentMessages("sess-1", "admin", 20);
+
+            assertThat(result).isEmpty();
+            verify(messageMapper, never()).selectList(any(Wrapper.class));
+        }
+    }
+
     // ==================== deleteConversation ====================
 
     @Nested

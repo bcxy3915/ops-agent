@@ -1,5 +1,6 @@
 package com.example.opsaiagent.common.config;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -29,6 +30,9 @@ public class JacksonConfig {
         return JsonMapper.builder()
                 .findAndAddModules()
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                // 与 Spring Boot 默认行为保持一致：忽略请求体中 DTO 未声明的字段，
+                // 否则前端回传完整对象（如带 name）时会直接 500
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .build();
     }
 }

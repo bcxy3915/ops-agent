@@ -1,6 +1,7 @@
 package com.example.opsaiagent.ops.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.example.opsaiagent.common.config.JsonbStringTypeHandler;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -9,7 +10,7 @@ import java.time.LocalDateTime;
  * 服务实体
  */
 @Data
-@TableName("ops_service")
+@TableName(value = "ops_service", autoResultMap = true)
 public class OpsServiceEntity {
 
     /**
@@ -68,9 +69,9 @@ public class OpsServiceEntity {
 
     /**
      * 标签
-     * JSONB 类型，简单起见用 String 存
+     * JSONB 类型，简单起见用 String 存；写入需经 TypeHandler 以 Types.OTHER 绑定
      */
-    @TableField("tags")
+    @TableField(value = "tags", typeHandler = JsonbStringTypeHandler.class)
     private String tags;
 
     /**
