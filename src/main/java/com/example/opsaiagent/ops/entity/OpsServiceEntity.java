@@ -1,7 +1,7 @@
 package com.example.opsaiagent.ops.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
-import com.example.opsaiagent.common.config.JsonbStringTypeHandler;
+import com.example.opsaiagent.common.config.JsonbTypeHandler;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -71,7 +71,7 @@ public class OpsServiceEntity {
      * 标签
      * JSONB 类型，简单起见用 String 存；写入需经 TypeHandler 以 Types.OTHER 绑定
      */
-    @TableField(value = "tags", typeHandler = JsonbStringTypeHandler.class)
+    @TableField(value = "tags", typeHandler = JsonbTypeHandler.class)
     private String tags;
 
     /**

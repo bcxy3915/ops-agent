@@ -54,39 +54,50 @@ class AlertThrottleServiceTest {
     @Test
     @DisplayName("allowEvent：未达上限允许")
     void allowEvent_underLimit() {
-        assertThat(throttle.allowEvent("svc-a", now)).isTrue();
+        assertThat(throttle.allowEvent("t1", "svc-a", now)).isTrue();
     }
 
     @Test
     @DisplayName("allowEvent：达到每小时上限拒绝")
     void allowEvent_overLimit() {
         for (int i = 0; i < AlertThrottleService.HOURLY_EVENT_LIMIT; i++) {
-            throttle.recordEvent("svc-a", now);
+            throttle.recordEvent("t1", "svc-a", now);
         }
 
-        assertThat(throttle.allowEvent("svc-a", now)).isFalse();
+        assertThat(throttle.allowEvent("t1", "svc-a", now)).isFalse();
     }
 
     @Test
     @DisplayName("allowEvent：跨小时窗口后计数重置")
     void allowEvent_rollsWindow() {
         for (int i = 0; i < AlertThrottleService.HOURLY_EVENT_LIMIT; i++) {
-            throttle.recordEvent("svc-a", now);
+            throttle.recordEvent("t1", "svc-a", now);
         }
 
         // 一小时后
-        assertThat(throttle.allowEvent("svc-a", now + 3_600_000L + 1)).isTrue();
+        assertThat(throttle.allowEvent("t1", "svc-a", now + 3_600_000L + 1)).isTrue();
     }
 
     @Test
     @DisplayName("recordFired / recordEvent：不同服务相互独立")
     void counters_isolatedByService() {
         for (int i = 0; i < AlertThrottleService.HOURLY_EVENT_LIMIT; i++) {
-            throttle.recordEvent("svc-a", now);
+            throttle.recordEvent("t1", "svc-a", now);
         }
 
-        assertThat(throttle.allowEvent("svc-a", now)).isFalse();
-        assertThat(throttle.allowEvent("svc-b", now)).isTrue();
+        assertThat(throttle.allowEvent("t1", "svc-a", now)).isFalse();
+        assertThat(throttle.allowEvent("t1", "svc-b", now)).isTrue();
+    }
+
+    @Test
+    @DisplayName("recordEvent：不同租户的同名服务相互独立")
+    void counters_isolatedByTenant() {
+        for (int i = 0; i < AlertThrottleService.HOURLY_EVENT_LIMIT; i++) {
+            throttle.recordEvent("t1", "svc-a", now);
+        }
+
+        assertThat(throttle.allowEvent("t1", "svc-a", now)).isFalse();
+        assertThat(throttle.allowEvent("t2", "svc-a", now)).isTrue();
     }
 
     @Test
@@ -94,12 +105,12 @@ class AlertThrottleServiceTest {
     void reset_clears() {
         throttle.recordFired(1L, now - 10_000);
         for (int i = 0; i < AlertThrottleService.HOURLY_EVENT_LIMIT; i++) {
-            throttle.recordEvent("svc-a", now);
+            throttle.recordEvent("t1", "svc-a", now);
         }
 
         throttle.reset();
 
         assertThat(throttle.shouldSilence(1L, 30, now)).isFalse();
-        assertThat(throttle.allowEvent("svc-a", now)).isTrue();
+        assertThat(throttle.allowEvent("t1", "svc-a", now)).isTrue();
     }
 }

@@ -14,6 +14,12 @@ public class ServiceUpdateRequest {
     @Pattern(regexp = "https?://.+", message = "baseUrl 格式错误")
     private String baseUrl;
 
+    @Schema(description = "健康检查路径", example = "/actuator/health")
+    private String healthPath;
+
+    @Schema(description = "指标路径", example = "/actuator/metrics")
+    private String metricsPath;
+
     @Schema(description = "负责人", example = "张三")
     private String owner;
 

@@ -165,6 +165,8 @@ public class ServiceController {
             @Valid @RequestBody ServiceUpdateRequest request) {
         OpsServiceEntity entity = findAccessibleService(name);
         if (request.getBaseUrl() != null) entity.setBaseUrl(request.getBaseUrl());
+        if (request.getHealthPath() != null) entity.setHealthPath(request.getHealthPath());
+        if (request.getMetricsPath() != null) entity.setMetricsPath(request.getMetricsPath());
         if (request.getOwner() != null) entity.setOwner(request.getOwner());
         if (request.getEnv() != null) entity.setEnv(request.getEnv());
         if (request.getTags() != null) entity.setTags(toJson(request.getTags()));

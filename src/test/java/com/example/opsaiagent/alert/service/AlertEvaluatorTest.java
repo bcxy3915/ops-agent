@@ -76,7 +76,7 @@ class AlertEvaluatorTest {
     @BeforeEach
     void setUp() {
         // 默认允许产生事件；个别用例单独覆盖（静默 / 节流用例会短路或覆盖该 stub）
-        lenient().when(throttle.allowEvent(anyString(), anyLong())).thenReturn(true);
+        lenient().when(throttle.allowEvent(any(), anyString(), anyLong())).thenReturn(true);
         // 默认无到期维护窗口、服务不在维护窗口内（evaluate() 开头与命中分支会查询）
         lenient().when(maintenanceWindowService.expireDueWindows(any())).thenReturn(java.util.List.of());
         lenient().when(maintenanceWindowService.isServiceInWindow(anyString(), any())).thenReturn(false);
@@ -131,7 +131,7 @@ class AlertEvaluatorTest {
         assertThat(inserted.getThreshold()).isEqualTo(80.0);
         assertThat(inserted.getFiredAt()).isNotNull();
         verify(throttle).recordFired(1L, NOW);
-        verify(throttle).recordEvent("svc-a", NOW);
+        verify(throttle).recordEvent(isNull(), eq("svc-a"), eq(NOW));
         // 闭环编排（T18）：快照生成成功 → LLM 诊断 → 通知（带诊断结果）
         verify(snapshotService).buildAndSave(inserted);
         verify(diagnosisService).diagnose(snap);
@@ -261,7 +261,7 @@ class AlertEvaluatorTest {
         AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
         when(metricSampleStore.queryLatest("svc-a", "cpu", NOW))
                 .thenReturn(new MetricPoint(NOW, 95.0));
-        when(throttle.allowEvent("svc-a", NOW)).thenReturn(false);
+        when(throttle.allowEvent(isNull(), eq("svc-a"), eq(NOW))).thenReturn(false);
 
         evaluator.evaluateRule(rule, NOW);
 

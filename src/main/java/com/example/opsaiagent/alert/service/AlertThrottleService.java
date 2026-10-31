@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 告警静默与通知节流。
  *   静默：规则触发后进入 silence_seconds 静默期，期内不再重复告警
- *   节流：同一服务每小时最多产生 N 条告警事件，超限事件以 SILENCED 落库
+ *   节流：同一租户的同一服务每小时最多产生 N 条告警事件，超限事件以 SILENCED 落库
  * 状态保存在内存中（重启清零），生产环境可替换为 Redis。
  */
 @Service
@@ -20,7 +20,7 @@ public class AlertThrottleService {
     /** ruleId -> 上次触发时间戳（ms），用于静默期检查 */
     private final Map<Long, Long> lastFiredAt = new ConcurrentHashMap<>();
 
-    /** service -> 小时窗口计数 */
+    /** tenantId|service -> 小时窗口计数 */
     private final Map<String, HourWindow> hourlyCount = new ConcurrentHashMap<>();
 
     /**
@@ -47,9 +47,10 @@ public class AlertThrottleService {
 
     /**
      * 是否允许继续产生告警事件（未超每小时上限）
+     * 按租户 + 服务计数，避免不同租户的同名服务互相挤占额度。
      */
-    public boolean allowEvent(String service, long nowMs) {
-        HourWindow window = hourlyWindow(service, nowMs);
+    public boolean allowEvent(String tenantId, String service, long nowMs) {
+        HourWindow window = hourlyWindow(tenantId, service, nowMs);
         window.slide(nowMs);
         return window.count < HOURLY_EVENT_LIMIT;
     }
@@ -57,8 +58,8 @@ public class AlertThrottleService {
     /**
      * 记录产生一条告警事件
      */
-    public void recordEvent(String service, long nowMs) {
-        HourWindow window = hourlyWindow(service, nowMs);
+    public void recordEvent(String tenantId, String service, long nowMs) {
+        HourWindow window = hourlyWindow(tenantId, service, nowMs);
         window.slide(nowMs);
         window.count++;
     }
@@ -71,8 +72,9 @@ public class AlertThrottleService {
         hourlyCount.clear();
     }
 
-    private HourWindow hourlyWindow(String service, long nowMs) {
-        return hourlyCount.computeIfAbsent(service, k -> new HourWindow(nowMs));
+    private HourWindow hourlyWindow(String tenantId, String service, long nowMs) {
+        String key = (tenantId == null || tenantId.isBlank() ? "" : tenantId) + "|" + service;
+        return hourlyCount.computeIfAbsent(key, k -> new HourWindow(nowMs));
     }
 
     /** 滚动小时窗口 */

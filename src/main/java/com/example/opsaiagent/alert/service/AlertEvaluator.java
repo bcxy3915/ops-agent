@@ -175,12 +175,12 @@ public class AlertEvaluator {
                 recordEvent(rule, value, nowMs, AlertEventStatus.SILENCED, "静默期内压制，未重复告警");
                 return;
             }
-            if (!throttle.allowEvent(service, nowMs)) {
+            if (!throttle.allowEvent(rule.getTenantId(), service, nowMs)) {
                 recordEvent(rule, value, nowMs, AlertEventStatus.SILENCED, "超出每小时告警上限");
                 return;
             }
             throttle.recordFired(rule.getId(), nowMs);
-            throttle.recordEvent(service, nowMs);
+            throttle.recordEvent(rule.getTenantId(), service, nowMs);
             AlertEventEntity event = recordEvent(rule, value, nowMs, AlertEventStatus.FIRING, buildDetail(rule, value));
             afterFiring(event);
         } else {

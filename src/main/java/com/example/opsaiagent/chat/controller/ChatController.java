@@ -86,19 +86,26 @@ public class ChatController {
 
     /**
      * 根据问题返回答案（流式，SSE 增加 citations 事件）
-     * @param question 问题
-     * @param sessionId 会话ID
      * @return SSE 事件流：citations 事件 + 答案 token + [DONE]
      */
     @Operation(
             summary = "流式问答（SSE）",
-            description = "先推送 citations 引用事件，再逐字返回答案。返回 text/event-stream，需用 EventSource 消费。"
+            description = "先推送 citations 引用事件，再逐字返回答案。返回 text/event-stream，前端用 fetch + ReadableStream 消费（POST 传参，避免长文本撑爆请求头）。"
     )
     @RateLimit(key = "askStream", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
-    @GetMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")
+    @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")
     public Flux<ServerSentEvent<String>> askStream(
-            @RequestParam String question,
-            @RequestParam(required = false, defaultValue = "default") String sessionId) {
-        return opsAgentService.askStreamWithCitations(sessionId, question);
+            @RequestBody AskStreamRequest request) {
+        String sessionId = (request.getSessionId() == null || request.getSessionId().isBlank())
+                ? "default" : request.getSessionId();
+        return opsAgentService.askStreamWithCitations(sessionId, request.getQuestion());
+    }
+
+    /** 流式问答请求体（长文本走 body，不走 URL query） */
+    @lombok.Data
+    @lombok.NoArgsConstructor
+    public static class AskStreamRequest {
+        private String question;
+        private String sessionId;
     }
 }
