@@ -29,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.document.Document;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -112,8 +113,11 @@ public class KnowledgeDocumentService {
     private final KnowledgeQueryScope queryScope;
 
     /** 上传文件大小上限（MB） */
-    @Value("${ops-agent.knowledge.upload.max-size-mb:20}")
-    private long maxUploadMb = 20;
+    @Value("${ops-agent.knowledge.upload.max-size-mb:50}")
+    private long maxUploadMb = 50;
+
+    /** knowledge_chunk 批量插入的每批条数 */
+    private static final int CHUNK_INSERT_BATCH_SIZE = 500;
 
     /**
      * 分页查询文档列表
@@ -236,6 +240,7 @@ public class KnowledgeDocumentService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "标题和内容不能为空");
         }
         String title = request.getTitle().trim();
+        vectorIndexer.checkTextLength(request.getContent());
 
         KnowledgeDocumentEntity entity = new KnowledgeDocumentEntity();
         entity.setTitle(title);
@@ -729,17 +734,8 @@ public class KnowledgeDocumentService {
         if (!StringUtils.hasText(fileName)) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "文件名缺失");
         }
-        String lower = fileName.toLowerCase();
-        String docType;
-        if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
-            docType = "MARKDOWN";
-        } else if (lower.endsWith(".pdf")) {
-            docType = "PDF";
-        } else if (lower.endsWith(".txt")) {
-            docType = "TXT";
-        } else if (lower.endsWith(".docx")) {
-            docType = "DOCX";
-        } else {
+        String docType = DocumentParserStrategyFactory.resolveDocType(fileName);
+        if (docType == null) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID,
                     "不支持的文件类型，仅支持 md/pdf/txt/docx: " + fileName);
         }
@@ -750,7 +746,12 @@ public class KnowledgeDocumentService {
                     .map(Document::getText)
                     .filter(Objects::nonNull)
                     .collect(Collectors.joining("\n"));
+            // 上传时即显式校验文本长度，避免审核阶段才发现超长被截断
+            vectorIndexer.checkTextLength(text);
             return new ParsedDocument(docType, text, fileName);
+        } catch (BusinessException e) {
+            // 文本超长等业务校验异常直接透传，不包装为解析失败
+            throw e;
         } catch (IOException e) {
             log.error("文档解析失败: {}", fileName, e);
             throw new BusinessException(ErrorCode.KNOWLEDGE_UPLOAD_FAILED, "文档解析失败: " + e.getMessage());
@@ -773,16 +774,21 @@ public class KnowledgeDocumentService {
             documentMapper.updateById(entity);
             return;
         }
-        List<Document> chunks = vectorIndexer.split(content);
+        List<Document> chunks;
+        if ("MARKDOWN".equals(entity.getDocType())) {
+            // Markdown 按标题层级重新解析后结构化切分，与内置知识库切分行为一致，保留章节边界
+            List<Document> structured = parserStrategyFactory.getStrategy("MARKDOWN")
+                    .parse(new ByteArrayResource(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            chunks = structured.isEmpty() ? List.of() : vectorIndexer.split(structured);
+            if (chunks.isEmpty()) {
+                // 短文本可能被切分器全部丢弃，退化为整段切分（内部有单块兜底）
+                chunks = vectorIndexer.split(content);
+            }
+        } else {
+            chunks = vectorIndexer.split(content);
+        }
 
         List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
-        List<Document> vectorDocs = new ArrayList<>();
-        String tenantId = entity.getTenantId() == null ? "" : entity.getTenantId();
-        String deptId = entity.getDeptId() == null ? "" : String.valueOf(entity.getDeptId());
-        String visibility = entity.getVisibility() == null ? VISIBILITY_PERSONAL : entity.getVisibility();
-        String trustStatus = entity.getTrustStatus() == null ? "" : entity.getTrustStatus();
-        String owner = entity.getOwner() == null ? "" : entity.getOwner();
-        String reviewStatus = entity.getReviewStatus() == null ? "" : entity.getReviewStatus();
         int ordinal = 1;
         for (Document chunk : chunks) {
             KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
@@ -792,9 +798,25 @@ public class KnowledgeDocumentService {
             chunkEntity.setOrdinal(ordinal);
             chunkEntity.setContent(chunk.getText());
             chunkEntity.setSection(extractSection(chunk.getText(), entity.getDocType()));
-            chunkMapper.insert(chunkEntity);
             chunkEntities.add(chunkEntity);
+            ordinal++;
+        }
+        // 批量写入分块（每 500 条一批，避免大文档产生数万次单条 INSERT），主键回填后供向量 metadata 引用
+        for (int i = 0; i < chunkEntities.size(); i += CHUNK_INSERT_BATCH_SIZE) {
+            chunkMapper.insertBatch(
+                    chunkEntities.subList(i, Math.min(i + CHUNK_INSERT_BATCH_SIZE, chunkEntities.size())));
+        }
 
+        List<Document> vectorDocs = new ArrayList<>();
+        String tenantId = entity.getTenantId() == null ? "" : entity.getTenantId();
+        String deptId = entity.getDeptId() == null ? "" : String.valueOf(entity.getDeptId());
+        String visibility = entity.getVisibility() == null ? VISIBILITY_PERSONAL : entity.getVisibility();
+        String trustStatus = entity.getTrustStatus() == null ? "" : entity.getTrustStatus();
+        String owner = entity.getOwner() == null ? "" : entity.getOwner();
+        String reviewStatus = entity.getReviewStatus() == null ? "" : entity.getReviewStatus();
+        ordinal = 1;
+        for (Document chunk : chunks) {
+            KnowledgeChunkEntity chunkEntity = chunkEntities.get(ordinal - 1);
             java.util.Map<String, Object> metadata = new java.util.HashMap<>();
             metadata.put("source", UPLOAD_VECTOR_SOURCE_PREFIX + entity.getId());
             metadata.put("docId", String.valueOf(entity.getId()));

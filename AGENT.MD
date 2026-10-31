@@ -85,6 +85,18 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 不伪造模型响应、检索命中、外部指标或诊断结论；测试中的模拟数据应明确为测试夹具。
 - 默认使用 Mock 验证外部模型和通知调用，避免测试产生真实费用或向外部发送通知。
 
+### 6.1 知识入库（ingest）链路约定
+
+适用于「上传 / 在线沉淀 / 内置加载 → 解析 → 切分 → 向量入库」全链路，核心组件位于 `knowledge/ingest/`、`knowledge/service/VectorIndexer`、`knowledge/loader/DocumentLoader`：
+
+- 上传大小限制的唯一配置源是 `ops-agent.knowledge.upload.max-size-mb`（默认 50）；multipart 的 `max-file-size` / `max-request-size` 通过占位符引用它，不允许单独写死或出现两套口径。
+- 文件扩展名 → docType 的唯一映射源是 `DocumentParserStrategyFactory.resolveDocType()`；新增文件类型时在映射表和对应解析策略中同步登记。
+- 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略，不单独引入其他 Reader；Markdown 一律先做结构化切分（`MarkdownDocumentParserStrategy`），短文本被全部丢弃时再用纯文本切分兜底。
+- 切分由 `VectorIndexer` 统一收口；解析后文本受 `ops-agent.knowledge.ingest.max-chars`（默认 1000 万字符）限制，超长必须显式拒绝，禁止用 `maxNumChunks` 之类参数静默截断。
+- chunk 落库使用 `KnowledgeChunkMapper.insertBatch`（500 条/批），禁止逐条 `insert`；向量写入与 metadata 组装统一走 `VectorIndexer`。
+- 解析健壮性：PDF 先落地临时文件再用 PDFBox 按页读取（不整份载入堆内存，临时文件必须 finally 删除）；TXT 按 UTF-8 BOM → UTF-16 BOM → 严格 UTF-8 → GB18030 的顺序探测编码；DOCX 解析已启用 zip bomb 防护（`ZipSecureFile.setMinInflateRatio`），调整 POI 相关配置时不得移除。
+- 大文件演进方向：文件上限扩大到 100MB+ 前，需先将 `DocumentParserStrategy.parse(Resource): List<Document>` 升级为流式签名（产出端逐段产出、消费端逐段切分入库），趁实现与调用方较少时改造成本最低。
+
 ## 7. 常用命令
 
 以下命令在项目根目录执行。Windows PowerShell 优先使用 Maven Wrapper：
@@ -119,6 +131,7 @@ docker compose up -d
 - 修复缺陷时，优先添加能复现问题的回归测试。
 - 业务修改至少验证正常路径、关键边界和失败路径；权限相关修改覆盖越权与跨租户场景。
 - 先执行相关测试，再按影响范围运行完整测试；涉及构建配置或公共基础设施时执行相应构建检查。
+- 断言 Reactor 流在 `doFinally` / `publishOn` 等异步线程中的副作用时，使用 `Mockito.timeout(...)` 等待，避免 StepVerifier 与回调线程的竞态导致偶发失败。
 - JaCoCo 报告位于 `target/site/jacoco/`，Surefire 测试报告位于 `target/surefire-reports/`。
 - 纯文档修改检查内容、路径和编码即可，无需为此运行完整后端测试。
 - 交付前检查差异，避免引入凭据、构建产物或与任务无关的文件。

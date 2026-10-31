@@ -1,5 +1,7 @@
 package com.example.opsaiagent.loader;
 
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
+import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,7 +68,8 @@ class DocumentLoaderTest {
     @BeforeEach
     void setUp() throws IOException {
         vectorIndexer = new VectorIndexer(vectorStore);
-        loader = new DocumentLoader(vectorIndexer, resourcePatternResolver, jdbcTemplate);
+        loader = new DocumentLoader(vectorIndexer, new DocumentParserStrategyFactory(
+                java.util.List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, jdbcTemplate);
         lenient().when(mockMdResource.getFilename()).thenReturn("test.md");
         lenient().when(mockNewResource.getFilename()).thenReturn("new.md");
         lenient().when(mockMdResource.getInputStream())
@@ -76,8 +79,11 @@ class DocumentLoaderTest {
     }
 
     private void stubKnowledgeFiles(Resource[] mdFiles, Resource[] pdfFiles) throws IOException {
-        when(resourcePatternResolver.getResources("classpath*:knowledge/*.md")).thenReturn(mdFiles);
-        when(resourcePatternResolver.getResources("classpath*:knowledge/*.pdf")).thenReturn(pdfFiles);
+        // 加载器现通过统一通配符扫描目录，再由解析策略按类型处理
+        Resource[] all = new Resource[mdFiles.length + pdfFiles.length];
+        System.arraycopy(mdFiles, 0, all, 0, mdFiles.length);
+        System.arraycopy(pdfFiles, 0, all, mdFiles.length, pdfFiles.length);
+        when(resourcePatternResolver.getResources("classpath*:knowledge/*")).thenReturn(all);
     }
 
     private Map<String, Object> row(String src, String hash) {

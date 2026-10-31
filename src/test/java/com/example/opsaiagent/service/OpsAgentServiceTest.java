@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -211,10 +212,10 @@ class OpsAgentServiceTest {
                 .expectNext("[DONE]")
                 .verifyComplete();
 
-        // 会话和消息都应保存
+        // 会话和消息都应保存（doFinally 在 boundedElastic 线程异步执行，加 timeout 等待避免竞态）
         verify(conversationService).ensureConversation("sess-1", "admin", "问题");
         verify(conversationService).saveUserMessage("sess-1", "问题");
-        verify(conversationService).saveAssistantMessage("sess-1", "你好");
+        verify(conversationService, timeout(1000)).saveAssistantMessage("sess-1", "你好");
     }
 
     @Test
@@ -295,7 +296,8 @@ class OpsAgentServiceTest {
 
         verify(conversationService).ensureConversation("sess-1", "admin", "问题");
         verify(conversationService).saveUserMessage("sess-1", "问题");
-        verify(conversationService).saveAssistantMessage("sess-1", "你好");
+        // doFinally 在 boundedElastic 线程异步执行，加 timeout 等待避免竞态
+        verify(conversationService, timeout(1000)).saveAssistantMessage("sess-1", "你好");
     }
 
     @Test

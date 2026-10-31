@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.ingest.parser;
 
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.springframework.ai.document.Document;
@@ -14,6 +15,11 @@ import java.util.List;
  */
 @Component
 public class DocxDocumentParserStrategy implements DocumentParserStrategy {
+
+    static {
+        // zip bomb 防护：压缩率低于 0.5% 判定为恶意文件直接拒绝（POI 默认 1%，此处收紧）
+        ZipSecureFile.setMinInflateRatio(0.005d);
+    }
 
     @Override
     public boolean support(String fileType) {

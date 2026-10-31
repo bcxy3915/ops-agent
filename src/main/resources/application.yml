@@ -16,8 +16,9 @@ spring:
 
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 25MB
+      # 与 ops-agent.knowledge.upload.max-size-mb 保持单一配置源；request 略大于 file 以容纳表单字段
+      max-file-size: ${ops-agent.knowledge.upload.max-size-mb:50}MB
+      max-request-size: ${ops-agent.knowledge.upload.max-request-mb:55}MB
 
   mail:
     # 邮件通知渠道的 SMTP 配置（T09/T11），通过环境变量注入
@@ -88,7 +89,13 @@ ops-agent:
   # 知识库
   knowledge:
     upload:
-      max-size-mb: 20
+      # 上传文件大小上限（multipart max-file-size 引用同一配置，勿单独修改）
+      max-size-mb: 50
+      # multipart max-request-size，需略大于 max-size-mb 以容纳表单字段
+      max-request-mb: 55
+    ingest:
+      # 解析后文本字符上限（超出显式拒绝，避免 maxNumChunks 静默截断）
+      max-chars: 10000000
 
   crypto:
     # 密钥从 application-local.yml 或环境变量注入，这里只给默认值占位

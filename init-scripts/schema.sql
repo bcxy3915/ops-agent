@@ -877,6 +877,47 @@ COMMENT ON COLUMN knowledge_chunk.tenant_id IS '所属租户 ID';
 COMMENT ON COLUMN knowledge_chunk.dept_id IS '所属部门 ID';
 
 -- ------------------------------------------------------------
+-- knowledge_index_task：知识索引任务表；审核/确认只写任务，
+-- 由后台 worker 在独立事务中完成分块与向量化，避免长事务
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS knowledge_index_task (
+    id BIGSERIAL,
+    doc_id BIGINT NOT NULL,
+    doc_version INTEGER DEFAULT 1 NOT NULL,
+    vector_source VARCHAR(128) NOT NULL,
+    task_type VARCHAR(16) DEFAULT 'INDEX' NOT NULL,
+    status VARCHAR(16) DEFAULT 'PENDING' NOT NULL,
+    attempts INTEGER DEFAULT 0 NOT NULL,
+    max_attempts INTEGER DEFAULT 3 NOT NULL,
+    error_msg text,
+    created_at TIMESTAMP DEFAULT NOW(),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    lease_until TIMESTAMP,
+    CONSTRAINT knowledge_index_task_pkey PRIMARY KEY (id)
+);
+
+-- 同一文档同时只允许一条未完成任务
+CREATE UNIQUE INDEX IF NOT EXISTS uk_knowledge_index_task_active_doc
+    ON knowledge_index_task (doc_id) WHERE status IN ('PENDING', 'RUNNING');
+CREATE INDEX IF NOT EXISTS idx_knowledge_index_task_status
+    ON knowledge_index_task USING btree (status, created_at);
+
+COMMENT ON TABLE knowledge_index_task IS '知识索引任务表；异步分块与向量化';
+COMMENT ON COLUMN knowledge_index_task.doc_id IS '文档 ID';
+COMMENT ON COLUMN knowledge_index_task.doc_version IS '入队时的文档版本，用于幂等校验';
+COMMENT ON COLUMN knowledge_index_task.vector_source IS '向量 source 标识，用于幂等重建与删除';
+COMMENT ON COLUMN knowledge_index_task.task_type IS '任务类型：INDEX';
+COMMENT ON COLUMN knowledge_index_task.status IS '任务状态：PENDING/RUNNING/SUCCESS/FAILED/SKIPPED';
+COMMENT ON COLUMN knowledge_index_task.attempts IS '已尝试次数';
+COMMENT ON COLUMN knowledge_index_task.max_attempts IS '最大尝试次数';
+COMMENT ON COLUMN knowledge_index_task.error_msg IS '最近一次失败原因';
+COMMENT ON COLUMN knowledge_index_task.created_at IS '创建时间';
+COMMENT ON COLUMN knowledge_index_task.started_at IS '开始执行时间';
+COMMENT ON COLUMN knowledge_index_task.finished_at IS '结束时间';
+COMMENT ON COLUMN knowledge_index_task.lease_until IS '执行租约到期时间，超时由调度回收';
+
+-- ------------------------------------------------------------
 -- knowledge_case：知识案例表；保存故障案例与处置经验
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS knowledge_case (

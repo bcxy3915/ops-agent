@@ -19,6 +19,7 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.mapper.FailureSnapshotMapper;
 import com.example.opsaiagent.security.util.SecurityUtils;
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -36,7 +38,6 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,6 +68,9 @@ public class KnowledgeCaseService {
 
     private static final Pattern MD_HEADING = Pattern.compile("^#{1,6}\\s+(.+)$", Pattern.MULTILINE);
 
+    /** knowledge_chunk 批量插入的每批条数 */
+    private static final int CHUNK_INSERT_BATCH_SIZE = 500;
+
     private final KnowledgeCaseMapper caseMapper;
     private final DiagnosisRecordMapper diagnosisRecordMapper;
     private final AlertEventMapper alertEventMapper;
@@ -74,6 +78,7 @@ public class KnowledgeCaseService {
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
     private final VectorIndexer vectorIndexer;
+    private final DocumentParserStrategyFactory parserStrategyFactory;
     private final ObjectMapper objectMapper;
     private final KnowledgeQueryScope queryScope;
 
@@ -305,12 +310,17 @@ public class KnowledgeCaseService {
         doc.setChunkCount(0);
         documentMapper.insert(doc);
 
-        List<Document> chunks = vectorIndexer.split(content);
+        List<Document> chunks;
+        // 案例内容为 Markdown，按标题层级结构化切分，与文档审核路径行为一致
+        List<Document> structured = parserStrategyFactory.getStrategy("MARKDOWN")
+                .parse(new ByteArrayResource(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        chunks = structured.isEmpty() ? List.of() : vectorIndexer.split(structured);
+        if (chunks.isEmpty()) {
+            // 短文本可能被切分器全部丢弃，退化为整段切分（内部有单块兜底）
+            chunks = vectorIndexer.split(content);
+        }
+
         List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
-        List<Document> vectorDocs = new ArrayList<>();
-        String tenantId = doc.getTenantId() == null ? "" : doc.getTenantId();
-        String deptId = doc.getDeptId() == null ? "" : String.valueOf(doc.getDeptId());
-        String owner = doc.getOwner() == null ? "" : doc.getOwner();
         int ordinal = 1;
         for (Document chunk : chunks) {
             KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
@@ -320,9 +330,22 @@ public class KnowledgeCaseService {
             chunkEntity.setOrdinal(ordinal);
             chunkEntity.setContent(chunk.getText());
             chunkEntity.setSection(extractSection(chunk.getText(), "MARKDOWN"));
-            chunkMapper.insert(chunkEntity);
             chunkEntities.add(chunkEntity);
+            ordinal++;
+        }
+        // 批量写入分块（每 500 条一批），主键回填后供向量 metadata 引用
+        for (int i = 0; i < chunkEntities.size(); i += CHUNK_INSERT_BATCH_SIZE) {
+            chunkMapper.insertBatch(
+                    chunkEntities.subList(i, Math.min(i + CHUNK_INSERT_BATCH_SIZE, chunkEntities.size())));
+        }
 
+        List<Document> vectorDocs = new ArrayList<>();
+        String tenantId = doc.getTenantId() == null ? "" : doc.getTenantId();
+        String deptId = doc.getDeptId() == null ? "" : String.valueOf(doc.getDeptId());
+        String owner = doc.getOwner() == null ? "" : doc.getOwner();
+        ordinal = 1;
+        for (Document chunk : chunks) {
+            KnowledgeChunkEntity chunkEntity = chunkEntities.get(ordinal - 1);
             java.util.Map<String, Object> metadata = new java.util.HashMap<>();
             metadata.put("source", CASE_VECTOR_SOURCE_PREFIX + doc.getId());
             metadata.put("docId", String.valueOf(doc.getId()));

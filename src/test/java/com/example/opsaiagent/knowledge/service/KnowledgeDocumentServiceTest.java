@@ -13,6 +13,10 @@ import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
+import com.example.opsaiagent.knowledge.ingest.parser.DocxDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.PdfDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.TxtDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
@@ -69,7 +73,6 @@ class KnowledgeDocumentServiceTest {
     private KnowledgeChunkMapper chunkMapper;
     @Mock
     private VectorStore vectorStore;
-    @Mock
     private DocumentParserStrategyFactory parserStrategyFactory;
     @Mock
     private JdbcTemplate jdbcTemplate;
@@ -90,6 +93,10 @@ class KnowledgeDocumentServiceTest {
     @BeforeEach
     void setUp() {
         vectorIndexer = new VectorIndexer(vectorStore);
+        // 使用真实解析策略工厂，覆盖 md/pdf/txt/docx 真实解析路径
+        parserStrategyFactory = new DocumentParserStrategyFactory(java.util.List.of(
+                new MarkdownDocumentParserStrategy(), new PdfDocumentParserStrategy(),
+                new TxtDocumentParserStrategy(), new DocxDocumentParserStrategy()));
         service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorIndexer, parserStrategyFactory,
                 jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
@@ -407,7 +414,7 @@ class KnowledgeDocumentServiceTest {
         entity.setReviewedBy("dept-reviewer");
         when(documentMapper.selectById(1L)).thenReturn(entity);
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
         when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
@@ -768,7 +775,7 @@ class KnowledgeDocumentServiceTest {
         when(tenantService.findById("t1"))
                 .thenReturn(Optional.of(tenant("NONE", false)));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
@@ -791,7 +798,7 @@ class KnowledgeDocumentServiceTest {
                 .thenReturn(Optional.of(tenant("DEPT_ONLY", false)));
         when(deptService.subtreeIds("t1", 5L)).thenReturn(List.of(5L));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
@@ -843,7 +850,7 @@ class KnowledgeDocumentServiceTest {
         when(tenantService.findById("t1"))
                 .thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");

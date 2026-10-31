@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文档解析策略工厂类
@@ -14,7 +15,31 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DocumentParserStrategyFactory {
 
+    /** 文件扩展名 → 文档类型的唯一映射源（上传/内置加载共用） */
+    private static final Map<String, String> EXTENSION_TO_DOC_TYPE = Map.of(
+            "md", "MARKDOWN",
+            "markdown", "MARKDOWN",
+            "pdf", "PDF",
+            "txt", "TXT",
+            "docx", "DOCX");
+
     private final List<DocumentParserStrategy> strategies;
+
+    /**
+     * 根据文件名解析文档类型
+     * @param fileName 文件名（含扩展名）
+     * @return 文档类型；不支持的扩展名返回 null
+     */
+    public static String resolveDocType(String fileName) {
+        if (fileName == null) {
+            return null;
+        }
+        int idx = fileName.lastIndexOf('.');
+        if (idx < 0 || idx == fileName.length() - 1) {
+            return null;
+        }
+        return EXTENSION_TO_DOC_TYPE.get(fileName.substring(idx + 1).toLowerCase());
+    }
 
     /**
      * 根据文件类型获取解析策略

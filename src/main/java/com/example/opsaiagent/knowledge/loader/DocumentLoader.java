@@ -1,14 +1,12 @@
 package com.example.opsaiagent.knowledge.loader;
 
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.markdown.MarkdownDocumentReader;
-import org.springframework.ai.reader.markdown.config.MarkdownDocumentReaderConfig;
-import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
-import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,6 +48,9 @@ public class DocumentLoader {
 
     // 向量入库公共组件（切分 + 分批写入）
     private final VectorIndexer vectorIndexer;
+
+    // 文档解析策略工厂（与用户上传共用同一套解析配置）
+    private final DocumentParserStrategyFactory parserStrategyFactory;
 
     // 资源加载器
     private final ResourcePatternResolver resourcePatternResolver;
@@ -194,13 +195,13 @@ public class DocumentLoader {
      */
     Map<String, String> listKnowledgeFiles() throws IOException {
         Map<String, String> sources = new LinkedHashMap<>();
-        Resource[] mdFiles = resourcePatternResolver.getResources("classpath*:knowledge/*.md");
-        Resource[] pdfFiles = resourcePatternResolver.getResources("classpath*:knowledge/*.pdf");
-        for (Resource r : mdFiles) {
-            sources.put(r.getFilename(), sha256Hex(r.getInputStream()));
-        }
-        for (Resource r : pdfFiles) {
-            sources.put(r.getFilename(), sha256Hex(r.getInputStream()));
+        Resource[] resources = resourcePatternResolver.getResources("classpath*:knowledge/*");
+        for (Resource r : resources) {
+            String fileName = r.getFilename();
+            if (fileName == null || DocumentParserStrategyFactory.resolveDocType(fileName) == null) {
+                continue; // 仅统计可解析类型，与 loadAndIndex 保持一致
+            }
+            sources.put(fileName, sha256Hex(r.getInputStream()));
         }
         return sources;
     }
@@ -237,70 +238,35 @@ public class DocumentLoader {
         int indexed = 0;
 
         try {
-            // 1. 加载 markdown 文档
-            Resource[] mdFiles = resourcePatternResolver.getResources("classpath*:knowledge/*.md");
-            for (Resource md : mdFiles) {
-                String fileName = md.getFilename();
-                if (!targetFiles.containsKey(fileName)) {
+            // 1. 通过解析策略统一加载目录下各类型文档（与用户上传共用同一套解析配置）
+            Resource[] resources = resourcePatternResolver.getResources("classpath*:knowledge/*");
+            for (Resource res : resources) {
+                String fileName = res.getFilename();
+                if (fileName == null || !targetFiles.containsKey(fileName)) {
+                    continue;
+                }
+                String docType = DocumentParserStrategyFactory.resolveDocType(fileName);
+                if (docType == null) {
+                    log.warn("跳过不支持的文件类型: {}", fileName);
                     continue;
                 }
                 String hash = targetFiles.get(fileName);
-                MarkdownDocumentReaderConfig mdConfig = MarkdownDocumentReaderConfig.builder()
-                        .withHorizontalRuleCreateDocument(true)
-                        .withIncludeCodeBlock(false)
-                        .withIncludeBlockquote(false)
-                        .withAdditionalMetadata("source", fileName)
-                        .build();
-                MarkdownDocumentReader reader = new MarkdownDocumentReader(md, mdConfig);
-                List<Document> docs = reader.get();
+                DocumentParserStrategy strategy = parserStrategyFactory.getStrategy(docType);
+                List<Document> docs = strategy.parse(res);
                 for (Document d : docs) {
+                    // 内置文档统一写入 source 与内容指纹，用于增量比对与残留清理
+                    d.getMetadata().put("source", fileName);
                     d.getMetadata().put(HASH_METADATA_KEY, hash);
                 }
                 allDocs.addAll(docs);
-                log.info("加载 Markdown: {}", fileName);
+                log.info("加载 {}: {}", docType, fileName);
             }
 
-            // 2. 加载 pdf 文档
-            Resource[] pdfFiles = resourcePatternResolver.getResources("classpath*:knowledge/*.pdf");
-            PdfDocumentReaderConfig config = PdfDocumentReaderConfig.builder()
-                    .withPageTopMargin(0)
-                    .withPageBottomMargin(0)
-                    .withPagesPerDocument(1)
-                    .build();
-            for (Resource pdf : pdfFiles) {
-                String fileName = pdf.getFilename();
-                if (!targetFiles.containsKey(fileName)) {
-                    continue;
-                }
-                String hash = targetFiles.get(fileName);
-                PagePdfDocumentReader reader = new PagePdfDocumentReader(pdf, config);
-                List<Document> docs = reader.get();
-                for (Document d : docs) {
-                    d.getMetadata().put(HASH_METADATA_KEY, hash);
-                }
-                allDocs.addAll(docs);
-                log.info("加载 PDF: {}", fileName);
-            }
-
-            // 3. 统一兜底设置 source 元数据
-            for (Document doc : allDocs) {
-                if (doc.getMetadata().containsKey("source")) {
-                    continue; // 已有 source，跳过
-                }
-                Object source = doc.getMetadata().get("filename");
-                if (source == null) {
-                    source = doc.getMetadata().get("file_name");
-                }
-                if (source != null) {
-                    doc.getMetadata().put("source", source.toString());
-                }
-            }
-
-            // 4. 文本切分
+            // 2. 文本切分
             List<Document> chunks = vectorIndexer.split(allDocs);
             log.info("文档切分完成，共 {} 块", chunks.size());
 
-            // 5. 填充内置知识元数据后分批写入向量库
+            // 3. 填充内置知识元数据后分批写入向量库
             for (Document doc : chunks) {
                 // 内置知识统一归属平台公共知识，供检索范围过滤使用
                 doc.getMetadata().putIfAbsent("tenantId", "0");
