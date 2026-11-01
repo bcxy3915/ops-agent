@@ -129,7 +129,10 @@ class ChatControllerTest {
                         ServerSentEvent.builder("好").build(),
                         ServerSentEvent.builder("[DONE]").build()));
 
-        Flux<ServerSentEvent<String>> flux = controller.askStream("问题", "sess-1");
+        ChatController.AskStreamRequest request = new ChatController.AskStreamRequest();
+        request.setQuestion("问题");
+        request.setSessionId("sess-1");
+        Flux<ServerSentEvent<String>> flux = controller.askStream(request);
 
         StepVerifier.create(flux)
                 .expectNextMatches(ev -> "citations".equals(ev.event()) && "[]".equals(ev.data()))

@@ -94,8 +94,15 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 
 - 上传大小限制的唯一配置源是 `ops-agent.knowledge.upload.max-size-mb`（默认 50）；multipart 的 `max-file-size` / `max-request-size` 通过占位符引用它，不允许单独写死或出现两套口径。
 - 文件扩展名 → docType 的唯一映射源是 `DocumentParserStrategyFactory.resolveDocType()`；新增文件类型时在映射表和对应解析策略中同步登记。
-- 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略，不单独引入其他 Reader；Markdown 一律先做结构化切分（`MarkdownDocumentParserStrategy`），短文本被全部丢弃时再用纯文本切分兜底。
+- 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略做文本抽取，不单独引入其他 Reader。其中内置加载的 Markdown 直接读原文（保留标题结构交给切分策略），上传的 Markdown 由 `MarkdownDocumentParserStrategy` 抽取纯文本后存入 `raw_content`。
 - 切分由 `VectorIndexer` 统一收口；解析后文本受 `ops-agent.knowledge.ingest.max-chars`（默认 1000 万字符）限制，超长必须显式拒绝，禁止用 `maxNumChunks` 之类参数静默截断。
+- 切分策略位于 `knowledge/ingest/splitter`（策略模式，设计文档 `docs/design/text-split/`）：`TextChunkStrategy` 接口（name / order / supports / split）+ `TextChunkStrategyResolver` 四级路由——`strategyOverride` 显式指定 → docType 覆盖配置 → `supports` 自然匹配 → `default-strategy`；未知名与策略异常一律降级 `token` 兜底，切分永不失败。新增策略须登记唯一 name 并保持 order 语义（小者优先）。
+- 路由现状：MARKDOWN → `markdown-structural`（自研 ATX 标题行扫描，不依赖 `MarkdownDocumentReader` 行为；headingPath 复用 `metadata.section`，零 DDL）；TXT / PDF / DOCX → `recursive`（段落→行→句终分隔符阶梯，冒号不切；围栏代码块与表格行是原子单元；相邻块携带整句 overlap；尾块不足 minChunkChars 并入前块）；`token` 仅作兜底（包装旧 `TokenTextSplitter` 口径）。
+- 策略四条不变量由单测强制（`RecursiveBoundarySplitterTest` 等）：块按序拼接（去相邻重叠）与原文完全一致、不产空白块、每块不超 `max-chunk-tokens`、输出块携带输入文档全部 metadata。修改切分算法必须先跑这三类测试。
+- 切分配置唯一来源 `ops-agent.knowledge.split.*`（`application.yml`）。回退旧 TokenTextSplitter 口径：`default-strategy: token` + `markdown.strategy: token`，不要通过改代码回退。
+- 每个向量块自动打 `splitStrategy`（策略名）与 `splitVersion`（算法代次，当前 2）标记，供 A/B 评测隔离、检索排查与存量重索引识别；调整算法代次时同步更新 `TextChunkStrategy.CURRENT_SPLIT_VERSION`。
+- 展示与检索文本分离：`knowledge_chunk.content` 存原始块文本（前端展示）；embedding 文本在 `KnowledgeDocumentIndexer` 处加「【标题｜章节路径】」上下文头（`keep-heading-path` 控制），两者不得混用。
+- 新旧策略 A/B 评测入口 `SplitEvalIT`（`.\mvnw.cmd -Dtest=SplitEvalIT test`，surefire 默认不含 *IT）：评测数据集放 `src/test/resources/splitter/eval/`（documents/ + qa-golden.json），缺失时自动跳过；需本地 PG + `DASHSCOPE_API_KEY`，报告输出至 `docs/design/text-split/eval/`，gate 判定见设计文档 §10.3。
 - chunk 落库使用 `KnowledgeChunkMapper.insertBatch`（500 条/批），禁止逐条 `insert`；索引编排（清旧数据 → 切分 → 写分块 → 写向量）统一由 `KnowledgeDocumentIndexer` 完成，底层向量写入走 `VectorIndexer`。
 - 索引必须异步执行：审核通过、案例确认等业务事务只调用 `KnowledgeIndexTaskService.enqueue()` 写入 `knowledge_index_task`，**禁止在业务事务内直接调用切分/embedding/向量写入**。分块与向量化由 `KnowledgeIndexTaskService` 的定时 worker 在独立事务中完成。
 - 任务表并发约定：worker 用 `FOR UPDATE SKIP LOCKED` + 租约（默认 30 分钟，需覆盖大文档完整索引耗时）领取任务，多实例安全；同一文档只保留一条未完成任务（部分唯一索引 + UPSERT）；执行前校验文档 `reviewStatus=APPROVED` 且 `docVersion` 与入队时一致，否则跳过，执行后再次复核并回滚过期写入。

@@ -2,8 +2,8 @@ package com.example.opsaiagent.knowledge.loader;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
-import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategy;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitContext;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import jakarta.annotation.PostConstruct;
@@ -18,6 +18,7 @@ import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
@@ -252,7 +253,7 @@ public class DocumentLoader {
         if (targetFiles == null || targetFiles.isEmpty()) {
             return 0;
         }
-        List<Document> allDocs = new ArrayList<>();
+        List<Document> allChunks = new ArrayList<>();
         int indexed = 0;
 
         try {
@@ -269,23 +270,26 @@ public class DocumentLoader {
                     continue;
                 }
                 String hash = targetFiles.get(fileName);
-                DocumentParserStrategy strategy = parserStrategyFactory.getStrategy(docType);
-                List<Document> docs = strategy.parse(res);
+                // MARKDOWN 直接读原文，交给 markdown-structural 策略做标题结构化切分
+                List<Document> docs = "MARKDOWN".equals(docType)
+                        ? List.of(new Document(res.getContentAsString(StandardCharsets.UTF_8)))
+                        : parserStrategyFactory.getStrategy(docType).parse(res);
                 for (Document d : docs) {
                     // 内置文档统一写入 source 与内容指纹，用于增量比对与残留清理
                     d.getMetadata().put("source", fileName);
                     d.getMetadata().put(HASH_METADATA_KEY, hash);
                 }
-                allDocs.addAll(docs);
-                log.info("加载 {}: {}", docType, fileName);
+
+                // 2. 按文件类型路由切分策略后切分（目录混放 md/txt/pdf 时各走各的策略）
+                SplitContext context = new SplitContext(docType, fileName,
+                        stripExtension(fileName), LAYER_BUILTIN, "0", null);
+                List<Document> chunks = vectorIndexer.split(docs, context);
+                log.info("加载 {}: {} -> {} 块", docType, fileName, chunks.size());
+                allChunks.addAll(chunks);
             }
 
-            // 2. 文本切分
-            List<Document> chunks = vectorIndexer.split(allDocs);
-            log.info("文档切分完成，共 {} 块", chunks.size());
-
             // 3. 填充内置知识元数据后分批写入向量库
-            for (Document doc : chunks) {
+            for (Document doc : allChunks) {
                 // 内置知识统一归属平台公共知识，供检索范围过滤使用
                 doc.getMetadata().putIfAbsent("tenantId", "0");
                 doc.getMetadata().putIfAbsent("deptId", "");
@@ -294,12 +298,18 @@ public class DocumentLoader {
                 doc.getMetadata().putIfAbsent("owner", "system");
                 doc.getMetadata().putIfAbsent("layer", "BUILTIN");
             }
-            indexed = vectorIndexer.write(chunks);
+            indexed = vectorIndexer.write(allChunks);
             log.info("向量入库完成，共 {} 条", indexed);
         } catch (Exception e) {
             log.error("文档加载失败", e);
         }
         return indexed;
+    }
+
+    /** 去掉文件扩展名作为切分上下文标题 */
+    private static String stripExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     /**

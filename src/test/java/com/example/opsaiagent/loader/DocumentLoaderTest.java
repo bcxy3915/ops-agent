@@ -3,6 +3,7 @@ package com.example.opsaiagent.loader;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitterTestFixture;
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
@@ -72,7 +73,7 @@ class DocumentLoaderTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        vectorIndexer = new VectorIndexer(vectorStore);
+        vectorIndexer = SplitterTestFixture.vectorIndexer(vectorStore);
         loader = new DocumentLoader(vectorIndexer, new DocumentParserStrategyFactory(
                 java.util.List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, jdbcTemplate,
                 documentMapper);
@@ -82,6 +83,9 @@ class DocumentLoaderTest {
                 .thenAnswer(inv -> new ByteArrayInputStream(MD_CONTENT.getBytes(StandardCharsets.UTF_8)));
         lenient().when(mockNewResource.getInputStream())
                 .thenAnswer(inv -> new ByteArrayInputStream(MD_CONTENT.getBytes(StandardCharsets.UTF_8)));
+        // Markdown 现直接读原文交给 markdown-structural 策略切分
+        lenient().when(mockMdResource.getContentAsString(StandardCharsets.UTF_8)).thenReturn(MD_CONTENT);
+        lenient().when(mockNewResource.getContentAsString(StandardCharsets.UTF_8)).thenReturn(MD_CONTENT);
     }
 
     private void stubKnowledgeFiles(Resource[] mdFiles, Resource[] pdfFiles) throws IOException {

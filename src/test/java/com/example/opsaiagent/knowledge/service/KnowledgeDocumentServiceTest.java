@@ -19,6 +19,7 @@ import com.example.opsaiagent.knowledge.ingest.parser.DocxDocumentParserStrategy
 import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.ingest.parser.PdfDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.ingest.parser.TxtDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitterTestFixture;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
@@ -101,7 +102,7 @@ class KnowledgeDocumentServiceTest {
 
     @BeforeEach
     void setUp() {
-        vectorIndexer = new VectorIndexer(vectorStore);
+        vectorIndexer = SplitterTestFixture.vectorIndexer(vectorStore);
         // 审核/发布改为入队异步索引任务，验证任务入队而非同步向量写入
 
         // 使用真实解析策略工厂，覆盖 md/pdf/txt/docx 真实解析路径

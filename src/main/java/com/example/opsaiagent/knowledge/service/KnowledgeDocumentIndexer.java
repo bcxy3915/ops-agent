@@ -3,18 +3,18 @@ package com.example.opsaiagent.knowledge.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
-import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
+import com.example.opsaiagent.knowledge.ingest.splitter.MarkdownStructuralSplitter;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitContext;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitProperties;
+import com.example.opsaiagent.knowledge.ingest.splitter.TextChunkStrategy;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -44,8 +44,8 @@ public class KnowledgeDocumentIndexer {
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
     private final VectorIndexer vectorIndexer;
-    private final DocumentParserStrategyFactory parserStrategyFactory;
     private final JdbcTemplate jdbcTemplate;
+    private final SplitProperties splitProperties;
 
     /**
      * 重建文档索引：清空旧数据 → 切分 → 写分块 → 写向量 → 回写分块数。
@@ -82,18 +82,14 @@ public class KnowledgeDocumentIndexer {
     }
 
     /**
-     * 切分文档：Markdown 先按标题层级结构化切分，短文本被全部丢弃时退化为整段切分。
+     * 切分文档：单次委托策略门面，按 docType 路由
+     * （MARKDOWN → markdown-structural 结构化切分，其余 → recursive 递归边界切分，
+     * 策略异常时由 Resolver 降级 token 兜底，详见切分设计文档）。
      */
     private List<Document> split(KnowledgeDocumentEntity entity, String content) {
-        if (DOC_TYPE_MARKDOWN.equals(entity.getDocType())) {
-            List<Document> structured = parserStrategyFactory.getStrategy(DOC_TYPE_MARKDOWN)
-                    .parse(new ByteArrayResource(content.getBytes(StandardCharsets.UTF_8)));
-            List<Document> chunks = structured.isEmpty() ? List.of() : vectorIndexer.split(structured);
-            if (!chunks.isEmpty()) {
-                return chunks;
-            }
-        }
-        return vectorIndexer.split(content);
+        SplitContext context = new SplitContext(entity.getDocType(), entity.getSource(),
+                entity.getTitle(), entity.getLayer(), entity.getTenantId(), null);
+        return vectorIndexer.split(List.of(new Document(content)), context);
     }
 
     private List<KnowledgeChunkEntity> buildChunks(KnowledgeDocumentEntity entity, List<Document> chunks) {
@@ -106,11 +102,20 @@ public class KnowledgeDocumentIndexer {
             chunkEntity.setDeptId(entity.getDeptId());
             chunkEntity.setOrdinal(ordinal);
             chunkEntity.setContent(chunk.getText());
-            chunkEntity.setSection(extractSection(chunk.getText(), entity.getDocType()));
+            chunkEntity.setSection(resolveSection(chunk, entity.getDocType()));
             chunkEntities.add(chunkEntity);
             ordinal++;
         }
         return chunkEntities;
+    }
+
+    /** 章节优先取策略产出的 headingPath（如「手册 > 数据库 > 主从切换」），缺失时退回首行启发式 */
+    private String resolveSection(Document chunk, String docType) {
+        Object headingPath = chunk.getMetadata().get(MarkdownStructuralSplitter.METADATA_SECTION);
+        if (headingPath instanceof String path && StringUtils.hasText(path)) {
+            return path.length() > 200 ? path.substring(0, 200) : path;
+        }
+        return extractSection(chunk.getText(), docType);
     }
 
     private List<Document> buildVectorDocs(KnowledgeDocumentEntity entity, List<Document> chunks,
@@ -129,6 +134,7 @@ public class KnowledgeDocumentIndexer {
         String layer = entity.getLayer() == null ? "" : entity.getLayer();
 
         List<Document> vectorDocs = new ArrayList<>(chunks.size());
+        boolean keepHeader = splitProperties.isKeepHeadingPath();
         for (int i = 0; i < chunks.size(); i++) {
             Document chunk = chunks.get(i);
             KnowledgeChunkEntity chunkEntity = chunkEntities.get(i);
@@ -145,9 +151,32 @@ public class KnowledgeDocumentIndexer {
             metadata.put("owner", owner);
             metadata.put("ordinal", String.valueOf(i + 1));
             metadata.put("chunkId", String.valueOf(chunkEntity.getId()));
-            vectorDocs.add(new Document(chunk.getText(), metadata));
+            // 章节路径（headingPath 优先）与切分策略标记，供检索展示与重索引识别
+            metadata.put(MarkdownStructuralSplitter.METADATA_SECTION,
+                    chunkEntity.getSection() == null ? "" : chunkEntity.getSection());
+            metadata.put("splitStrategy",
+                    String.valueOf(chunk.getMetadata().getOrDefault("splitStrategy", "")));
+            metadata.put("splitVersion",
+                    chunk.getMetadata().getOrDefault("splitVersion", TextChunkStrategy.CURRENT_SPLIT_VERSION));
+            // 展示与检索文本分离：向量文本携带「标题｜章节」上下文头提升召回，
+            // knowledge_chunk.content 永远存原始块文本用于前端展示
+            vectorDocs.add(new Document(embeddingText(title, chunkEntity.getSection(), chunk.getText(), keepHeader), metadata));
         }
         return vectorDocs;
+    }
+
+    /** embedding 上下文头：【标题｜章节路径】，两者均缺失时不加头 */
+    private String embeddingText(String title, String section, String text, boolean keepHeader) {
+        if (!keepHeader) {
+            return text;
+        }
+        boolean hasTitle = StringUtils.hasText(title);
+        boolean hasSection = StringUtils.hasText(section);
+        if (!hasTitle && !hasSection) {
+            return text;
+        }
+        String header = hasTitle && hasSection ? title + "｜" + section : (hasTitle ? title : section);
+        return "【" + header + "】\n" + text;
     }
 
     private void deleteVectors(String vectorSource) {

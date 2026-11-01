@@ -77,6 +77,12 @@ ops-agent:
     rerank:
       enabled: false
       model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank
+    # 同文档竞争治理（设计文档 §10.3.10）：top-K 内单文档配额 + 邻近块合并，
+    # 防止同主题文档霸占 top-K 挤出期望文档；回退 = enabled: false
+    diversity:
+      enabled: true
+      max-per-doc: 3
+      merge-adjacent: true
   security:
     jwt:
       secret: ${JWT_SECRET:}
@@ -97,6 +103,27 @@ ops-agent:
     ingest:
       # 解析后文本字符上限（超出显式拒绝，避免 maxNumChunks 静默截断）
       max-chars: 10000000
+    # 文本切分策略（A/B 评测终局结论见 docs/design/text-split/文本切分策略-技术设计与评估-20261031.md §10.3.9）
+    split:
+      # 未命中类型路由时的默认策略（recursive / token）
+      default-strategy: recursive
+      # 目标块 token 预算（CL100K 近似，text-embedding-v3 实际分词略有偏差）
+      chunk-size-tokens: 480
+      # 相邻块重叠 token 数（约 17%，落在句边界）
+      overlap-tokens: 80
+      # 尾块最小字符数，不足并入前块
+      min-chunk-chars: 100
+      # 单块 token 硬上限
+      max-chunk-tokens: 800
+      # embedding 文本携带「标题｜章节」上下文头（展示文本不受影响）
+      keep-heading-path: true
+      # 围栏代码块与表格作为原子单元不被切断
+      preserve-code-block: true
+      markdown:
+        # MARKDOWN 类型策略覆盖（markdown-structural / recursive / token）
+        strategy: markdown-structural
+        # headingPath 最深采集层级
+        max-heading-level: 3
     # 异步索引任务：审核/确认只写任务，分块与向量化由后台 worker 在独立事务中执行
     index:
       # 调度轮询间隔（毫秒）

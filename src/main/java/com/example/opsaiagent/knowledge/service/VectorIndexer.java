@@ -2,22 +2,26 @@ package com.example.opsaiagent.knowledge.service;
 
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitContext;
+import com.example.opsaiagent.knowledge.ingest.splitter.TextChunkStrategyResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 向量入库公共组件：统一「文本切分」与「分批写入向量库」逻辑。
  *
- * 内置知识库（DocumentLoader）、用户上传文档（KnowledgeDocumentService）、
- * 故障案例沉淀（KnowledgeCaseService）三处原本各自重复 TokenTextSplitter 配置
- * 与 batch=10 分批写入，现统一收敛到此处。
+ * 切分已收敛为策略模式（knowledge.ingest.splitter 包）：
+ * 按文档类型路由 markdown-structural / recursive / token，
+ * 详见 docs/design/text-split/文本切分策略-技术设计与评估-20261031.md。
+ *
+ * 旧签名 split(text) / split(docs) 保留并委托新门面，调用方零改动。
  */
 @Slf4j
 @Component
@@ -29,7 +33,7 @@ public class VectorIndexer {
 
     /**
      * 切分器块数硬上限。该值仅作防御性兜底，实际长度约束由 maxChars 在切分前显式校验，
-     * 避免 TokenTextSplitter 达到 maxNumChunks 后静默丢弃剩余内容。
+     * 避免达到上限后静默丢弃剩余内容。
      */
     private static final int MAX_NUM_CHUNKS = 100_000;
 
@@ -38,30 +42,48 @@ public class VectorIndexer {
     private long maxChars = 10_000_000;
 
     private final VectorStore vectorStore;
+    private final TextChunkStrategyResolver strategyResolver;
 
     /**
      * 将单段文本切分为块；切分后若为空（短文本可能被切分器丢弃），保留一个块兜底保证可检索。
      */
     public List<Document> split(String text) {
-        checkTextLength(text);
-        List<Document> chunks = splitDocs(List.of(new Document(text)));
-        if (chunks.isEmpty()) {
-            return List.of(new Document(text));
-        }
-        return chunks;
+        return split(List.of(new Document(text)), SplitContext.empty());
     }
 
     /**
-     * 对已解析出的文档列表（如 Markdown/PDF 阅读器产物）进行切分。
+     * 对已解析出的文档列表（如 PDF 按页产物）进行切分；无上下文时走默认策略路由。
      */
     public List<Document> split(List<Document> docs) {
+        return split(docs, SplitContext.empty());
+    }
+
+    /**
+     * 切分门面：长度校验 → 策略路由切分 → 空结果兜底 → 块数防御。
+     * @param context 切分上下文（docType/title/layer 等），决定命中策略
+     */
+    public List<Document> split(List<Document> docs, SplitContext context) {
         long totalChars = docs.stream()
                 .map(Document::getText)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .mapToLong(String::length)
                 .sum();
         checkTextLength(totalChars);
-        return splitDocs(docs);
+
+        List<Document> chunks = strategyResolver.split(docs, context == null ? SplitContext.empty() : context);
+
+        if (chunks.isEmpty()) {
+            // 兜底：切分结果为空时保留原文块（继承旧 split(text) 语义），保证可检索
+            chunks = docs.stream()
+                    .filter(d -> d.getText() != null && !d.getText().isBlank())
+                    .toList();
+        }
+        if (chunks.size() >= MAX_NUM_CHUNKS) {
+            // 防御性兜底：maxChars 校验在前，理论上不应到达；一旦到达必须显式失败而非静默截断
+            throw new IllegalStateException(
+                    "文档切分块数达到上限 " + MAX_NUM_CHUNKS + "，内容可能被截断，请拆分后上传");
+        }
+        return chunks;
     }
 
     /**
@@ -91,21 +113,5 @@ public class VectorIndexer {
             indexed += batch.size();
         }
         return indexed;
-    }
-
-    private List<Document> splitDocs(List<Document> docs) {
-        TokenTextSplitter splitter = TokenTextSplitter.builder()
-                .withChunkSize(500)
-                .withMinChunkSizeChars(200)
-                .withMaxNumChunks(MAX_NUM_CHUNKS)
-                .withKeepSeparator(true)
-                .build();
-        List<Document> chunks = splitter.apply(docs);
-        if (chunks.size() >= MAX_NUM_CHUNKS) {
-            // 防御性兜底：maxChars 校验在前，理论上不应到达；一旦到达必须显式失败而非静默截断
-            throw new IllegalStateException(
-                    "文档切分块数达到上限 " + MAX_NUM_CHUNKS + "，内容可能被截断，请拆分后上传");
-        }
-        return chunks;
     }
 }

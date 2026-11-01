@@ -1,6 +1,7 @@
 package com.example.opsaiagent.retrieval;
 
 import com.example.opsaiagent.rbac.service.DataScope;
+import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
 import com.example.opsaiagent.retrieval.rerank.RerankerClient;
 import org.junit.jupiter.api.DisplayName;
@@ -48,8 +49,21 @@ class HybridRetrieverTest {
     @Mock
     private DataScope dataScope;
 
+    @Mock
+    private RetrievalDiversifier diversifier;
+
     @InjectMocks
     private HybridRetriever hybridRetriever;
+
+    /** diversify 直通桩：保留前 limit 个，便于断言后续编排行为 */
+    private void diversifierPassThrough() {
+        when(diversifier.diversify(any(), anyInt()))
+                .thenAnswer(inv -> {
+                    List<Document> list = inv.getArgument(0);
+                    int limit = inv.getArgument(1);
+                    return list.stream().limit(limit).toList();
+                });
+    }
 
     private Document doc(String text) {
         return new Document(text, Map.of("source", "test.md"));
@@ -65,27 +79,51 @@ class HybridRetrieverTest {
                 .thenReturn(List.of(b));
         when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));
         when(rerankerClient.rerank("查询", List.of(v, b), 3)).thenReturn(List.of(v));
+        diversifierPassThrough();
 
         List<Document> result = hybridRetriever.retrieve("查询", 3);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getText()).isEqualTo("向量文档");
+        verify(diversifier).diversify(List.of(v, b), 20);
         verify(rerankerClient).rerank("查询", List.of(v, b), 3);
     }
 
     @Test
-    @DisplayName("retrieve：向量检索抛异常时降级仅用 BM25")
+    @DisplayName("retrieve：融合结果先过同文档治理，rerank 接收治理后的候选")
+    void retrieve_diversifyAppliedBeforeRerank() {
+        Document v = doc("向量文档");
+        Document b = doc("BM25文档");
+        Document kept = doc("治理后保留");
+        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(v));
+        when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
+                .thenReturn(List.of(b));
+        when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));
+        when(diversifier.diversify(List.of(v, b), 20)).thenReturn(List.of(kept));
+        when(rerankerClient.rerank("查询", List.of(kept), 3)).thenReturn(List.of(kept));
+
+        List<Document> result = hybridRetriever.retrieve("查询", 3);
+
+        assertThat(result).containsExactly(kept);
+        verify(rerankerClient).rerank("查询", List.of(kept), 3);
+    }
+
+    @Test
+    @DisplayName("retrieve：向量检索抛异常时降级仅用 BM25（同样过同文档治理）")
     void retrieve_vectorFailureFallsBackToBm25() {
         Document b = doc("BM25文档");
+        List<Document> bm25Results = List.of(b, doc("BM25文档2"));
         when(vectorStore.similaritySearch(any(SearchRequest.class)))
                 .thenThrow(new RuntimeException("network error"));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
-                .thenReturn(List.of(b, doc("BM25文档2")));
+                .thenReturn(bm25Results);
+        diversifierPassThrough();
 
         List<Document> result = hybridRetriever.retrieve("查询", 1);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getText()).isEqualTo("BM25文档");
+        verify(diversifier).diversify(bm25Results, 1);
         verify(rrfFuser, never()).fuseAndLimit(anyInt(), any(), any());
         verify(rerankerClient, never()).rerank(anyString(), any(), anyInt());
     }
@@ -96,6 +134,7 @@ class HybridRetrieverTest {
         when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(doc("a"), doc("b"), doc("c"), doc("d")));
+        diversifierPassThrough();
 
         List<Document> result = hybridRetriever.retrieve("查询", 2);
 

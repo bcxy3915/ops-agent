@@ -24,6 +24,7 @@ import org.springframework.ai.document.Document;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -100,7 +101,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("基于快照诊断成功：调用 LLM 结构化输出并落库 SUCCESS")
     void diagnose_success() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().entity(DiagnosisResult.class))
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
                 .thenReturn(sampleResult());
         when(hybridRetriever.retrieve(anyString(), eq(3))).thenReturn(List.of(
                 new Document("CPU 打满通常是流量突增或死循环导致", Map.of("source", "ops-runbook"))));
@@ -121,7 +122,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("知识库检索失败降级：诊断仍成功（T17 容错）")
     void diagnose_kbRetrieveFails_stillSucceeds() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().entity(DiagnosisResult.class))
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
                 .thenReturn(sampleResult());
         when(hybridRetriever.retrieve(anyString(), eq(3))).thenThrow(new RuntimeException("kb down"));
 
@@ -135,7 +136,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("LLM 调用失败：记录 FAILED 并填充错误信息，不抛异常")
     void diagnose_llmFails_recordsFailed() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().entity(DiagnosisResult.class))
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
                 .thenThrow(new RuntimeException("LLM timeout"));
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
@@ -149,7 +150,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("LLM 返回 null：按失败处理落库")
     void diagnose_llmReturnsNull_failed() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().entity(DiagnosisResult.class))
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
                 .thenReturn(null);
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
@@ -163,7 +164,7 @@ class DiagnosisServiceTest {
     @DisplayName("按快照 ID 诊断：先查快照再诊断")
     void diagnoseBySnapshot_loadsSnapshot() {
         when(snapshotService.getById(100L)).thenReturn(snapshot);
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().entity(DiagnosisResult.class))
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
                 .thenReturn(sampleResult());
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
@@ -196,7 +197,7 @@ class DiagnosisServiceTest {
         base.setSummary("CPU 持续打满");
         when(diagnosisMapper.selectById(1L)).thenReturn(base);
         when(snapshotService.getById(100L)).thenReturn(snapshot);
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().content())
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().content())
                 .thenReturn("可以重点排查最近一次发版，回滚验证即可。");
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
@@ -242,7 +243,7 @@ class DiagnosisServiceTest {
         base.setSnapshotId(100L);
         when(diagnosisMapper.selectById(1L)).thenReturn(base);
         when(snapshotService.getById(100L)).thenReturn(snapshot);
-        when(chatClient.prompt().system(anyString()).user(anyString()).call().content())
+        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().content())
                 .thenThrow(new RuntimeException("LLM timeout"));
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
