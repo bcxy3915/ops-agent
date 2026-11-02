@@ -2,6 +2,7 @@ package com.example.opsaiagent.notification.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.crypto.util.AesGcmUtil;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
@@ -12,7 +13,10 @@ import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntit
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationChannelMapper;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;
+import com.example.opsaiagent.oncall.service.OncallMemberService;
 import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
+import com.example.opsaiagent.security.entity.OpsUserEntity;
+import com.example.opsaiagent.security.mapper.OpsUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +29,7 @@ import java.util.List;
  * 统一入口：告警事件 → 渲染模板 → 遍历启用渠道发送 → 发送记录落库
  * 失败记录进入重试队列，由 {@link NotificationRetryTask} 定时重试。
  * T18 闭环：可附带 LLM 诊断结果一起通知。
+ * P1 值班联动（规格 7）：发送前按事件租户解析值班收件人，动态邮箱优先于渠道配置。
  */
 @Slf4j
 @Service
@@ -36,6 +41,9 @@ public class NotificationCenter {
     private final NotifierRegistry notifierRegistry;
     private final NotificationTemplateService templateService;
     private final NotificationProperties properties;
+    private final OncallMemberService oncallMemberService;
+    private final OpsUserMapper opsUserMapper;
+    private final AesGcmUtil aesGcmUtil;
 
     /**
      * 按告警事件通知所有启用渠道（告警触发时调用）
@@ -46,8 +54,34 @@ public class NotificationCenter {
 
     /**
      * 按告警事件通知所有启用渠道（T18 闭环：附带 LLM 诊断结果）
+     * P1 值班联动：默认按 PRIMARY 解析收件人，空则回退 ADMIN，仍空则收件人为空
+     * （EMAIL 渠道回退 config.recipients 兜底，Webhook 渠道不受影响）。
      */
     public void sendOnEvent(AlertEventEntity event, DiagnosisRecordEntity diagnosis) {
+        List<String> recipients =
+                oncallMemberService.resolveRecipients(event.getTenantId(), null, null, null);
+        if (recipients.isEmpty()) {
+            recipients = oncallMemberService.resolveRecipients(event.getTenantId(), null, "ADMIN", null);
+        }
+        sendOnEvent(event, diagnosis, resolveRecipientEmails(event.getTenantId(), recipients));
+    }
+
+    /**
+     * 按告警事件通知所有启用渠道（升级场景：按级别解析收件人，L1→BACKUP、L2→ADMIN）
+     *
+     * @param levelNo 升级级别（告警升级服务调用）
+     */
+    public void sendOnEvent(AlertEventEntity event, DiagnosisRecordEntity diagnosis, Integer levelNo) {
+        List<String> recipients =
+                oncallMemberService.resolveRecipients(event.getTenantId(), null, null, levelNo);
+        sendOnEvent(event, diagnosis, resolveRecipientEmails(event.getTenantId(), recipients));
+    }
+
+    /**
+     * 按告警事件通知所有启用渠道，使用指定收件人邮箱（空列表表示未解析到，EMAIL 渠道回退配置兜底）
+     */
+    private void sendOnEvent(AlertEventEntity event, DiagnosisRecordEntity diagnosis,
+                             List<String> recipientEmails) {
         LambdaQueryWrapper<NotificationChannelConfigEntity> channelQuery =
                 new LambdaQueryWrapper<NotificationChannelConfigEntity>()
                         .eq(NotificationChannelConfigEntity::getEnabled, true);
@@ -60,8 +94,31 @@ public class NotificationCenter {
             return;
         }
         for (NotificationChannelConfigEntity channel : channels) {
-            sendToChannel(channel, event, null, diagnosis);
+            sendToChannel(channel, event, null, diagnosis, recipientEmails);
         }
+    }
+
+    /**
+     * 按租户把值班人用户 ID 解析为邮箱列表（P1 值班联动）。
+     * oncall_member.user_id 设计上存 ops_user.id（如 u-zhangwei），历史数据可能存 username，
+     * 故按 id/username 双列匹配；【铁律】必须带 tenant_id 条件，防跨租户撞号越权读邮箱。
+     * 邮箱为加密存储（email_enc），解密失败/为空的记录跳过。
+     */
+    private List<String> resolveRecipientEmails(String tenantId, List<String> userIds) {
+        if (tenantId == null || tenantId.isBlank() || userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        List<OpsUserEntity> users = opsUserMapper.selectList(
+                new LambdaQueryWrapper<OpsUserEntity>()
+                        .eq(OpsUserEntity::getTenantId, tenantId)
+                        .and(w -> w.in(OpsUserEntity::getId, userIds)
+                                .or()
+                                .in(OpsUserEntity::getUsername, userIds)));
+        return users.stream()
+                .map(u -> aesGcmUtil.decrypt(u.getEmailEnc()))
+                .filter(e -> e != null && !e.isBlank())
+                .distinct()
+                .toList();
     }
 
     /**
@@ -90,7 +147,7 @@ public class NotificationCenter {
      */
     private NotificationRecordEntity sendToChannel(NotificationChannelConfigEntity channel,
                                                    AlertEventEntity event, String tag) {
-        return sendToChannel(channel, event, tag, null);
+        return sendToChannel(channel, event, tag, null, null);
     }
 
     /**
@@ -99,6 +156,16 @@ public class NotificationCenter {
     private NotificationRecordEntity sendToChannel(NotificationChannelConfigEntity channel,
                                                    AlertEventEntity event, String tag,
                                                    DiagnosisRecordEntity diagnosis) {
+        return sendToChannel(channel, event, tag, diagnosis, null);
+    }
+
+    /**
+     * 单渠道发送 + 记录落库（P1 值班联动：recipientEmails 动态收件人，EMAIL 渠道优先使用）
+     */
+    private NotificationRecordEntity sendToChannel(NotificationChannelConfigEntity channel,
+                                                   AlertEventEntity event, String tag,
+                                                   DiagnosisRecordEntity diagnosis,
+                                                   List<String> recipientEmails) {
         NotificationRecordEntity record = buildRecord(channel, event, tag);
         record.setStatus("PENDING");
         recordMapper.insert(record);
@@ -107,6 +174,13 @@ public class NotificationCenter {
             NotificationChannelType type = NotificationChannelType.valueOf(channel.getType());
             Notifier notifier = notifierRegistry.get(type);
             NotificationContent content = templateService.render(event, null);
+            if (recipientEmails != null && !recipientEmails.isEmpty()) {
+                content = NotificationContent.builder()
+                        .title(content.getTitle())
+                        .content(content.getContent())
+                        .dynamicRecipients(recipientEmails)
+                        .build();
+            }
             if (diagnosis != null && "SUCCESS".equals(diagnosis.getStatus())) {
                 content = appendDiagnosis(content, diagnosis);
             }
@@ -198,6 +272,7 @@ public class NotificationCenter {
         return NotificationContent.builder()
                 .title(content.getTitle())
                 .content(sb.toString())
+                .dynamicRecipients(content.getDynamicRecipients())
                 .build();
     }
 

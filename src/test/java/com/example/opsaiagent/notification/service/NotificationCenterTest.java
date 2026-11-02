@@ -2,6 +2,7 @@ package com.example.opsaiagent.notification.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.crypto.util.AesGcmUtil;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
@@ -12,6 +13,9 @@ import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntit
 import com.example.opsaiagent.notification.entity.NotificationRecordEntity;
 import com.example.opsaiagent.notification.mapper.NotificationChannelMapper;
 import com.example.opsaiagent.notification.mapper.NotificationRecordMapper;
+import com.example.opsaiagent.oncall.service.OncallMemberService;
+import com.example.opsaiagent.security.entity.OpsUserEntity;
+import com.example.opsaiagent.security.mapper.OpsUserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,13 +32,17 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 通知中心测试（T10）：统一入口、发送记录、失败重试
+ * 通知中心测试（T10）：统一入口、发送记录、失败重试、值班动态收件人（P1）
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("通知中心")
@@ -48,6 +56,12 @@ class NotificationCenterTest {
     private NotifierRegistry notifierRegistry;
     @Mock
     private NotificationTemplateService templateService;
+    @Mock
+    private OncallMemberService oncallMemberService;
+    @Mock
+    private OpsUserMapper opsUserMapper;
+    @Mock
+    private AesGcmUtil aesGcmUtil;
     @Mock
     private Notifier notifier;
 
@@ -83,6 +97,14 @@ class NotificationCenterTest {
         event.setStatus("FIRING");
         event.setFiredAt(LocalDateTime.now());
         return event;
+    }
+
+    private OpsUserEntity user(String id, String username, String emailEnc) {
+        OpsUserEntity user = new OpsUserEntity();
+        user.setId(id);
+        user.setUsername(username);
+        user.setEmailEnc(emailEnc);
+        return user;
     }
 
     // ==================== sendOnEvent ====================
@@ -211,6 +233,101 @@ class NotificationCenterTest {
 
         assertThat(result.getContent()).contains("根因：根因A");
         assertThat(result.getContent()).doesNotContain("置信度");
+    }
+
+    // ==================== sendOnEvent + 值班动态收件人（P1 规格 7） ====================
+
+    @Test
+    @DisplayName("值班联动：PRIMARY 有值班人时解出邮箱并传给 Notifier")
+    void sendOnEvent_primaryRecipients_resolvedToEmails() throws Exception {
+        AlertEventEntity e = event(1L);
+        e.setTenantId("t-xinghai");
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "邮件", "EMAIL")));
+        when(notifierRegistry.get(NotificationChannelType.EMAIL)).thenReturn(notifier);
+        when(templateService.render(any(AlertEventEntity.class), any()))
+                .thenReturn(NotificationContent.builder().title("t").content("c").build());
+        when(oncallMemberService.resolveRecipients(eq("t-xinghai"), isNull(), isNull(), isNull()))
+                .thenReturn(List.of("u-zhangwei"));
+        when(opsUserMapper.selectList(any())).thenReturn(
+                List.of(user("u-zhangwei", "zhangwei", "enc:mail")));
+        when(aesGcmUtil.decrypt("enc:mail")).thenReturn("zhangwei@xinghai.com");
+
+        notificationCenter.sendOnEvent(e, null);
+
+        ArgumentCaptor<NotificationContent> captor = ArgumentCaptor.forClass(NotificationContent.class);
+        verify(notifier).send(any(NotificationChannelConfigEntity.class), captor.capture());
+        assertThat(captor.getValue().getDynamicRecipients())
+                .containsExactly("zhangwei@xinghai.com");
+    }
+
+    @Test
+    @DisplayName("值班联动：PRIMARY 为空时回退 ADMIN 再解析一次")
+    void sendOnEvent_emptyPrimary_fallsBackToAdmin() throws Exception {
+        AlertEventEntity e = event(1L);
+        e.setTenantId("t-xinghai");
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "邮件", "EMAIL")));
+        when(notifierRegistry.get(NotificationChannelType.EMAIL)).thenReturn(notifier);
+        when(templateService.render(any(AlertEventEntity.class), any()))
+                .thenReturn(NotificationContent.builder().title("t").content("c").build());
+        when(oncallMemberService.resolveRecipients(eq("t-xinghai"), isNull(), isNull(), isNull()))
+                .thenReturn(List.of());
+        when(oncallMemberService.resolveRecipients(eq("t-xinghai"), isNull(), eq("ADMIN"), isNull()))
+                .thenReturn(List.of("u-admin"));
+        when(opsUserMapper.selectList(any())).thenReturn(List.of(user("u-admin", "admin", "enc:admin")));
+        when(aesGcmUtil.decrypt("enc:admin")).thenReturn("admin@ops.com");
+
+        notificationCenter.sendOnEvent(e, null);
+
+        ArgumentCaptor<NotificationContent> captor = ArgumentCaptor.forClass(NotificationContent.class);
+        verify(notifier).send(any(NotificationChannelConfigEntity.class), captor.capture());
+        assertThat(captor.getValue().getDynamicRecipients()).containsExactly("admin@ops.com");
+    }
+
+    @Test
+    @DisplayName("值班联动：PRIMARY/ADMIN 均为空时不解邮箱，内容不带动态收件人")
+    void sendOnEvent_noRecipients_noDynamicEmails() throws Exception {
+        AlertEventEntity e = event(1L);
+        e.setTenantId("t-xinghai");
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "邮件", "EMAIL")));
+        when(notifierRegistry.get(NotificationChannelType.EMAIL)).thenReturn(notifier);
+        when(templateService.render(any(AlertEventEntity.class), any()))
+                .thenReturn(NotificationContent.builder().title("t").content("c").build());
+        when(oncallMemberService.resolveRecipients(anyString(), isNull(), isNull(), isNull()))
+                .thenReturn(List.of());
+        when(oncallMemberService.resolveRecipients(anyString(), isNull(), eq("ADMIN"), isNull()))
+                .thenReturn(List.of());
+
+        notificationCenter.sendOnEvent(e, null);
+
+        verify(opsUserMapper, never()).selectList(any());
+        ArgumentCaptor<NotificationContent> captor = ArgumentCaptor.forClass(NotificationContent.class);
+        verify(notifier).send(any(NotificationChannelConfigEntity.class), captor.capture());
+        assertThat(captor.getValue().getDynamicRecipients()).isNullOrEmpty();
+    }
+
+    @Test
+    @DisplayName("升级通知：按 levelNo 解析收件人（不查 PRIMARY 默认路径）")
+    void sendOnEvent_withLevelNo_resolvesByLevel() throws Exception {
+        AlertEventEntity e = event(1L);
+        e.setTenantId("t-xinghai");
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "邮件", "EMAIL")));
+        when(notifierRegistry.get(NotificationChannelType.EMAIL)).thenReturn(notifier);
+        when(templateService.render(any(AlertEventEntity.class), any()))
+                .thenReturn(NotificationContent.builder().title("t").content("c").build());
+        when(oncallMemberService.resolveRecipients(eq("t-xinghai"), isNull(), isNull(), eq(2)))
+                .thenReturn(List.of("u-admin"));
+        when(opsUserMapper.selectList(any())).thenReturn(List.of(user("u-admin", "admin", "enc:admin")));
+        when(aesGcmUtil.decrypt("enc:admin")).thenReturn("admin@ops.com");
+
+        notificationCenter.sendOnEvent(e, null, 2);
+
+        // 只按级别解析一次，不再走 PRIMARY 默认路径
+        verify(oncallMemberService).resolveRecipients(eq("t-xinghai"), isNull(), isNull(), eq(2));
+        verify(oncallMemberService, never())
+                .resolveRecipients(anyString(), isNull(), isNull(), isNull());
+        ArgumentCaptor<NotificationContent> captor = ArgumentCaptor.forClass(NotificationContent.class);
+        verify(notifier).send(any(NotificationChannelConfigEntity.class), captor.capture());
+        assertThat(captor.getValue().getDynamicRecipients()).containsExactly("admin@ops.com");
     }
 
     // ==================== sendTest ====================

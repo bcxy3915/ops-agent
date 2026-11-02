@@ -70,7 +70,7 @@ public class MetricController {
         long startMs = endMs - rangeMs;
 
         Map<String, List<MetricPoint>> series = new LinkedHashMap<>();
-        for (String metric : List.of("cpu", "memory", "threadCount", "gcPause", "hikariActive")) {
+        for (String metric : List.of("cpu", "memory", "threadCount", "gcPause", "hikariActive", "httpCount")) {
             series.put(metric, metricSampler.getHistory(serviceName, metric, startMs, endMs));
         }
 

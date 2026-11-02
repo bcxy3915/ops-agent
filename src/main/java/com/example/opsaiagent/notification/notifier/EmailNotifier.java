@@ -12,6 +12,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 import jakarta.mail.internet.MimeMessage;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -35,10 +36,16 @@ public class EmailNotifier implements Notifier {
 
     @Override
     public void send(NotificationChannelConfigEntity channel, NotificationContent content) throws Exception {
+        // 动态收件人优先（值班表解析），为空时回退渠道配置 recipients
+        List<String> dynamic = content.getDynamicRecipients();
         String recipients = readConfig(channel, "recipients");
-        if (recipients == null || recipients.isBlank()) {
+        boolean hasDynamic = dynamic != null && !dynamic.isEmpty();
+        if (!hasDynamic && (recipients == null || recipients.isBlank())) {
             throw new IllegalArgumentException("邮件渠道缺少 recipients 配置");
         }
+        String[] to = hasDynamic
+                ? dynamic.toArray(new String[0])
+                : recipients.split("\\s*,\\s*");
         String subjectPrefix = readConfig(channel, "subjectPrefix");
         String subject = (subjectPrefix == null || subjectPrefix.isBlank())
                 ? content.getTitle()
@@ -46,7 +53,7 @@ public class EmailNotifier implements Notifier {
 
         MimeMessage message = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-        helper.setTo(recipients.split("\\s*,\\s*"));
+        helper.setTo(to);
         helper.setSubject(subject);
         helper.setText(content.getContent(), false);
         mailSender.send(message);
