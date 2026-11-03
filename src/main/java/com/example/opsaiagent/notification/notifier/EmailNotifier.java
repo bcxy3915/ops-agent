@@ -6,6 +6,7 @@ import com.example.opsaiagent.notification.Notifier;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -28,6 +29,9 @@ public class EmailNotifier implements Notifier {
 
     private final JavaMailSender mailSender;
     private final ObjectMapper objectMapper;
+
+    @Value("${spring.mail.username:}")
+    private String senderAddress;
 
     @Override
     public NotificationChannelType type() {
@@ -53,6 +57,10 @@ public class EmailNotifier implements Notifier {
 
         MimeMessage message = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        // 163 等 SMTP 服务要求发件人与认证账号一致，不能使用默认的本机地址。
+        if (senderAddress != null && !senderAddress.isBlank()) {
+            helper.setFrom(senderAddress.trim());
+        }
         helper.setTo(to);
         helper.setSubject(subject);
         helper.setText(content.getContent(), false);
