@@ -3,6 +3,7 @@ package com.example.opsaiagent.knowledge.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.alert.dto.AlertEventStatus;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
@@ -124,6 +125,13 @@ public class KnowledgeCaseService {
     public KnowledgeCaseDetailResponse confirm(Long id) {
         KnowledgeCaseEntity entity = requireCase(id);
         requirePending(entity);
+        if (entity.getSourceAlertId() != null) {
+            AlertEventEntity alert = alertEventMapper.selectById(entity.getSourceAlertId());
+            if (alert == null || !AlertEventStatus.RESOLVED.name().equals(alert.getStatus())) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_CASE_INVALID,
+                        "源告警尚未恢复，不能确认沉淀案例");
+            }
+        }
         String reviewer = currentReviewer();
         entity.setStatus(STATUS_CONFIRMED);
         // 历史案例可能缺少归属，确认时按当前上下文补齐，保证沉淀为 TENANT 知识
@@ -191,7 +199,7 @@ public class KnowledgeCaseService {
 
     /**
      * 案例自动生成（P1）
-     * 从成功的主诊断记录（status=SUCCESS 且非追问）批量生成待确认候选案例，按诊断记录去重。
+     * 从源告警已恢复的成功主诊断记录（status=SUCCESS 且非追问）生成候选，按诊断记录去重。
      * @param limit 本次最多生成条数（1~100）
      * @return 本次新生成的候选数量
      */
@@ -202,6 +210,8 @@ public class KnowledgeCaseService {
                 new LambdaQueryWrapper<DiagnosisRecordEntity>()
                         .eq(DiagnosisRecordEntity::getStatus, "SUCCESS")
                         .isNull(DiagnosisRecordEntity::getQuestion)
+                        .inSql(DiagnosisRecordEntity::getAlertEventId,
+                                "SELECT id FROM alert_event WHERE status = 'RESOLVED'")
                         .orderByDesc(DiagnosisRecordEntity::getCreatedAt)
                         .last("LIMIT " + safeLimit));
 

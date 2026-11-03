@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 定时扫描所有启用规则：
  *   从持久化采样中取当前指标值，按 compareMode（THRESHOLD / YOY / SIGMA）判断是否命中
  *   命中需持续 duration_seconds 才触发，避免毛刺误报
- *   同一规则已有 FIRING 事件时不重复触发（去重）
+ *   同一规则已有待处理、已确认或人工/维护静默事件时不重复触发（去重）
  *   静默期 / 每小时节流内的事件以 SILENCED 状态落库
  *   不再命中时恢复最新 FIRING 事件为 RESOLVED
  *   触发 FIRING 时生成故障快照（T12）并通知启用渠道（T10）
@@ -158,7 +158,7 @@ public class AlertEvaluator {
             if (sustainedSec < durationSec) {
                 return; // 未达持续时长，等待下次评估
             }
-            // 去重：已有 FIRING 事件则不重复触发
+            // 确认、认领和静默均不代表故障恢复；未恢复事件继续参与去重。
             if (findFiringId(rule.getId()) != null) {
                 return;
             }
@@ -289,7 +289,10 @@ public class AlertEvaluator {
         List<AlertEventEntity> rows = eventMapper.selectList(
                 new LambdaQueryWrapper<AlertEventEntity>()
                         .eq(AlertEventEntity::getRuleId, ruleId)
-                        .eq(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name())
+                        .and(w -> w.in(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name(),
+                                        AlertEventStatus.ACKNOWLEDGED.name())
+                                .or(s -> s.eq(AlertEventEntity::getStatus, AlertEventStatus.SILENCED.name())
+                                        .isNotNull(AlertEventEntity::getSilencedFrom)))
                         .orderByDesc(AlertEventEntity::getFiredAt)
                         .last("LIMIT 1"));
         return rows.isEmpty() ? null : rows.get(0).getId();
