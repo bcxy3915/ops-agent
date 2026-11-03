@@ -2,6 +2,8 @@
 
 本文为在本项目中工作的 AI 编程助手与开发者提供上下文、开发约定和验证要求。适用范围为当前后端项目目录。
 
+前端为同级独立仓库 `../ops-agent-frontend/`，其约定见 `../ops-agent-frontend/AGENT.MD`。涉及跨仓库需求时分别检查两边的 Git 状态、接口实现和验证结果；仅修改后端时不要顺带修改前端。
+
 ## 1. 项目概览
 
 Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响应、知识检索、服务健康与指标查询、告警、通知、故障诊断和权限管理等能力。
@@ -41,7 +43,9 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - `init-scripts/schema.sql`、`init-scripts/seed.sql`：数据库初始化结构与种子数据。
 - `docker-compose.yml`：本地依赖服务。
 - `.github/workflows/ci.yml`：后端持续集成。
-- `docs/`：设计及版本相关资料，部分子目录被 Git 忽略。
+- `docs/`：设计及版本相关资料。
+
+定位时注意：业务代码按领域分包，配置类位于各模块的 `config/`，不存在统一的顶层 `controller/`、`service/` 或 `config/`。部分历史测试包名与实现包名不一致（例如 `service/OpsAgentServiceTest` 对应 `chat/service/OpsAgentService`），应按类名搜索，不要仅按目录推断。
 
 ## 3. 工作方式
 
@@ -63,6 +67,7 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 新增或调整接口时同步检查 Jakarta Validation、OpenAPI 注解、权限及审计约定。
 - 保持接口路径、响应字段和 SSE 事件契约兼容；必要的契约变更应明确说明影响。
 - 异常应携带可诊断的信息，不吞掉异常，不用成功响应掩盖失败。
+- Spring Boot 4 默认 Jackson 3，但当前项目通过 `common/config/JacksonConfig` 与 `spring.http.converters.preferred-json-mapper: jackson2` 保持 Jackson 2；现有 DTO、脱敏序列化器使用 `com.fasterxml.jackson.*`。调整序列化配置时同步验证日期格式、未知请求字段兼容和敏感字段脱敏，不要单独切换 mapper 或混用两代注解。
 
 ## 5. 权限、数据与外部调用
 
@@ -77,6 +82,13 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 修改数据库结构前检查现有脚本组织方式；已有数据库的增量变更与新环境初始化都应考虑，不能仅依赖重新初始化。
 - 不自动清空数据库、删除 Docker 数据卷、重建向量索引或执行生产数据迁移。
 
+### 5.1 异步上下文与数据隔离
+
+- 租户、部门、用户及认证信息由 `rbac/context/` 与 Spring Security 上下文承载。跨线程前捕获 `RbacContextSnapshot`，执行时恢复，结束时清理；线程池沿用 `common/config/ContextPropagatingTaskDecorator`，不要假设 ThreadLocal 会随 `@Async`、Reactor 或线程池自动传播。
+- SSE 延迟订阅、异步消息持久化、定时诊断和索引 worker 都应检查实际执行线程的数据范围。按租户执行的系统任务可参考 `RbacContextSnapshot.forTenant()`；禁止把上一条任务的上下文遗留给下一条。
+- 数据查询范围优先复用 `rbac/service/DataScope`；知识检索同时检查向量过滤与 BM25 过滤。`RetrievalScope.deptIds` 的 `null` 表示同租户全部部门，空集合表示无部门可见，二者不得互换。
+- 新增方法权限沿用现有 `@PreAuthorize` 与权限码；前端隐藏按钮不能替代后端校验。认证白名单和 ASYNC dispatch 放行规则以 `security/config/SecurityConfig` 为准，不能为解决 SSE 错误而放开业务路径。
+
 ## 6. AI 与检索相关约定
 
 - 工具调用沿用服务注册与现有工具接口约定，避免在业务代码中硬编码服务地址。
@@ -88,17 +100,21 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 不伪造模型响应、检索命中、外部指标或诊断结论；测试中的模拟数据应明确为测试夹具。
 - 默认使用 Mock 验证外部模型和通知调用，避免测试产生真实费用或向外部发送通知。
 
+流式接口契约以 `chat/service/OpsAgentService.askStreamWithCitations()` 与前端 `src/api/chat.js` 为准：当前成功流依次输出答案 token、`event: citations`（引用列表 JSON）、`data: [DONE]`。该方法旧 Javadoc 仍写着“引用先发”，不能据此修改调用方。SSE 不套普通 `ApiResponse`；调整事件顺序、结束标记、取消或失败行为时同步核对前端解析与消息持久化测试。
+
+前端当前使用 `POST /api/ops/ask/stream`，请求体为 `{ question, sessionId }`，通过 `fetch` 携带 Bearer 请求头并解析事件。保留长问题走请求体的行为，避免中文 URL 编码膨胀导致请求头超限；不要将 JWT 放入 URL。
+
 ### 6.1 知识入库（ingest）链路约定
 
 适用于「上传 / 在线沉淀 / 内置加载 → 解析 → 切分 → 向量入库」全链路，核心组件位于 `knowledge/ingest/`、`knowledge/service/VectorIndexer`、`knowledge/loader/DocumentLoader`：
 
-- 上传大小限制的唯一配置源是 `ops-agent.knowledge.upload.max-size-mb`（默认 50）；multipart 的 `max-file-size` / `max-request-size` 通过占位符引用它，不允许单独写死或出现两套口径。
+- 单文件上限的配置源是 `ops-agent.knowledge.upload.max-size-mb`（默认 50），multipart 的 `max-file-size` 引用它；请求总大小由 `ops-agent.knowledge.upload.max-request-mb`（默认 55）控制，multipart 的 `max-request-size` 引用后者，须留出表单字段开销。调整时同步核对两项，不允许在 multipart 配置中单独写死。
 - 文件扩展名 → docType 的唯一映射源是 `DocumentParserStrategyFactory.resolveDocType()`；新增文件类型时在映射表和对应解析策略中同步登记。
 - 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略做文本抽取，不单独引入其他 Reader。其中内置加载的 Markdown 直接读原文（保留标题结构交给切分策略），上传的 Markdown 由 `MarkdownDocumentParserStrategy` 抽取纯文本后存入 `raw_content`。
 - 切分由 `VectorIndexer` 统一收口；解析后文本受 `ops-agent.knowledge.ingest.max-chars`（默认 1000 万字符）限制，超长必须显式拒绝，禁止用 `maxNumChunks` 之类参数静默截断。
 - 切分策略位于 `knowledge/ingest/splitter`（策略模式，设计文档 `docs/design/text-split/`）：`TextChunkStrategy` 接口（name / order / supports / split）+ `TextChunkStrategyResolver` 四级路由——`strategyOverride` 显式指定 → docType 覆盖配置 → `supports` 自然匹配 → `default-strategy`；未知名与策略异常一律降级 `token` 兜底，切分永不失败。新增策略须登记唯一 name 并保持 order 语义（小者优先）。
 - 路由现状：MARKDOWN → `markdown-structural`（自研 ATX 标题行扫描，不依赖 `MarkdownDocumentReader` 行为；headingPath 复用 `metadata.section`，零 DDL）；TXT / PDF / DOCX → `recursive`（段落→行→句终分隔符阶梯，冒号不切；围栏代码块与表格行是原子单元；相邻块携带整句 overlap；尾块不足 minChunkChars 并入前块）；`token` 仅作兜底（包装旧 `TokenTextSplitter` 口径）。
-- 策略四条不变量由单测强制（`RecursiveBoundarySplitterTest` 等）：块按序拼接（去相邻重叠）与原文完全一致、不产空白块、每块不超 `max-chunk-tokens`、输出块携带输入文档全部 metadata。修改切分算法必须先跑这三类测试。
+- 策略四条不变量由单测强制：块按序拼接（去相邻重叠）与原文完全一致、不产空白块、每块不超 `max-chunk-tokens`、输出块携带输入文档全部 metadata。修改切分算法须运行 `RecursiveBoundarySplitterTest`、`MarkdownStructuralSplitterTest` 和 `TextChunkStrategyResolverTest`。
 - 切分配置唯一来源 `ops-agent.knowledge.split.*`（`application.yml`）。回退旧 TokenTextSplitter 口径：`default-strategy: token` + `markdown.strategy: token`，不要通过改代码回退。
 - 每个向量块自动打 `splitStrategy`（策略名）与 `splitVersion`（算法代次，当前 2）标记，供 A/B 评测隔离、检索排查与存量重索引识别；调整算法代次时同步更新 `TextChunkStrategy.CURRENT_SPLIT_VERSION`。
 - 展示与检索文本分离：`knowledge_chunk.content` 存原始块文本（前端展示）；embedding 文本在 `KnowledgeDocumentIndexer` 处加「【标题｜章节路径】」上下文头（`keep-heading-path` 控制），两者不得混用。
@@ -125,7 +141,68 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 解析健壮性：PDF 先落地临时文件再用 PDFBox 按页读取（不整份载入堆内存，临时文件必须 finally 删除）；TXT 按 UTF-8 BOM → UTF-16 BOM → 严格 UTF-8 → GB18030 的顺序探测编码；DOCX 解析已启用 zip bomb 防护（`ZipSecureFile.setMinInflateRatio`），调整 POI 相关配置时不得移除。
 - 大文件演进方向：文件上限扩大到 100MB+ 前，需先将 `DocumentParserStrategy.parse(Resource): List<Document>` 升级为流式签名（产出端逐段产出、消费端逐段切分入库），趁实现与调用方较少时改造成本最低。
 
-## 7. 常用命令
+## 7. 告警与诊断闭环约定
+
+当前已实现的主链路为：`MetricSampler` 采样并持久化 → `AlertEvaluator` 评估启用规则 → 持续命中判断、去重与压制 → `alert_event` 落库 → `FailureSnapshotService` 保存现场 → `DiagnosisService` 结合知识检索生成诊断 → `NotificationCenter` 通知；人工处置、维护窗口、自动升级与通知重试构成配套闭环。修改这条链路时同步检查 `alert/`、`metrics/`、`snapshot/`、`diagnosis/`、`notification/`、`maintenance/` 和 `oncall/` 的调用关系。
+
+### 7.1 采样、规则评估与压制
+
+- 指标采样由 `MetricSampler` 每 10 秒执行一次，首次延迟 5 秒；告警评估读取 `MetricSampleStore` 中的持久化采样，不直接调用模型或重新拉取实时指标来决定是否触发。
+- `AlertEvaluator.evaluate()` 默认每 30 秒执行，配置为 `ops-agent.alert.evaluate-cron`；先处理维护窗口到期，再逐条评估启用规则。每条规则在其租户的 `RbacContextSnapshot` 中执行，单条失败不阻断其他规则。
+- 比较模式为 `THRESHOLD`（阈值）、`YOY`（24 小时前基线变化率）和 `SIGMA`（最近 1 小时统计偏差）。YOY 基线缺失或接近 0、SIGMA 样本不足 5 个或标准差接近 0 时不命中；调整算法时覆盖这些边界与上下方向。
+- 命中须满足 `durationSeconds`（未配置时 60 秒），按 `ruleId` 记录连续命中起点；同规则已有 `FIRING` 事件时不重复触发。当前不命中或无最新采样时会清理持续状态，并恢复该规则最新 `FIRING` 事件；不要将这一实现描述为自动恢复所有未关闭事件。
+- 触发顺序保持为：持续时长 → `FIRING` 去重 → 维护窗口 → 规则静默期 → 服务每小时节流 → `FIRING` 落库与闭环。规则静默及节流压制仍以 `SILENCED` 留痕，不进入快照、诊断和通知链路。
+- `AlertThrottleService` 的规则静默按 `ruleId` 计时，服务节流按 `tenantId + service` 隔离，当前上限为每小时 50 条。连续命中状态与节流状态均在进程内、重启清零；修改部署或并发策略时检查这些状态，不将其视为分布式锁或跨实例精确计数。
+
+### 7.2 告警状态、已读与维护窗口
+
+- 事件状态为 `FIRING / ACKNOWLEDGED / SILENCED / RESOLVED`。确认与认领会记录 `acknowledgedBy / acknowledgedAt`，将非恢复事件转为已确认；手动恢复记录恢复人、时间与备注。操作入口统一走 `AlertEventService`，列表、详情与批量操作复用 `AlertScope` 的数据权限。
+- **已读不等于已确认或已处理**：已读记录位于 `user_alert_read`，按租户和用户隔离；有效已读条件为 `readAt >= firedAt`。未读计数包含 `FIRING / ACKNOWLEDGED / SILENCED`，标记已读不能改变事件状态或停止升级。
+- 人工静默保留首次 `silencedFrom`，到期时间范围为当前时间后 15 分钟至 7 天；解除或到期恢复到静默前状态（缺失时默认 `FIRING`）。静默到期恢复由 `AlertEscalationService.scanAndEscalate()` 调用，即使没有启用升级规则也会先执行。
+- 维护窗口按租户与服务匹配；创建窗口同时压制存量未恢复告警。维护期新命中事件以 `SILENCED` 落库，`silencedReason` 使用 `MaintenanceWindowService.SILENCE_REASON_PREFIX`（`维护窗口：`）标记，不通知、不升级。不要将该来源标记与普通人工静默混用。
+- 计划到期由 `AlertEvaluator` 调用 `expireDueWindows()` 识别，再重新评估维护压制事件：仍异常则转 `FIRING` 并执行快照、诊断、通知；规则删除、停用或已不命中则转 `RESOLVED`。维护到期重评估与普通静默回原状态是两种恢复路径，修改时分别验证。
+
+### 7.3 故障快照、智能诊断与通知
+
+- `AlertEvaluator.afterFiring()` 当前顺序执行“快照 → 诊断 → 通知”，各环节独立捕获失败；快照失败则跳过诊断，诊断失败仍发送基础告警通知，不允许模型故障导致告警事件丢失或通知被整体取消。
+- `FailureSnapshotService.buildAndSave()` 按事件查询已有快照并复用，保存告警、服务信息与状态、指标窗口和审计数据。事件、快照、诊断及通知记录须保留 `alertEventId / ruleId / tenantId / deptId` 关联，不按服务名重新猜测归属。
+- `DiagnosisService` 从快照构建检索词，通过 `DiagnosisScope.of(snapshot).retrievalScope()` 限定知识范围，结构化输出根因、证据、置信度、建议与摘要；记录 `SUCCESS / FAILED`、错误信息、`durationMs` 与 `referencesJson`。检索失败可降级为仅基于快照事实诊断，不能伪造引用。
+- 诊断调用使用独立的 `diagnosis-...` 会话 ID，避免混入聊天记忆；手动诊断入口为 `POST /api/diagnoses/snapshot/{snapshotId}`，追问为 `POST /api/diagnoses/{id}/follow-up`，追问新增记录并继承事件与快照关联，不能覆盖原诊断。
+- 通知统一经 `NotificationCenter` → `NotificationTemplateService` → `NotifierRegistry` 分发，当前渠道类型为 `EMAIL / FEISHU_WEBHOOK / GENERIC_WEBHOOK`。发送事件所属租户的启用渠道，只有 `SUCCESS` 诊断才附加诊断摘要；新增渠道沿用 `Notifier` 扩展点。
+- 初次通知默认解析本租户 `PRIMARY` 值班人，空则尝试 `ADMIN`；用户 ID / 历史 username 解析邮箱时必须附带租户条件，并通过现有 AES 工具解密。动态邮箱优先，未解析到时 EMAIL 使用渠道配置收件人兜底，Webhook 按渠道配置投递。
+- 通知记录先写 `PENDING`，发送后写 `SUCCESS / FAILED`。失败由 `NotificationRetryTask` 扫描 `FAILED`、未达最大次数且已到重试时间的记录；配置为 `ops-agent.notification.max-retry`（默认 2）、`retry-delay-sec`（默认 300）与 `retry-cron`（默认每 5 分钟），每轮最多 100 条。通知失败与告警状态相互独立，不把发送失败改写为告警恢复。
+
+### 7.4 升级与验证
+
+- `AlertEscalationService` 默认每 30 秒扫描，配置为 `ops-agent.alert.escalation-cron`；仅对启用且开启升级的规则，读取 `alert_rule_escalation_level` 多级路径，处理 `FIRING / ACKNOWLEDGED`，跳过静默与已恢复事件。
+- 当前 `UNACKNOWLEDGED` 匹配 `FIRING` 并从 `firedAt` 计时；`UNRESOLVED` 匹配 `ACKNOWLEDGED` 并从 `acknowledgedAt`（缺失时用 `firedAt`）计时。每轮每事件最多升到一个到期级别，更新事件级别、写 `alert_escalation` 和审计日志，再通知；通知失败不回退升级记录。
+- 升级实际通知经 `NotificationCenter` 按级别解析值班人：L1 为 `BACKUP`，L2 及以上为 `ADMIN`。规则的 `toUsers / toRole` 也用于升级记录及审计收件人描述；调整目标配置时同时核对实际投递路径，不能只依据审计文字断言邮件收件人。
+- 修改本链路时按影响范围运行 `MetricSamplerTest`、`AlertEvaluatorTest`、`AlertThrottleServiceTest`、`AlertEventServiceTest`、`AlertReadServiceTest`、`AlertEscalationServiceTest`、`MaintenanceWindowServiceTest`、`OncallMemberServiceTest`、`FailureSnapshotServiceTest`、`DiagnosisServiceTest` 与 `NotificationCenterTest`，涉及数据权限或接口时补跑对应 Scope / Controller 测试。
+- 关键回归场景包括：持续命中与恢复、三种比较模式、去重和节流、维护压制与到期重评估、已读不改变状态、人工静默回原状态、未确认与未恢复升级、跨租户同名服务和值班人隔离、快照或模型失败仍通知、通知失败重试。模型、SMTP 和 Webhook 使用 Mock，不因验证文档或单测发送真实通知。
+
+## 8. 常用命令
+
+### 8.1 本地配置与依赖准备
+
+- 应用默认启用 `local` profile；本地覆盖文件应放在 `src/main/resources/application-local.yml`。只读取完成任务所需的配置，不在工具输出或交付说明中展开真实密钥。
+- `.env.example` 是 Docker Compose 的数据库变量模板，`.env` 由 Compose 读取；Spring Boot 不会自动把该文件加载为进程环境变量。启动 Java 时需通过 IDE、当前终端环境变量或本地 YAML 单独提供配置。
+- 默认 PostgreSQL 为 `localhost:5433/opsdb`，用户 `postgres`；应用端口为 `8080`。Compose 的 `DB_PORT`、`DB_NAME`、`DB_USER` 仅改变容器配置，修改后还须同步应用的 `spring.datasource.*`，不能假设自动联动。
+- Compose 只启动 PostgreSQL（含 Pgvector），不启动后端、前端或示例业务服务。`init-scripts/` 挂载到 PostgreSQL 初始化目录，仅在数据目录首次初始化时自动执行；已有 `ops_pgdata` 数据卷不会因修改 SQL 或重启容器而重跑脚本。
+
+| 环境变量 | 对应配置 / 用途 |
+| --- | --- |
+| `DB_PASSWORD` | `spring.datasource.password`；也供 Compose 使用，Java 进程需单独可见 |
+| `AI_API_KEY` | 对话模型 API Key；当前默认 DeepSeek 兼容接口 |
+| `DASHSCOPE_API_KEY` | 百炼 embedding API Key；当前模型 `text-embedding-v3`、向量维度 1024 |
+| `JWT_SECRET` | JWT 签名密钥，按 UTF-8 字节使用，至少 32 字节 |
+| `OPS_AES_KEY` | AES-256-GCM 密钥，Base64 编码的 32 字节密钥 |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` | 邮件通知配置；未配置时默认不做邮件健康检查 |
+| `OPS_CORS_ALLOWED_ORIGINS` | 逗号分隔的前端来源白名单 |
+| `LOG_LEVEL` | 根日志及业务包默认日志级别（默认 INFO） |
+
+模型、embedding、向量维度与 Pgvector 索引需保持一致；切换 embedding 模型前评估已有向量的兼容与重建方案。默认重排序关闭（`ops-agent.retrieval.rerank.enabled: false`），不可仅凭 README 假设已启用。
+
+### 8.2 开发与验证命令
 
 以下命令在项目根目录执行。Windows PowerShell 优先使用 Maven Wrapper：
 
@@ -135,6 +212,9 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 
 # 运行某个测试类（替换为实际测试类名）
 .\mvnw.cmd "-Dtest=KnowledgeDocumentServiceTest" test
+
+# 运行切分策略相关测试（PowerShell 下多个类名放在同一引号内）
+.\mvnw.cmd "-Dtest=RecursiveBoundarySplitterTest,MarkdownStructuralSplitterTest,TextChunkStrategyResolverTest" test
 
 # 运行测试
 .\mvnw.cmd test
@@ -154,17 +234,24 @@ docker compose up -d
 
 已安装 Maven 时可将 `.\mvnw.cmd` 替换为 `mvn`；Linux/macOS 使用 `./mvnw`。启动前确认 JDK 21、数据库和所需环境变量就绪。不要为了通过测试关闭安全配置或绕过业务校验。
 
-## 8. 测试与交付
+启动后可用 `GET /actuator/health` 验证基础健康状态，Swagger UI 位于 `/swagger-ui.html`，OpenAPI JSON 位于 `/v3/api-docs`。健康检查通过不代表模型、检索及通知链路均可用，应按本次需求验证对应功能。
+
+## 9. 测试与交付
 
 - 修复缺陷时，优先添加能复现问题的回归测试。
 - 业务修改至少验证正常路径、关键边界和失败路径；权限相关修改覆盖越权与跨租户场景。
 - 先执行相关测试，再按影响范围运行完整测试；涉及构建配置或公共基础设施时执行相应构建检查。
 - 断言 Reactor 流在 `doFinally` / `publishOn` 等异步线程中的副作用时，使用 `Mockito.timeout(...)` 等待，避免 StepVerifier 与回调线程的竞态导致偶发失败。
 - JaCoCo 报告位于 `target/site/jacoco/`，Surefire 测试报告位于 `target/surefire-reports/`。
+- 当前 CI 在 JDK 21 下执行 `mvn -B clean test`，未启动数据库服务，也未配置独立覆盖率门槛。不要把历史用例数量或覆盖率写成固定验收指标，以本次报告为准。
+- `SplitEvalIT` 不在 Surefire 默认测试命名范围内，`test` / `package` 不代表已跑真实 embedding 评测；需要时显式指定 `"-Dtest=SplitEvalIT"`。它会访问真实模型、写入和清理评测向量，应使用专用本地测试库，并在交付时区分通过、跳过和未运行。
 - 纯文档修改检查内容、路径和编码即可，无需为此运行完整后端测试。
 - 交付前检查差异，避免引入凭据、构建产物或与任务无关的文件。
 - 不自动提交、推送或发布；这些操作遵循用户明确要求。
 
-## 9. 文档维护
+## 10. 文档维护
 
 项目结构、常用命令或开发约定变化时，同步更新本文。涉及依赖版本、API 与配置的描述，应以仓库当前文件为依据，避免复制过时说明。
+
+- 本文维护长期协作规则、关键契约和可执行命令；临时排查记录、完整评测结果与任务进度放入对应专题资料，避免将一次性现象固化为通用规则。
+- 前后端契约变化时同时检查两边的 `AGENT.MD` 与相关实现；发现注释、README 与代码冲突时，在本次修改范围内明确依据和待同步位置。
