@@ -81,21 +81,18 @@ public class AlertEvaluator {
     }
 
     /**
-     * 维护窗口到期恢复（P1 规格 5）
-     * 到期窗口置 ended_at；把窗口期间以维护静默压制的告警恢复为 FIRING，
+     * 维护窗口结束恢复（包括自然到期与提前结束）。
+     * 到期窗口置 ended_at；重新检查全部维护静默告警，避免提前结束或上轮恢复失败后遗漏。
+     * 服务已无有效维护窗口时，把窗口期间以维护静默压制的告警恢复为 FIRING，
      * 若指标仍命中则重新走闭环（快照/诊断/通知），否则恢复为 RESOLVED。
      */
     private void recoverExpiredMaintenanceWindows() {
-        List<String> expiredServices = maintenanceWindowService.expireDueWindows(LocalDateTime.now());
-        if (expiredServices.isEmpty()) {
-            return;
-        }
+        maintenanceWindowService.expireDueWindows(LocalDateTime.now());
         List<AlertEventEntity> suppressed = eventMapper.selectList(
                 new LambdaQueryWrapper<AlertEventEntity>()
-                        .in(AlertEventEntity::getService, expiredServices)
                         .eq(AlertEventEntity::getStatus, AlertEventStatus.SILENCED.name())
-                        .apply("silenced_reason LIKE '" + MaintenanceWindowService.SILENCE_REASON_PREFIX + "%'")
-                        .last("LIMIT 200"));
+                        .likeRight(AlertEventEntity::getSilencedReason,
+                                MaintenanceWindowService.SILENCE_REASON_PREFIX));
         for (AlertEventEntity event : suppressed) {
             try {
                 RbacContextSnapshot.forTenant(event.getTenantId())
@@ -111,8 +108,11 @@ public class AlertEvaluator {
      * 命中 → 转 FIRING 并触发闭环通知；不命中 → RESOLVED。
      */
     private void restoreMaintenanceEvent(AlertEventEntity event) {
-        AlertRuleEntity rule = ruleMapper.selectById(event.getRuleId());
         LocalDateTime now = LocalDateTime.now();
+        if (maintenanceWindowService.isServiceInWindow(event.getTenantId(), event.getService(), now)) {
+            return;
+        }
+        AlertRuleEntity rule = ruleMapper.selectById(event.getRuleId());
         if (rule == null || !Boolean.TRUE.equals(rule.getEnabled())) {
             // 规则已删除/停用：直接恢复为静默前状态（无规则可评估）
             event.setStatus(AlertEventStatus.RESOLVED.name());
