@@ -68,8 +68,6 @@ public class AuditLogAspect {
 
         // 用户：优先从认证上下文取，登录场景则从参数提取
         entity.setUsername(resolveUsername(joinPoint));
-        entity.setTenantId(TenantContext.get());
-        entity.setDeptId(DeptContext.get());
 
         // HTTP 上下文：通过 RequestContextHolder 从当前线程获取请求对象
         ServletRequestAttributes attributes =
@@ -98,6 +96,9 @@ public class AuditLogAspect {
             entity.setErrorMessage(truncate(throwable.getMessage(), 500));
             throw throwable;
         } finally {
+            // 租户/部门上下文在方法执行后才最终确定（登录场景由 AuthService 写入）
+            entity.setTenantId(TenantContext.get());
+            entity.setDeptId(DeptContext.get());
             // 无论成功失败都要计算耗时并保存，放在 finally 保证一定执行
             entity.setDurationMs(System.currentTimeMillis() - startTime);
             auditLogService.save(entity);

@@ -114,10 +114,24 @@ public class UserController {
                 && !requestedTenant.equals(current)) {
             throw new BusinessException(ErrorCode.USER_OPERATION_FORBIDDEN, "不能跨租户查询用户");
         }
+
+        // 企业管理员看本企业全部用户；部门管理员只看本部门及下级
+        if (SecurityUtils.hasRole("TENANT_ADMIN")) {
+            List<Long> deptIds = deptId == null ? null : deptService.subtreeIds(current, deptId);
+            return new UserScope(current, deptIds);
+        }
+
         Long effectiveDept = deptId != null ? deptId : SecurityUtils.getCurrentDeptId();
-        List<Long> deptIds = effectiveDept == null
-                ? null : deptService.subtreeIds(current, effectiveDept);
-        return new UserScope(current, deptIds);
+        if (effectiveDept == null) {
+            // 没有部门的部门管理员不应退化为全企业可见
+            return new UserScope(current, List.of());
+        }
+        List<Long> allowed = deptService.subtreeIds(current, SecurityUtils.getCurrentDeptId());
+        if (!allowed.contains(effectiveDept)) {
+            // 不能通过传入父部门/兄弟部门越权查询
+            return new UserScope(current, List.of());
+        }
+        return new UserScope(current, deptService.subtreeIds(current, effectiveDept));
     }
 
     private boolean isPlatformTenant(String tenantId) {

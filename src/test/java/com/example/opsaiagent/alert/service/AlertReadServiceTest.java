@@ -61,11 +61,11 @@ class AlertReadServiceTest {
     // ==================== markRead / markAllRead ====================
 
     @Test
-    @DisplayName("markRead：插入已读记录")
+    @DisplayName("markRead：插入已读记录（带当前租户）")
     void markRead_inserts() {
         service.markRead(1L, "admin");
 
-        verify(readMapper).insertIgnore("admin", 1L);
+        verify(readMapper).insertIgnore("t-default", "admin", 1L);
     }
 
     @Test
@@ -73,7 +73,7 @@ class AlertReadServiceTest {
     void markRead_blankUserSkipped() {
         service.markRead(1L, " ");
 
-        verify(readMapper, never()).insertIgnore(anyString(), any());
+        verify(readMapper, never()).insertIgnore(anyString(), anyString(), any());
     }
 
     @Test
@@ -81,8 +81,8 @@ class AlertReadServiceTest {
     void markAllRead_batch() {
         service.markAllRead(List.of(1L, 2L), "admin");
 
-        verify(readMapper).insertIgnore("admin", 1L);
-        verify(readMapper).insertIgnore("admin", 2L);
+        verify(readMapper).insertIgnore("t-default", "admin", 1L);
+        verify(readMapper).insertIgnore("t-default", "admin", 2L);
     }
 
     @Test
@@ -91,7 +91,7 @@ class AlertReadServiceTest {
         service.markAllRead(List.of(), "admin");
         service.markAllRead(List.of(1L), null);
 
-        verify(readMapper, never()).insertIgnore(anyString(), any());
+        verify(readMapper, never()).insertIgnore(anyString(), anyString(), any());
     }
 
     // ==================== unreadCount（规格 1.2 口径） ====================

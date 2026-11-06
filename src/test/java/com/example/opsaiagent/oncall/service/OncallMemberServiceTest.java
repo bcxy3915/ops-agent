@@ -72,7 +72,7 @@ class OncallMemberServiceTest {
 
         assertThatThrownBy(() -> service.add(req))
                 .isInstanceOf(BusinessException.class);
-        verify(memberMapper, never()).insert(any());
+        verify(memberMapper, never()).insert(any(OncallMemberEntity.class));
     }
 
     @Test

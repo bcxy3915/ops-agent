@@ -4,6 +4,7 @@ import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.mail.Message;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 
+import java.util.List;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,6 +93,54 @@ class EmailNotifierTest {
         when(mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
         newNotifier().send(channel("a@x.com"), content());
         verify(mailSender).send(any(MimeMessage.class));
+    }
+
+    @Test
+    @DisplayName("动态收件人优先：覆盖渠道配置 recipients")
+    void send_dynamicRecipientsPreferred() throws Exception {
+        MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
+        when(mailSender.createMimeMessage()).thenReturn(message);
+        NotificationContent content = NotificationContent.builder().title("t").content("c")
+                .dynamicRecipients(List.of("oncall@x.com", "backup@x.com")).build();
+
+        newNotifier().send(channel("a@x.com,b@x.com"), content);
+
+        verify(mailSender).send(any(MimeMessage.class));
+        assertThat(message.getRecipients(Message.RecipientType.TO))
+                .extracting(Object::toString)
+                .containsExactly("oncall@x.com", "backup@x.com");
+    }
+
+    @Test
+    @DisplayName("动态收件人为空：回退渠道配置 recipients")
+    void send_emptyDynamicFallsBackToConfig() throws Exception {
+        MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
+        when(mailSender.createMimeMessage()).thenReturn(message);
+        NotificationContent content = NotificationContent.builder().title("t").content("c")
+                .dynamicRecipients(List.of()).build();
+
+        newNotifier().send(channel("a@x.com,b@x.com"), content);
+
+        verify(mailSender).send(any(MimeMessage.class));
+        assertThat(message.getRecipients(Message.RecipientType.TO))
+                .extracting(Object::toString)
+                .containsExactly("a@x.com", "b@x.com");
+    }
+
+    @Test
+    @DisplayName("仅有动态收件人、渠道无配置也能发送")
+    void send_dynamicOnly_withoutConfig() throws Exception {
+        MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
+        when(mailSender.createMimeMessage()).thenReturn(message);
+        NotificationContent content = NotificationContent.builder().title("t").content("c")
+                .dynamicRecipients(List.of("oncall@x.com")).build();
+
+        newNotifier().send(channel(null), content);
+
+        verify(mailSender).send(any(MimeMessage.class));
+        assertThat(message.getRecipients(Message.RecipientType.TO))
+                .extracting(Object::toString)
+                .containsExactly("oncall@x.com");
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.example.opsaiagent.retrieval.bm25;
 
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import com.example.opsaiagent.retrieval.RetrievalScope;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,7 +31,8 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final DataScope dataScope;
-    private final Bm25Index index = new Bm25Index();
+    /** 只读快照：重建时整体替换引用，避免检索线程读到半成品索引 */
+    private volatile Bm25Index index = new Bm25Index();
 
     /**
      * 初始化索引
@@ -38,6 +40,17 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void initIndex() {
+        rebuild();
+    }
+
+    /**
+     * 文档向量入库后刷新索引，避免新文档在关键词检索路径长期缺席。
+     *
+     * @param event 索引更新事件
+     */
+    @EventListener
+    public void onIndexUpdated(KnowledgeIndexUpdatedEvent event) {
+        log.info("检测到知识索引更新，刷新 BM25 索引: docId={}", event.docId());
         rebuild();
     }
 
@@ -63,8 +76,9 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     @Override
     public List<Document> search(String query, int topK, RetrievalScope scope) {
         RetrievalScope effective = scope == null ? RetrievalScope.publicOnly() : scope;
-        int fetch = Math.min(index.size(), Math.max(topK, topK * 4));
-        return index.search(query, fetch).stream()
+        Bm25Index snapshot = index;
+        int fetch = Math.min(snapshot.size(), Math.max(topK, topK * 4));
+        return snapshot.search(query, fetch).stream()
                 .map(Bm25Index.ScoredDocument::getDocument)
                 .filter(doc -> effective.matches(doc.getMetadata()))
                 .limit(topK)
@@ -72,7 +86,7 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     }
 
     /**
-     * 重建索引
+     * 重建索引：先构建独立实例，完成后原子替换，保证检索线程始终读到完整索引
      */
     @Override
     public void rebuild() {
@@ -87,8 +101,10 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
                         return new Document(id, content, metadata);
                     }
             );
-            index.build(docs);
-            log.info("BM25 索引构建完成，共 {} 个文档", index.size());
+            Bm25Index fresh = new Bm25Index();
+            fresh.build(docs);
+            index = fresh;
+            log.info("BM25 索引构建完成，共 {} 个文档", fresh.size());
         } catch (Exception e) {
             log.error("BM25 索引构建失败", e);
         }

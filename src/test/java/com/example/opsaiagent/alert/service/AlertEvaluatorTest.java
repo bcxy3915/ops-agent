@@ -76,7 +76,7 @@ class AlertEvaluatorTest {
     @BeforeEach
     void setUp() {
         // 默认允许产生事件；个别用例单独覆盖（静默 / 节流用例会短路或覆盖该 stub）
-        lenient().when(throttle.allowEvent(anyString(), anyLong())).thenReturn(true);
+        lenient().when(throttle.allowEvent(any(), anyString(), anyLong())).thenReturn(true);
         // 默认无到期维护窗口、服务不在维护窗口内（evaluate() 开头与命中分支会查询）
         lenient().when(maintenanceWindowService.expireDueWindows(any())).thenReturn(java.util.List.of());
         lenient().when(maintenanceWindowService.isServiceInWindow(anyString(), any())).thenReturn(false);
@@ -131,7 +131,7 @@ class AlertEvaluatorTest {
         assertThat(inserted.getThreshold()).isEqualTo(80.0);
         assertThat(inserted.getFiredAt()).isNotNull();
         verify(throttle).recordFired(1L, NOW);
-        verify(throttle).recordEvent("svc-a", NOW);
+        verify(throttle).recordEvent(isNull(), eq("svc-a"), eq(NOW));
         // 闭环编排（T18）：快照生成成功 → LLM 诊断 → 通知（带诊断结果）
         verify(snapshotService).buildAndSave(inserted);
         verify(diagnosisService).diagnose(snap);
@@ -261,7 +261,7 @@ class AlertEvaluatorTest {
         AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
         when(metricSampleStore.queryLatest("svc-a", "cpu", NOW))
                 .thenReturn(new MetricPoint(NOW, 95.0));
-        when(throttle.allowEvent("svc-a", NOW)).thenReturn(false);
+        when(throttle.allowEvent(isNull(), eq("svc-a"), eq(NOW))).thenReturn(false);
 
         evaluator.evaluateRule(rule, NOW);
 
@@ -413,7 +413,7 @@ class AlertEvaluatorTest {
 
         evaluator.evaluate();
 
-        verify(eventMapper).updateById(argThat(e -> "FIRING".equals(e.getStatus())));
+        verify(eventMapper).updateById(argThat((AlertEventEntity e) -> "FIRING".equals(e.getStatus())));
         verify(notificationCenter, org.mockito.Mockito.atLeastOnce()).sendOnEvent(any(), any());
     }
 
@@ -437,7 +437,7 @@ class AlertEvaluatorTest {
 
         evaluator.evaluate();
 
-        verify(eventMapper).updateById(argThat(e -> "RESOLVED".equals(e.getStatus())));
+        verify(eventMapper).updateById(argThat((AlertEventEntity e) -> "RESOLVED".equals(e.getStatus())));
         verify(notificationCenter, never()).sendOnEvent(any(), any());
     }
 
@@ -447,6 +447,7 @@ class AlertEvaluatorTest {
     @DisplayName("evaluate：只评估启用规则，异常规则不中断整体")
     void evaluate_onlyEnabledAndTolerant() {
         when(ruleMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         evaluator.evaluate();
         verify(eventMapper, never()).insert(any(AlertEventEntity.class));
 
@@ -459,6 +460,5 @@ class AlertEvaluatorTest {
         evaluator.evaluate();
         // 异常被吞掉，未产生事件
         verify(eventMapper, never()).insert(any(AlertEventEntity.class));
-        verify(eventMapper, never()).selectList(any(Wrapper.class));
     }
 }

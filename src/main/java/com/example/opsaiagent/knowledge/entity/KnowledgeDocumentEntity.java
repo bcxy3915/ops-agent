@@ -61,9 +61,29 @@ public class KnowledgeDocumentEntity {
     @TableField("reviewed_at")
     private LocalDateTime reviewedAt;
 
+    /** 部门审核人；企业审核后仍保留，用于“我已审核”历史 */
+    @TableField("dept_reviewed_by")
+    private String deptReviewedBy;
+
+    /** 部门审核时间；企业审核后仍保留 */
+    @TableField("dept_reviewed_at")
+    private LocalDateTime deptReviewedAt;
+
     /** 审核意见 / 驳回原因 */
     @TableField("review_note")
     private String reviewNote;
+
+    /** 索引发布状态：UNPUBLISHED / BUILDING / FAILED / PUBLISHED */
+    @TableField("publish_status")
+    private String publishStatus;
+
+    /** 最近一次索引失败原因 */
+    @TableField("publish_error")
+    private String publishError;
+
+    /** 索引发布完成时间 */
+    @TableField("published_at")
+    private LocalDateTime publishedAt;
 
     /** 信任状态：VERIFIED / PENDING / AI_DRAFT / EXPIRED */
     @TableField("trust_status")

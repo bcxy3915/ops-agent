@@ -3,6 +3,7 @@ package com.example.opsaiagent.knowledge.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
+import com.example.opsaiagent.alert.dto.AlertEventStatus;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
@@ -14,10 +15,8 @@ import com.example.opsaiagent.knowledge.dto.CaseReviseRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseDetailResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseSummaryResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeCaseEntity;
-import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
-import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.mapper.FailureSnapshotMapper;
@@ -28,9 +27,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -38,9 +34,6 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 故障案例服务（T19/T20/T21）
@@ -67,15 +60,12 @@ public class KnowledgeCaseService {
     /** CASE 文档向量 source 前缀 */
     public static final String CASE_VECTOR_SOURCE_PREFIX = "case:";
 
-    private static final Pattern MD_HEADING = Pattern.compile("^#{1,6}\\s+(.+)$", Pattern.MULTILINE);
-
     private final KnowledgeCaseMapper caseMapper;
     private final DiagnosisRecordMapper diagnosisRecordMapper;
     private final AlertEventMapper alertEventMapper;
     private final FailureSnapshotMapper failureSnapshotMapper;
     private final KnowledgeDocumentMapper documentMapper;
-    private final KnowledgeChunkMapper chunkMapper;
-    private final VectorStore vectorStore;
+    private final KnowledgeIndexTaskService indexTaskService;
     private final ObjectMapper objectMapper;
     private final KnowledgeQueryScope queryScope;
 
@@ -135,6 +125,13 @@ public class KnowledgeCaseService {
     public KnowledgeCaseDetailResponse confirm(Long id) {
         KnowledgeCaseEntity entity = requireCase(id);
         requirePending(entity);
+        if (entity.getSourceAlertId() != null) {
+            AlertEventEntity alert = alertEventMapper.selectById(entity.getSourceAlertId());
+            if (alert == null || !AlertEventStatus.RESOLVED.name().equals(alert.getStatus())) {
+                throw new BusinessException(ErrorCode.KNOWLEDGE_CASE_INVALID,
+                        "源告警尚未恢复，不能确认沉淀案例");
+            }
+        }
         String reviewer = currentReviewer();
         entity.setStatus(STATUS_CONFIRMED);
         // 历史案例可能缺少归属，确认时按当前上下文补齐，保证沉淀为 TENANT 知识
@@ -202,7 +199,7 @@ public class KnowledgeCaseService {
 
     /**
      * 案例自动生成（P1）
-     * 从成功的主诊断记录（status=SUCCESS 且非追问）批量生成待确认候选案例，按诊断记录去重。
+     * 从源告警已恢复的成功主诊断记录（status=SUCCESS 且非追问）生成候选，按诊断记录去重。
      * @param limit 本次最多生成条数（1~100）
      * @return 本次新生成的候选数量
      */
@@ -213,6 +210,8 @@ public class KnowledgeCaseService {
                 new LambdaQueryWrapper<DiagnosisRecordEntity>()
                         .eq(DiagnosisRecordEntity::getStatus, "SUCCESS")
                         .isNull(DiagnosisRecordEntity::getQuestion)
+                        .inSql(DiagnosisRecordEntity::getAlertEventId,
+                                "SELECT id FROM alert_event WHERE status = 'RESOLVED'")
                         .orderByDesc(DiagnosisRecordEntity::getCreatedAt)
                         .last("LIMIT " + safeLimit));
 
@@ -275,7 +274,8 @@ public class KnowledgeCaseService {
     }
 
     /**
-     * 沉淀 CASE 知识文档：生成文档实体 → 分块 → 写 chunk → 向量化
+     * 沉淀 CASE 知识文档：生成文档实体并入队索引任务
+     * （分块与向量化含外部 embedding，交给后台任务在独立事务中执行，避免长事务）
      */
     private void indexCaseDocument(KnowledgeCaseEntity entity) {
         String content = buildCaseContent(entity);
@@ -305,56 +305,12 @@ public class KnowledgeCaseService {
         doc.setFilePath(CASE_VECTOR_SOURCE_PREFIX + entity.getId());
         doc.setRawContent(content);
         doc.setChunkCount(0);
+        doc.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
         documentMapper.insert(doc);
 
-        TokenTextSplitter splitter = TokenTextSplitter.builder()
-                .withChunkSize(500)
-                .withMinChunkSizeChars(200)
-                .withMaxNumChunks(10000)
-                .withKeepSeparator(true)
-                .build();
-        List<Document> chunks = splitter.apply(List.of(new Document(content)));
-        List<KnowledgeChunkEntity> chunkEntities = new ArrayList<>();
-        List<Document> vectorDocs = new ArrayList<>();
-        String tenantId = doc.getTenantId() == null ? "" : doc.getTenantId();
-        String deptId = doc.getDeptId() == null ? "" : String.valueOf(doc.getDeptId());
-        String owner = doc.getOwner() == null ? "" : doc.getOwner();
-        int ordinal = 1;
-        for (Document chunk : chunks) {
-            KnowledgeChunkEntity chunkEntity = new KnowledgeChunkEntity();
-            chunkEntity.setDocId(doc.getId());
-            chunkEntity.setTenantId(doc.getTenantId());
-            chunkEntity.setDeptId(doc.getDeptId());
-            chunkEntity.setOrdinal(ordinal);
-            chunkEntity.setContent(chunk.getText());
-            chunkEntity.setSection(extractSection(chunk.getText(), "MARKDOWN"));
-            chunkMapper.insert(chunkEntity);
-            chunkEntities.add(chunkEntity);
-
-            java.util.Map<String, Object> metadata = new java.util.HashMap<>();
-            metadata.put("source", CASE_VECTOR_SOURCE_PREFIX + doc.getId());
-            metadata.put("docId", String.valueOf(doc.getId()));
-            metadata.put("title", doc.getTitle() == null ? "" : doc.getTitle());
-            metadata.put("layer", doc.getLayer());
-            metadata.put("trustStatus", doc.getTrustStatus());
-            metadata.put("tenantId", tenantId);
-            metadata.put("deptId", deptId);
-            metadata.put("visibility", VISIBILITY_TENANT);
-            metadata.put("reviewStatus", "APPROVED");
-            metadata.put("owner", owner);
-            metadata.put("ordinal", String.valueOf(ordinal));
-            metadata.put("chunkId", String.valueOf(chunkEntity.getId()));
-            Document vectorDoc = new Document(chunk.getText(), metadata);
-            vectorDocs.add(vectorDoc);
-            ordinal++;
-        }
-        int batchSize = 10;
-        for (int i = 0; i < vectorDocs.size(); i += batchSize) {
-            vectorStore.add(vectorDocs.subList(i, Math.min(i + batchSize, vectorDocs.size())));
-        }
-        doc.setChunkCount(chunkEntities.size());
-        documentMapper.updateById(doc);
-        log.info("案例知识沉淀完成: caseId={}, docId={}, chunks={}", entity.getId(), doc.getId(), chunkEntities.size());
+        // 向量 source 沿用 case:<文档ID>，与既有数据口径一致
+        indexTaskService.enqueue(doc.getId(), doc.getVersion(), CASE_VECTOR_SOURCE_PREFIX + doc.getId());
+        log.info("案例知识文档已创建，索引任务入队: caseId={}, docId={}", entity.getId(), doc.getId());
     }
 
     /**
@@ -561,24 +517,6 @@ public class KnowledgeCaseService {
             log.warn("列表序列化失败", e);
             return null;
         }
-    }
-
-    /**
-     * 从块文本提取章节标题（markdown 取首个标题行；其他类型取首个非空行截断）
-     */
-    String extractSection(String text, String docType) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        if ("MARKDOWN".equals(docType)) {
-            Matcher m = MD_HEADING.matcher(text);
-            if (m.find()) {
-                String heading = m.group(1).trim();
-                return heading.length() > 100 ? heading.substring(0, 100) : heading;
-            }
-        }
-        String firstLine = text.lines().filter(StringUtils::hasText).findFirst().orElse("");
-        return firstLine.length() > 100 ? firstLine.substring(0, 100) : firstLine;
     }
 
     /**

@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 定时扫描所有启用规则：
  *   从持久化采样中取当前指标值，按 compareMode（THRESHOLD / YOY / SIGMA）判断是否命中
  *   命中需持续 duration_seconds 才触发，避免毛刺误报
- *   同一规则已有 FIRING 事件时不重复触发（去重）
+ *   同一规则已有待处理、已确认或人工/维护静默事件时不重复触发（去重）
  *   静默期 / 每小时节流内的事件以 SILENCED 状态落库
  *   不再命中时恢复最新 FIRING 事件为 RESOLVED
  *   触发 FIRING 时生成故障快照（T12）并通知启用渠道（T10）
@@ -81,21 +81,18 @@ public class AlertEvaluator {
     }
 
     /**
-     * 维护窗口到期恢复（P1 规格 5）
-     * 到期窗口置 ended_at；把窗口期间以维护静默压制的告警恢复为 FIRING，
+     * 维护窗口结束恢复（包括自然到期与提前结束）。
+     * 到期窗口置 ended_at；重新检查全部维护静默告警，避免提前结束或上轮恢复失败后遗漏。
+     * 服务已无有效维护窗口时，把窗口期间以维护静默压制的告警恢复为 FIRING，
      * 若指标仍命中则重新走闭环（快照/诊断/通知），否则恢复为 RESOLVED。
      */
     private void recoverExpiredMaintenanceWindows() {
-        List<String> expiredServices = maintenanceWindowService.expireDueWindows(LocalDateTime.now());
-        if (expiredServices.isEmpty()) {
-            return;
-        }
+        maintenanceWindowService.expireDueWindows(LocalDateTime.now());
         List<AlertEventEntity> suppressed = eventMapper.selectList(
                 new LambdaQueryWrapper<AlertEventEntity>()
-                        .in(AlertEventEntity::getService, expiredServices)
                         .eq(AlertEventEntity::getStatus, AlertEventStatus.SILENCED.name())
-                        .apply("silenced_reason LIKE '" + MaintenanceWindowService.SILENCE_REASON_PREFIX + "%'")
-                        .last("LIMIT 200"));
+                        .likeRight(AlertEventEntity::getSilencedReason,
+                                MaintenanceWindowService.SILENCE_REASON_PREFIX));
         for (AlertEventEntity event : suppressed) {
             try {
                 RbacContextSnapshot.forTenant(event.getTenantId())
@@ -111,8 +108,11 @@ public class AlertEvaluator {
      * 命中 → 转 FIRING 并触发闭环通知；不命中 → RESOLVED。
      */
     private void restoreMaintenanceEvent(AlertEventEntity event) {
-        AlertRuleEntity rule = ruleMapper.selectById(event.getRuleId());
         LocalDateTime now = LocalDateTime.now();
+        if (maintenanceWindowService.isServiceInWindow(event.getTenantId(), event.getService(), now)) {
+            return;
+        }
+        AlertRuleEntity rule = ruleMapper.selectById(event.getRuleId());
         if (rule == null || !Boolean.TRUE.equals(rule.getEnabled())) {
             // 规则已删除/停用：直接恢复为静默前状态（无规则可评估）
             event.setStatus(AlertEventStatus.RESOLVED.name());
@@ -158,7 +158,7 @@ public class AlertEvaluator {
             if (sustainedSec < durationSec) {
                 return; // 未达持续时长，等待下次评估
             }
-            // 去重：已有 FIRING 事件则不重复触发
+            // 确认、认领和静默均不代表故障恢复；未恢复事件继续参与去重。
             if (findFiringId(rule.getId()) != null) {
                 return;
             }
@@ -175,12 +175,12 @@ public class AlertEvaluator {
                 recordEvent(rule, value, nowMs, AlertEventStatus.SILENCED, "静默期内压制，未重复告警");
                 return;
             }
-            if (!throttle.allowEvent(service, nowMs)) {
+            if (!throttle.allowEvent(rule.getTenantId(), service, nowMs)) {
                 recordEvent(rule, value, nowMs, AlertEventStatus.SILENCED, "超出每小时告警上限");
                 return;
             }
             throttle.recordFired(rule.getId(), nowMs);
-            throttle.recordEvent(service, nowMs);
+            throttle.recordEvent(rule.getTenantId(), service, nowMs);
             AlertEventEntity event = recordEvent(rule, value, nowMs, AlertEventStatus.FIRING, buildDetail(rule, value));
             afterFiring(event);
         } else {
@@ -289,7 +289,10 @@ public class AlertEvaluator {
         List<AlertEventEntity> rows = eventMapper.selectList(
                 new LambdaQueryWrapper<AlertEventEntity>()
                         .eq(AlertEventEntity::getRuleId, ruleId)
-                        .eq(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name())
+                        .and(w -> w.in(AlertEventEntity::getStatus, AlertEventStatus.FIRING.name(),
+                                        AlertEventStatus.ACKNOWLEDGED.name())
+                                .or(s -> s.eq(AlertEventEntity::getStatus, AlertEventStatus.SILENCED.name())
+                                        .isNotNull(AlertEventEntity::getSilencedFrom)))
                         .orderByDesc(AlertEventEntity::getFiredAt)
                         .last("LIMIT 1"));
         return rows.isEmpty() ? null : rows.get(0).getId();

@@ -1,6 +1,7 @@
 package com.example.opsaiagent.retrieval;
 
 import com.example.opsaiagent.rbac.service.DataScope;
+import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
 import com.example.opsaiagent.retrieval.rerank.RerankerClient;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class HybridRetriever {
     private final RrfFuser rrfFuser;
     private final RerankerClient rerankerClient;
     private final DataScope dataScope;
+    private final RetrievalDiversifier diversifier;
 
     /**
      * 混合检索（使用当前请求的数据范围）
@@ -61,15 +63,18 @@ public class HybridRetriever {
         List<Document> bm25Results = keywordRetriever.search(query, 20, effective);
         log.info("混合检索: 向量命中 {} 个, BM25 命中 {} 个", vectorResults.size(), bm25Results.size());
         if (vectorResults.isEmpty()) {
-            return bm25Results.stream().limit(topK).toList();
+            return diversifier.diversify(bm25Results, topK);
         }
 
         // 2. RRF 融合
         List<Document> fused = rrfFuser.fuseAndLimit(20, vectorResults, bm25Results);
         log.info("RRF 融合后: {} 个", fused.size());
 
-        // 3. Reranker 精排
-        List<Document> reranked = rerankerClient.rerank(query, fused, topK);
+        // 3. 同文档多样性治理（§10.3.10：同文档配额 + 邻近合并，超额块让位给后排文档）
+        List<Document> diversified = diversifier.diversify(fused, 20);
+
+        // 4. Reranker 精排
+        List<Document> reranked = rerankerClient.rerank(query, diversified, topK);
         log.info("Reranker 后: {} 个", reranked.size());
 
         return reranked;

@@ -17,7 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -232,6 +234,35 @@ public class ConversationService {
         return messages.stream()
                 .map(this::toMessageResponse)
                 .toList();
+    }
+
+    /**
+     * 读取会话最近的消息（用于冷启动回填聊天记忆）
+     *
+     * 先按 id 倒序取最近 limit 条，再还原为正序：助手消息是异步落库的，
+     * createdAt 可能与用户消息乱序，按自增 id 排序才稳定。
+     *
+     * @param sessionId 会话 ID
+     * @param username 用户名，用于校验会话归属
+     * @param limit 最多读取条数
+     * @return 按时间正序排列的消息；会话不存在或不属于该用户时返回空列表
+     */
+    public List<MessageEntity> loadRecentMessages(String sessionId, String username, int limit) {
+        ConversationEntity conv = findBySessionId(sessionId);
+        if (conv == null || !conv.getUsername().equals(username)) {
+            return List.of();
+        }
+
+        List<MessageEntity> messages = messageMapper.selectList(
+                new LambdaQueryWrapper<MessageEntity>()
+                        .eq(MessageEntity::getSessionId, sessionId)
+                        .orderByDesc(MessageEntity::getId)
+                        .last("LIMIT " + limit)
+        );
+
+        List<MessageEntity> ordered = new ArrayList<>(messages);
+        ordered.sort(Comparator.comparing(MessageEntity::getId));
+        return ordered;
     }
 
     /**

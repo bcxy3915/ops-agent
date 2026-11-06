@@ -11,6 +11,7 @@ import com.example.opsaiagent.security.util.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +29,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/metrics/samples")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('service:read')")
 public class MetricSampleController {
 
     private final ServiceRegistry serviceRegistry;
@@ -40,9 +42,11 @@ public class MetricSampleController {
             @RequestParam(required = false) String metric,
             @RequestParam(defaultValue = "1h") String range) {
 
-        if (serviceRegistry.getByName(service) == null) {
+        com.example.opsaiagent.registry.ServiceInfo serviceInfo = serviceRegistry.getByName(service);
+        if (serviceInfo == null) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + service);
         }
+        checkServiceTenant(serviceInfo);
 
         String effectiveRange = normalizeRange(range);
         long rangeMs = parseRange(effectiveRange);
@@ -64,6 +68,19 @@ public class MetricSampleController {
                 .range(effectiveRange)
                 .series(series)
                 .build());
+    }
+
+    /**
+     * 校验服务是否属于当前租户。
+     *
+     * @param service 服务信息
+     */
+    private void checkServiceTenant(com.example.opsaiagent.registry.ServiceInfo service) {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        if (org.springframework.util.StringUtils.hasText(tenantId) && !"0".equals(tenantId)
+                && !tenantId.equals(service.getTenantId())) {
+            throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + service.getName());
+        }
     }
 
     private String normalizeRange(String range) {

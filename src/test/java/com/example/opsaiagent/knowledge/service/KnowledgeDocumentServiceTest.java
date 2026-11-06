@@ -7,16 +7,25 @@ import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeIndexStatusResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentVersionEntity;
+import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
+import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
+import com.example.opsaiagent.knowledge.ingest.parser.DocxDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.PdfDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.parser.TxtDocumentParserStrategy;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitterTestFixture;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.rbac.entity.TenantEntity;
 import com.example.opsaiagent.rbac.service.DeptService;
 import com.example.opsaiagent.rbac.service.TenantService;
+import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
 import com.example.opsaiagent.security.util.SecurityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
@@ -30,6 +39,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
@@ -44,8 +54,10 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -67,6 +79,7 @@ class KnowledgeDocumentServiceTest {
     private KnowledgeChunkMapper chunkMapper;
     @Mock
     private VectorStore vectorStore;
+    private DocumentParserStrategyFactory parserStrategyFactory;
     @Mock
     private JdbcTemplate jdbcTemplate;
     @Mock
@@ -75,17 +88,30 @@ class KnowledgeDocumentServiceTest {
     private TenantService tenantService;
     @Mock
     private DeptService deptService;
+    @Mock
+    private KnowledgeIndexTaskService indexTaskService;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @Spy
     private KnowledgeQueryScope queryScope = new KnowledgeQueryScope(null);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private VectorIndexer vectorIndexer;
     private KnowledgeDocumentService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorStore, jdbcTemplate, objectMapper,
-                versionService, tenantService, deptService, queryScope);
+        vectorIndexer = SplitterTestFixture.vectorIndexer(vectorStore);
+        // 审核/发布改为入队异步索引任务，验证任务入队而非同步向量写入
+
+        // 使用真实解析策略工厂，覆盖 md/pdf/txt/docx 真实解析路径
+        parserStrategyFactory = new DocumentParserStrategyFactory(java.util.List.of(
+                new MarkdownDocumentParserStrategy(), new PdfDocumentParserStrategy(),
+                new TxtDocumentParserStrategy(), new DocxDocumentParserStrategy()));
+        service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorIndexer, parserStrategyFactory,
+                jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope,
+                indexTaskService, eventPublisher);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
 
@@ -256,6 +282,23 @@ class KnowledgeDocumentServiceTest {
     }
 
     @Test
+    @DisplayName("getById：跨租户同名作者的个人文档不可见")
+    void getById_crossTenantSameOwnerForbidden() {
+        KnowledgeQueryScope.Scope scope = queryScope.user("t1", Set.of(5L), "alice");
+        when(queryScope.current()).thenReturn(scope);
+
+        KnowledgeDocumentEntity other = doc(9L, "同名他人草稿", "PENDING", "PRIVATE", "内容");
+        other.setTenantId("t2");
+        other.setOwner("alice");
+        other.setVisibility("PERSONAL");
+        when(documentMapper.selectById(9L)).thenReturn(other);
+
+        assertThatThrownBy(() -> service.getById(9L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    @Test
     @DisplayName("upload：超过大小限制拒绝")
     void upload_oversizedRejected() {
         MultipartFile file = mock(MultipartFile.class);
@@ -392,34 +435,68 @@ class KnowledgeDocumentServiceTest {
     // ==================== publish ====================
 
     @Test
-    @DisplayName("publish：审核通过后分块并向量化入库")
+    @DisplayName("publish：审核通过后入队索引任务（分块与向量化由后台完成）")
     void publish_approved() {
         String longContent = "故障排查指南。" + "详细步骤说明内容。".repeat(200);
-        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "PENDING", "PRIVATE", longContent));
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", longContent);
+        entity.setReviewStatus("PENDING_TENANT");
+        entity.setReviewLevel("TENANT");
+        entity.setReviewedBy("dept-reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
+        when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
 
-        KnowledgeDocumentResponse r = service.publish(1L, true);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
-        assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-        verify(vectorStore).add(anyList());
-        ArgumentCaptor<KnowledgeDocumentEntity> updateCaptor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
-        verify(documentMapper, org.mockito.Mockito.atLeast(2)).updateById(updateCaptor.capture());
-        assertThat(updateCaptor.getAllValues().get(0).getLastReviewAt()).isNotNull();
-        assertThat(r.getChunkCount()).isGreaterThan(0);
+            KnowledgeDocumentResponse r = service.publish(1L, true);
+
+            assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+            // 审核不再预删旧索引，新索引成功后整体覆盖
+            verify(chunkMapper, never()).delete(any(LambdaQueryWrapper.class));
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
+            ArgumentCaptor<KnowledgeDocumentEntity> updateCaptor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+            verify(documentMapper, org.mockito.Mockito.atLeast(1)).updateById(updateCaptor.capture());
+            assertThat(updateCaptor.getAllValues().get(0).getLastReviewAt()).isNotNull();
+            // 索引异步执行，审核返回时分块尚未生成
+            assertThat(r.getChunkCount()).isZero();
+        }
     }
 
     @Test
     @DisplayName("publish：驳回保持待审核且不向量化")
     void publish_rejected() {
-        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "PENDING", "PRIVATE", "内容"));
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("PENDING_TENANT");
+        entity.setReviewLevel("TENANT");
+        entity.setReviewedBy("dept-reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
+        when(jdbcTemplate.update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1")))
+                .thenReturn(1);
 
-        KnowledgeDocumentResponse r = service.publish(1L, false);
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
-        assertThat(r.getTrustStatus()).isEqualTo("PENDING");
-        assertThat(r.getLastReviewAt()).isNotNull();
-        verify(vectorStore, never()).add(anyList());
-        verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
+            KnowledgeDocumentResponse r = service.publish(1L, false);
+
+            assertThat(r.getTrustStatus()).isEqualTo("PENDING");
+            assertThat(r.getLastReviewAt()).isNotNull();
+            assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+            verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
+            // 驳回必须物理删除旧向量：向量 metadata 是快照，仅改 DB 不足以让内容下线
+            verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1"));
+            // 驳回删除向量后必须刷新内存关键词索引，否则旧内容仍可被 BM25 命中
+            verify(eventPublisher).publishEvent(any(KnowledgeIndexUpdatedEvent.class));
+        }
     }
 
     @Test
@@ -428,7 +505,7 @@ class KnowledgeDocumentServiceTest {
         when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "内容"));
         assertThatThrownBy(() -> service.publish(1L, true))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
     }
 
     @Test
@@ -437,6 +514,180 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.publish(99L, true))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
+    }
+
+    // ==================== publishDirect ====================
+
+    @Test
+    @DisplayName("publishDirect：草稿跳过审核直接置为已通过并入队")
+    void publishDirect_draft() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("DRAFT");
+        entity.setReviewLevel("NONE");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+
+            KnowledgeDocumentResponse r = service.publishDirect(1L);
+
+            assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
+            assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
+            assertThat(r.getReviewLevel()).isEqualTo("TENANT");
+            assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+            assertThat(r.getPublishError()).isNull();
+            verify(indexTaskService).enqueue(eq(1L), eq(1), eq("upload:1"));
+        }
+    }
+
+    @Test
+    @DisplayName("publishDirect：已提交审核的文档不能绕过审核直接发布")
+    void publishDirect_pendingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("PENDING_DEPT");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+
+            assertThatThrownBy(() -> service.publishDirect(1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        }
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("publishDirect：非作者且非知识管理员禁止直接发布")
+    void publishDirect_otherOwnerForbidden() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("DRAFT");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("other");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasPermission("knowledge:admin")).thenReturn(false);
+
+            assertThatThrownBy(() -> service.publishDirect(1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        }
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    // ==================== reindex / index-status ====================
+
+    @Test
+    @DisplayName("reindex：入库失败文档可重试，重置为入库中并重新入队")
+    void reindex_failedRetry() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_FAILED);
+        entity.setPublishError("embedding 调用超时");
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        KnowledgeDocumentResponse r = service.reindex(1L);
+
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        assertThat(r.getPublishError()).isNull();
+        assertThat(r.getPublishedAt()).isNull();
+        verify(indexTaskService).enqueue(eq(1L), eq(1), eq("upload:1"));
+    }
+
+    @Test
+    @DisplayName("reindex：已发布文档可重建")
+    void reindex_publishedAllowed() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
+
+        KnowledgeDocumentResponse r = service.reindex(1L);
+
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("reindex：未通过审核拒绝")
+    void reindex_notApproved() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "PENDING", "PRIVATE", "内容");
+        entity.setReviewStatus("DRAFT");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.reindex(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("reindex：入库中重复调用拒绝，避免重复任务")
+    void reindex_buildingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.reindex(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_REVIEW_INVALID);
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("reindex：官方内置知识只读，拒绝重建索引")
+    void reindex_builtinRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "BUILTIN", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_FAILED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.reindex(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    @DisplayName("indexStatus：返回发布状态与任务重试次数")
+    void indexStatus_withTask() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        entity.setChunkCount(0);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        KnowledgeIndexTaskEntity task = new KnowledgeIndexTaskEntity();
+        task.setDocId(1L);
+        task.setAttempts(1);
+        task.setMaxAttempts(3);
+        when(indexTaskService.findLatest(1L)).thenReturn(task);
+
+        KnowledgeIndexStatusResponse r = service.indexStatus(1L);
+
+        assertThat(r.getDocId()).isEqualTo(1L);
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        assertThat(r.getChunkCount()).isZero();
+        assertThat(r.getTaskAttempts()).isEqualTo(1);
+        assertThat(r.getTaskMaxAttempts()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("indexStatus：无任务时任务字段为空")
+    void indexStatus_withoutTask() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+        when(indexTaskService.findLatest(1L)).thenReturn(null);
+
+        KnowledgeIndexStatusResponse r = service.indexStatus(1L);
+
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        assertThat(r.getTaskAttempts()).isNull();
+        assertThat(r.getTaskMaxAttempts()).isNull();
     }
 
     // ==================== update ====================
@@ -459,7 +710,7 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getVersion()).isEqualTo(1);
         assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
         assertThat(r.getOwner()).isEqualTo("ops");
-        verify(vectorStore, never()).add(anyList());
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
     }
 
     @Test
@@ -479,10 +730,55 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getReviewStatus()).isEqualTo("DRAFT");
         assertThat(r.getReviewLevel()).isEqualTo("NONE");
         assertThat(r.getVisibility()).isEqualTo("PERSONAL");
+        assertThat(r.getPublishStatus()).isEqualTo(KnowledgeDocumentService.PUBLISH_UNPUBLISHED);
         assertThat(r.getRawContent()).startsWith("全新内容");
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(vectorStore, never()).add(anyList());
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
+    }
+
+    @Test
+    @DisplayName("update：入库中的文档拒绝修改")
+    void update_buildingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "旧内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
+        req.setTitle("新标题");
+
+        assertThatThrownBy(() -> service.update(1L, req))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+        verify(documentMapper, never()).updateById(any(KnowledgeDocumentEntity.class));
+    }
+
+    @Test
+    @DisplayName("update：官方内置知识只读拒绝修改")
+    void update_builtinRejected() {
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "BUILTIN", "旧内容"));
+
+        KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
+        req.setTitle("新标题");
+
+        assertThatThrownBy(() -> service.update(1L, req))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        verify(documentMapper, never()).updateById(any(KnowledgeDocumentEntity.class));
+    }
+
+    @Test
+    @DisplayName("update：内容为空拒绝并保持原状态")
+    void update_emptyContentRejected() {
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "PRIVATE", "旧内容"));
+
+        KnowledgeDocumentUpdateRequest req = new KnowledgeDocumentUpdateRequest();
+        req.setTitle("手册");
+        req.setRawContent("   ");
+
+        assertThatThrownBy(() -> service.update(1L, req))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
     }
 
     @Test
@@ -496,6 +792,30 @@ class KnowledgeDocumentServiceTest {
     }
 
     // ==================== delete ====================
+
+    @Test
+    @DisplayName("delete：入库中的文档拒绝删除")
+    void delete_buildingRejected() {
+        KnowledgeDocumentEntity entity = doc(1L, "手册", "VERIFIED", "PRIVATE", "内容");
+        entity.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
+        when(documentMapper.selectById(1L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_INVALID);
+        verify(documentMapper, never()).deleteById(1L);
+    }
+
+    @Test
+    @DisplayName("delete：官方内置知识只读拒绝删除")
+    void delete_builtinRejected() {
+        when(documentMapper.selectById(1L)).thenReturn(doc(1L, "手册", "VERIFIED", "BUILTIN", "内容"));
+
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
+        verify(documentMapper, never()).deleteById(1L);
+    }
 
     @Test
     @DisplayName("delete：删除文档、分块与向量")
@@ -667,7 +987,7 @@ class KnowledgeDocumentServiceTest {
         // 回滚前先备份当前内容为历史快照
         verify(versionService).recordSnapshot(eq(1L), eq("当前内容"), any(), eq("ROLLBACK_BACKUP"));
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(vectorStore, never()).add(anyList());
+        verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
     }
 
@@ -680,7 +1000,7 @@ class KnowledgeDocumentServiceTest {
         assertThatThrownBy(() -> service.rollback(1L, 999L))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_VERSION_NOT_FOUND);
-        verify(documentMapper, never()).updateById(any());
+        verify(documentMapper, never()).updateById(any(KnowledgeDocumentEntity.class));
     }
 
     @Test
@@ -722,7 +1042,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewStatus()).isEqualTo("PENDING_DEPT");
             assertThat(r.getReviewLevel()).isEqualTo("DEPT");
             assertThat(r.getVisibility()).isEqualTo("DEPT");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -740,7 +1060,7 @@ class KnowledgeDocumentServiceTest {
         when(tenantService.findById("t1"))
                 .thenReturn(Optional.of(tenant("NONE", false)));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("ops");
@@ -750,7 +1070,7 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
             assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -763,12 +1083,13 @@ class KnowledgeDocumentServiceTest {
                 .thenReturn(Optional.of(tenant("DEPT_ONLY", false)));
         when(deptService.subtreeIds("t1", 5L)).thenReturn(List.of(5L));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
             sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", true));
 
@@ -776,7 +1097,25 @@ class KnowledgeDocumentServiceTest {
             assertThat(r.getReviewLevel()).isEqualTo("DEPT");
             assertThat(r.getVisibility()).isEqualTo("DEPT");
             assertThat(r.getTrustStatus()).isEqualTo("VERIFIED");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
+        }
+    }
+
+    @Test
+    @DisplayName("review：跨租户部门审核被拦截")
+    void review_deptCrossTenantForbidden() {
+        when(documentMapper.selectById(1L)).thenReturn(reviewDoc());
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("other-admin");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t2");
+            sec.when(SecurityUtils::getCurrentDeptId).thenReturn(9L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
+            sec.when(() -> SecurityUtils.hasPermission(anyString())).thenReturn(true);
+
+            assertThatThrownBy(() -> service.review(1L, reviewRequest("DEPT", true)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_OPERATION_FORBIDDEN);
         }
     }
 
@@ -794,12 +1133,13 @@ class KnowledgeDocumentServiceTest {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
             sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", true));
 
             assertThat(r.getReviewStatus()).isEqualTo("PENDING_TENANT");
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 
@@ -813,18 +1153,60 @@ class KnowledgeDocumentServiceTest {
         when(tenantService.findById("t1"))
                 .thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
         when(documentMapper.updateById(any(KnowledgeDocumentEntity.class))).thenReturn(1);
-        when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+        lenient().when(chunkMapper.insertBatch(anyList())).thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("TENANT", true));
 
             assertThat(r.getReviewStatus()).isEqualTo("APPROVED");
             assertThat(r.getReviewLevel()).isEqualTo("TENANT");
             assertThat(r.getVisibility()).isEqualTo("TENANT");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
+        }
+    }
+
+    @Test
+    @DisplayName("review：部门管理员不能执行企业审核")
+    void review_tenantRequiresTenantAdmin() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        doc.setReviewStatus("PENDING_TENANT");
+        doc.setReviewLevel("TENANT");
+        doc.setReviewedBy("dept-reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("dept-admin");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(false);
+            sec.when(() -> SecurityUtils.hasPermission(anyString())).thenReturn(false);
+
+            assertThatThrownBy(() -> service.review(1L, reviewRequest("TENANT", true)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("仅企业管理员可执行企业审核");
+        }
+    }
+
+    @Test
+    @DisplayName("review：部门审核人与企业审核人不能为同一人")
+    void review_tenantRequiresDifferentReviewer() {
+        KnowledgeDocumentEntity doc = reviewDoc();
+        doc.setReviewStatus("PENDING_TENANT");
+        doc.setReviewLevel("TENANT");
+        doc.setReviewedBy("reviewer");
+        when(documentMapper.selectById(1L)).thenReturn(doc);
+
+        try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
+            sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
+            sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
+
+            assertThatThrownBy(() -> service.review(1L, reviewRequest("TENANT", true)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("部门审核人与企业审核人不能为同一人");
         }
     }
 
@@ -842,13 +1224,14 @@ class KnowledgeDocumentServiceTest {
             sec.when(SecurityUtils::getCurrentUsername).thenReturn("reviewer");
             sec.when(SecurityUtils::getCurrentTenantId).thenReturn("t1");
             sec.when(SecurityUtils::getCurrentDeptId).thenReturn(5L);
+            sec.when(() -> SecurityUtils.hasRole(anyString())).thenReturn(true);
 
             KnowledgeDocumentResponse r = service.review(1L, reviewRequest("DEPT", false));
 
             assertThat(r.getReviewStatus()).isEqualTo("REJECTED");
             assertThat(r.getReviewLevel()).isEqualTo("NONE");
             assertThat(r.getVisibility()).isEqualTo("PERSONAL");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
         }
     }
 

@@ -1,14 +1,16 @@
 package com.example.opsaiagent.chat.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.example.opsaiagent.common.config.JsonbTypeHandler;
 import lombok.Data;
 
 import java.time.LocalDateTime;
 
 @Data
-@TableName("ops_message")
+@TableName(value = "ops_message", autoResultMap = true)
 public class MessageEntity {
 
     @TableId(type = IdType.AUTO)
@@ -35,8 +37,9 @@ public class MessageEntity {
     private String reasoning;
 
     /**
-     * 工具调用记录（JSON 字符串，仅 ASSISTANT）
+     * 工具调用记录（JSON 字符串，仅 ASSISTANT，数据库列为 jsonb）
      */
+    @TableField(value = "tool_calls", typeHandler = JsonbTypeHandler.class)
     private String toolCalls;
 
     /**

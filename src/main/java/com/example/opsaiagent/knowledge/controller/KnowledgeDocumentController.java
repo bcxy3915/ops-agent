@@ -5,6 +5,7 @@ import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentUpdateRequest;
+import com.example.opsaiagent.knowledge.dto.KnowledgeIndexStatusResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeOnlineCreateRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgePublishRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeReviewRequest;
@@ -107,6 +108,15 @@ public class KnowledgeDocumentController {
         return ApiResponse.success(documentService.publish(id, Boolean.TRUE.equals(request.getApproved())));
     }
 
+    @Operation(summary = "直接发布", description = "管理员上传后跳过审核，直接置为已通过并进入后台异步入库，需 knowledge:publish")
+    @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAnyAuthority('knowledge:publish', 'knowledge:admin')")
+    @AuditLog(operation = "PUBLISH_KNOWLEDGE_DIRECT", description = "直接发布知识文档")
+    @PostMapping("/{id}/publish-direct")
+    public ApiResponse<KnowledgeDocumentResponse> publishDirect(@PathVariable Long id) {
+        return ApiResponse.success(documentService.publishDirect(id));
+    }
+
     @Operation(summary = "提交审核", description = "作者将草稿/已驳回文档提交部门审核，需 knowledge:write")
     @RateLimit(key = "knowledgeWrite", limit = 20, period = 60, dimension = RateLimit.Dimension.USER)
     @PreAuthorize("hasAuthority('knowledge:write')")
@@ -135,6 +145,22 @@ public class KnowledgeDocumentController {
     public ApiResponse<KnowledgeDocumentResponse> update(@PathVariable Long id,
                                                          @Valid @RequestBody KnowledgeDocumentUpdateRequest request) {
         return ApiResponse.success(documentService.update(id, request));
+    }
+
+    @Operation(summary = "查询文档索引状态", description = "轻量返回 publishStatus / publishError / 任务重试次数，供前端轮询入库进度")
+    @PreAuthorize("hasAuthority('knowledge:read')")
+    @GetMapping("/{id}/index-status")
+    public ApiResponse<KnowledgeIndexStatusResponse> indexStatus(@PathVariable Long id) {
+        return ApiResponse.success(documentService.indexStatus(id));
+    }
+
+    @Operation(summary = "重建文档索引", description = "仅已通过审核且已发布/入库失败的文档可重试，不改变审核结论")
+    @RateLimit(key = "knowledgeReview", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
+    @PreAuthorize("hasAnyAuthority('knowledge:write', 'knowledge:review')")
+    @AuditLog(operation = "REINDEX_KNOWLEDGE", description = "重建知识文档索引")
+    @PostMapping("/{id}/reindex")
+    public ApiResponse<KnowledgeDocumentResponse> reindex(@PathVariable Long id) {
+        return ApiResponse.success(documentService.reindex(id));
     }
 
     @Operation(summary = "删除知识文档", description = "作者或知识管理员删除文档及其分块与向量，需 knowledge:write")

@@ -769,8 +769,19 @@ CREATE TABLE IF NOT EXISTS knowledge_document (
     reviewed_by VARCHAR(64),
     reviewed_at TIMESTAMP,
     review_note VARCHAR(500),
+    dept_reviewed_by VARCHAR(64),
+    dept_reviewed_at TIMESTAMP,
+    publish_status VARCHAR(16) DEFAULT 'UNPUBLISHED' NOT NULL,
+    publish_error text,
+    published_at TIMESTAMP,
     CONSTRAINT knowledge_document_pkey PRIMARY KEY (id)
 );
+
+-- 存量库升级：索引发布状态字段（幂等，已存在时跳过）
+ALTER TABLE knowledge_document
+    ADD COLUMN IF NOT EXISTS publish_status VARCHAR(16) DEFAULT 'UNPUBLISHED' NOT NULL,
+    ADD COLUMN IF NOT EXISTS publish_error text,
+    ADD COLUMN IF NOT EXISTS published_at TIMESTAMP;
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc_layer ON knowledge_document USING btree (layer);
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc_source ON knowledge_document USING btree (source);
@@ -778,6 +789,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_doc_status ON knowledge_document USING 
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc_tenant_dept ON knowledge_document USING btree (tenant_id, dept_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc_title ON knowledge_document USING btree (title);
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc_visibility ON knowledge_document USING btree (tenant_id, visibility, review_status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_doc_publish ON knowledge_document USING btree (publish_status, tenant_id);
 
 COMMENT ON TABLE knowledge_document IS '知识文档表；保存文档内容、可见性与审核状态';
 COMMENT ON COLUMN knowledge_document.id IS '主键 ID';
@@ -811,6 +823,33 @@ COMMENT ON COLUMN knowledge_document.review_level IS '当前审核层级：NONE/
 COMMENT ON COLUMN knowledge_document.reviewed_by IS '最近审核人';
 COMMENT ON COLUMN knowledge_document.reviewed_at IS '最近审核时间';
 COMMENT ON COLUMN knowledge_document.review_note IS '审核意见/驳回原因';
+COMMENT ON COLUMN knowledge_document.dept_reviewed_by IS '部门审核人；企业审核后仍保留';
+COMMENT ON COLUMN knowledge_document.dept_reviewed_at IS '部门审核时间；企业审核后仍保留';
+COMMENT ON COLUMN knowledge_document.publish_status IS '索引发布状态：UNPUBLISHED/BUILDING/FAILED/PUBLISHED';
+COMMENT ON COLUMN knowledge_document.publish_error IS '最近一次索引失败原因';
+COMMENT ON COLUMN knowledge_document.published_at IS '索引发布完成时间';
+
+-- 存量数据迁移（幂等）：已通过审核的历史文档视为已发布，保持既有查询语义
+UPDATE knowledge_document
+SET publish_status = 'PUBLISHED',
+    published_at = COALESCE(published_at, reviewed_at, last_review_at, updated_at)
+WHERE trust_status = 'VERIFIED'
+  AND publish_status = 'UNPUBLISHED';
+
+-- 存量向量回填（幂等）：历史向量缺少 reviewStatus 时按文档当前审核状态回填，
+-- 避免检索新增 reviewStatus 过滤后丢失召回。vector_store 由 Spring AI 启动时创建，
+-- 首次初始化时可能尚不存在，故先判断表是否存在。
+DO $$
+BEGIN
+    IF to_regclass('vector_store') IS NOT NULL THEN
+        UPDATE vector_store v
+        SET metadata = v.metadata::jsonb
+                || jsonb_build_object('reviewStatus', d.review_status)
+        FROM knowledge_document d
+        WHERE v.metadata->>'reviewStatus' IS NULL
+          AND v.metadata->>'docId' = d.id::text;
+    END IF;
+END $$;
 
 -- ------------------------------------------------------------
 -- knowledge_document_version：知识文档版本表；保存文档历史版本快照
@@ -871,6 +910,52 @@ COMMENT ON COLUMN knowledge_chunk.vector_id IS '向量 ID';
 COMMENT ON COLUMN knowledge_chunk.created_at IS '创建时间';
 COMMENT ON COLUMN knowledge_chunk.tenant_id IS '所属租户 ID';
 COMMENT ON COLUMN knowledge_chunk.dept_id IS '所属部门 ID';
+
+-- ------------------------------------------------------------
+-- knowledge_index_task：知识索引任务表；审核/确认只写任务，
+-- 由后台 worker 在独立事务中完成分块与向量化，避免长事务
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS knowledge_index_task (
+    id BIGSERIAL,
+    doc_id BIGINT NOT NULL,
+    doc_version INTEGER DEFAULT 1 NOT NULL,
+    vector_source VARCHAR(128) NOT NULL,
+    task_type VARCHAR(16) DEFAULT 'INDEX' NOT NULL,
+    status VARCHAR(16) DEFAULT 'PENDING' NOT NULL,
+    attempts INTEGER DEFAULT 0 NOT NULL,
+    max_attempts INTEGER DEFAULT 3 NOT NULL,
+    error_msg text,
+    created_at TIMESTAMP DEFAULT NOW(),
+    next_retry_at TIMESTAMP DEFAULT NOW(),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    lease_until TIMESTAMP,
+    CONSTRAINT knowledge_index_task_pkey PRIMARY KEY (id)
+);
+
+-- 存量升级：新增失败退避时间
+ALTER TABLE knowledge_index_task
+    ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP DEFAULT NOW();
+
+-- 同一文档同时只允许一条未完成任务
+CREATE UNIQUE INDEX IF NOT EXISTS uk_knowledge_index_task_active_doc
+    ON knowledge_index_task (doc_id) WHERE status IN ('PENDING', 'RUNNING');
+CREATE INDEX IF NOT EXISTS idx_knowledge_index_task_status
+    ON knowledge_index_task USING btree (status, created_at);
+
+COMMENT ON TABLE knowledge_index_task IS '知识索引任务表；异步分块与向量化';
+COMMENT ON COLUMN knowledge_index_task.doc_id IS '文档 ID';
+COMMENT ON COLUMN knowledge_index_task.doc_version IS '入队时的文档版本，用于幂等校验';
+COMMENT ON COLUMN knowledge_index_task.vector_source IS '向量 source 标识，用于幂等重建与删除';
+COMMENT ON COLUMN knowledge_index_task.task_type IS '任务类型：INDEX';
+COMMENT ON COLUMN knowledge_index_task.status IS '任务状态：PENDING/RUNNING/SUCCESS/FAILED/SKIPPED';
+COMMENT ON COLUMN knowledge_index_task.attempts IS '已尝试次数';
+COMMENT ON COLUMN knowledge_index_task.max_attempts IS '最大尝试次数';
+COMMENT ON COLUMN knowledge_index_task.error_msg IS '最近一次失败原因';
+COMMENT ON COLUMN knowledge_index_task.created_at IS '创建时间';
+COMMENT ON COLUMN knowledge_index_task.started_at IS '开始执行时间';
+COMMENT ON COLUMN knowledge_index_task.finished_at IS '结束时间';
+COMMENT ON COLUMN knowledge_index_task.lease_until IS '执行租约到期时间，超时由调度回收';
 
 -- ------------------------------------------------------------
 -- knowledge_case：知识案例表；保存故障案例与处置经验

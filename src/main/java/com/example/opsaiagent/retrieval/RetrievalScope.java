@@ -63,6 +63,10 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
         if (dataScope.deptId() != null) {
             List<Long> visible = dataScope.visibleDeptIds();
             deptIds = visible == null ? Set.of() : new LinkedHashSet<>(visible);
+        } else if (!SecurityUtils.hasRole("TENANT_ADMIN")
+                && !SecurityUtils.hasPermission("knowledge:admin")) {
+            // 无部门的普通用户不能把 null 解释成“同租户全部部门”，与列表口径保持一致
+            deptIds = Set.of();
         }
         return new RetrievalScope(tenantId, deptIds, userId);
     }
@@ -114,21 +118,26 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
     /**
      * 生成 Spring AI 向量检索 filterExpression。
      *
+     * 所有分支都必须带 reviewStatus == 'APPROVED'：审核结论是检索可见性的硬条件，
+     * 草稿 / 待审核 / 已驳回内容即使残留向量也不得命中。
+     *
      * @return filterExpression；无租户时仅 PUBLIC
      */
     public String filterExpression() {
         if (!StringUtils.hasText(tenantId)) {
-            return "visibility == '" + VISIBILITY_PUBLIC + "'";
+            return "visibility == '" + VISIBILITY_PUBLIC + "' && " + approvedClause();
         }
         List<String> clauses = new ArrayList<>();
-        clauses.add("visibility == '" + VISIBILITY_PUBLIC + "'");
-        clauses.add("(visibility == '" + VISIBILITY_TENANT + "' && tenantId == '" + escape(tenantId) + "')");
+        clauses.add("(visibility == '" + VISIBILITY_PUBLIC + "' && " + approvedClause() + ")");
+        clauses.add("(visibility == '" + VISIBILITY_TENANT + "' && tenantId == '"
+                + escape(tenantId) + "' && " + approvedClause() + ")");
 
         // null 表示同租户全部部门；空集合表示无部门可见，不生成 DEPT 分支
         if (deptIds == null || !deptIds.isEmpty()) {
             StringBuilder deptClause = new StringBuilder()
                     .append("(visibility == '").append(VISIBILITY_DEPT).append("'")
-                    .append(" && tenantId == '").append(escape(tenantId)).append("'");
+                    .append(" && tenantId == '").append(escape(tenantId)).append("'")
+                    .append(" && ").append(approvedClause());
             if (deptIds != null) {
                 deptClause.append(" && (");
                 int i = 0;
@@ -145,10 +154,16 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
         }
 
         if (StringUtils.hasText(userId)) {
+            // 个人知识必须限定租户：用户名只在租户内唯一，跨租户可能重名
             clauses.add("(visibility == '" + VISIBILITY_PERSONAL
-                    + "' && owner == '" + escape(userId) + "')");
+                    + "' && tenantId == '" + escape(tenantId)
+                    + "' && owner == '" + escape(userId) + "' && " + approvedClause() + ")");
         }
         return String.join(" || ", clauses);
+    }
+
+    private String approvedClause() {
+        return "reviewStatus == '" + REVIEW_APPROVED + "'";
     }
 
     private boolean isApproved(Map<String, Object> md) {

@@ -6,8 +6,10 @@ import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.alert.entity.AlertReadEntity;
 import com.example.opsaiagent.alert.mapper.AlertEventMapper;
 import com.example.opsaiagent.alert.mapper.AlertReadMapper;
+import com.example.opsaiagent.security.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -38,7 +40,7 @@ public class AlertReadService {
         if (userId == null || userId.isBlank()) {
             return;
         }
-        readMapper.insertIgnore(userId, alertEventId);
+        readMapper.insertIgnore(currentTenantId(), userId, alertEventId);
     }
 
     /**
@@ -48,8 +50,9 @@ public class AlertReadService {
         if (userId == null || userId.isBlank() || ids == null || ids.isEmpty()) {
             return;
         }
+        String tenantId = currentTenantId();
         for (Long id : ids) {
-            readMapper.insertIgnore(userId, id);
+            readMapper.insertIgnore(tenantId, userId, id);
         }
     }
 
@@ -62,6 +65,7 @@ public class AlertReadService {
         }
         List<AlertEventEntity> pending = eventMapper.selectList(
                 new LambdaQueryWrapper<AlertEventEntity>()
+                        .eq(AlertEventEntity::getTenantId, currentTenantId())
                         .in(AlertEventEntity::getStatus,
                                 AlertEventStatus.FIRING.name(),
                                 AlertEventStatus.ACKNOWLEDGED.name(),
@@ -91,6 +95,7 @@ public class AlertReadService {
         }
         List<AlertReadEntity> rows = readMapper.selectList(
                 new LambdaQueryWrapper<AlertReadEntity>()
+                        .eq(AlertReadEntity::getTenantId, currentTenantId())
                         .eq(AlertReadEntity::getUserId, userId)
                         .in(AlertReadEntity::getAlertEventId, eventIds));
         for (AlertReadEntity row : rows) {
@@ -112,5 +117,11 @@ public class AlertReadService {
             }
         }
         return result;
+    }
+
+    /** 当前租户（照项目惯例：登录上下文取，空时兜底引导租户） */
+    private String currentTenantId() {
+        String tenantId = SecurityUtils.getCurrentTenantId();
+        return StringUtils.hasText(tenantId) ? tenantId : "t-default";
     }
 }

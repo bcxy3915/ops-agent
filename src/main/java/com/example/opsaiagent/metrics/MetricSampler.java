@@ -156,6 +156,7 @@ public class MetricSampler {
         appendPoint(name, "threadCount", now, threadCount);
         appendPoint(name, "gcPause", now, gcPause);
         appendPoint(name, "hikariActive", now, hikariActiveVal);
+        appendPoint(name, "httpCount", now, httpCount);
     }
 
     /**

@@ -12,10 +12,8 @@ import com.example.opsaiagent.knowledge.dto.CaseReviseRequest;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseDetailResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseSummaryResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeCaseEntity;
-import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeCaseMapper;
-import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
 import com.example.opsaiagent.snapshot.mapper.FailureSnapshotMapper;
@@ -28,7 +26,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.vectorstore.VectorStore;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,7 +33,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -61,9 +58,7 @@ class KnowledgeCaseServiceTest {
     @Mock
     private KnowledgeDocumentMapper documentMapper;
     @Mock
-    private KnowledgeChunkMapper chunkMapper;
-    @Mock
-    private VectorStore vectorStore;
+    private KnowledgeIndexTaskService indexTaskService;
 
     private KnowledgeCaseService service;
 
@@ -72,8 +67,8 @@ class KnowledgeCaseServiceTest {
     @BeforeEach
     void setUp() {
         service = new KnowledgeCaseService(caseMapper, diagnosisRecordMapper, alertEventMapper,
-                failureSnapshotMapper, documentMapper, chunkMapper, vectorStore, objectMapper,
-                new KnowledgeQueryScope(null));
+                failureSnapshotMapper, documentMapper, indexTaskService,
+                objectMapper, new KnowledgeQueryScope(null));
     }
 
     private KnowledgeCaseEntity pendingCase() {
@@ -282,7 +277,7 @@ class KnowledgeCaseServiceTest {
             KnowledgeCaseEntity e = longPendingCase();
             e.setRealRootCause(null);
             when(caseMapper.selectById(1L)).thenReturn(e);
-            when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             KnowledgeCaseDetailResponse r = service.confirm(1L);
@@ -296,8 +291,7 @@ class KnowledgeCaseServiceTest {
             assertThat(e.getVisibility()).isEqualTo("TENANT");
             verify(caseMapper).updateById(e);
             verify(documentMapper).insert(any(KnowledgeDocumentEntity.class));
-            verify(chunkMapper, org.mockito.Mockito.atLeastOnce()).insert(any(KnowledgeChunkEntity.class));
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(any(), any(), anyString());
         }
 
         @Test
@@ -306,7 +300,7 @@ class KnowledgeCaseServiceTest {
             KnowledgeCaseEntity e = longPendingCase();
             e.setRealRootCause("人工确认的根因");
             when(caseMapper.selectById(1L)).thenReturn(e);
-            when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             service.confirm(1L);
@@ -324,12 +318,13 @@ class KnowledgeCaseServiceTest {
             e.setRealRootCause("");
             e.setEffectiveAction("");
             when(caseMapper.selectById(1L)).thenReturn(e);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
 
             KnowledgeCaseDetailResponse r = service.confirm(1L);
 
             assertThat(e.getStatus()).isEqualTo("CONFIRMED");
             verify(documentMapper, never()).insert(any(KnowledgeDocumentEntity.class));
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(any(), any(), anyString());
         }
 
         @Test
@@ -343,7 +338,7 @@ class KnowledgeCaseServiceTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("仅待确认案例可操作");
             verify(documentMapper, never()).insert(any(KnowledgeDocumentEntity.class));
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(any(), any(), anyString());
         }
 
         @Test
@@ -366,7 +361,7 @@ class KnowledgeCaseServiceTest {
         void revise_ok() {
             KnowledgeCaseEntity e = longPendingCase();
             when(caseMapper.selectById(1L)).thenReturn(e);
-            when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             CaseReviseRequest req = new CaseReviseRequest();
@@ -380,7 +375,7 @@ class KnowledgeCaseServiceTest {
             assertThat(e.getEffectiveAction()).isEqualTo("修正后的处置");
             assertThat(e.getMaskedStatus()).isEqualTo("PARTIAL");
             assertThat(e.getStatus()).isEqualTo("CONFIRMED");
-            verify(vectorStore).add(anyList());
+            verify(indexTaskService).enqueue(any(), any(), anyString());
         }
 
         @Test
@@ -388,7 +383,7 @@ class KnowledgeCaseServiceTest {
         void revise_noChanges() {
             KnowledgeCaseEntity e = pendingCase();
             when(caseMapper.selectById(1L)).thenReturn(e);
-            when(chunkMapper.insert(any(KnowledgeChunkEntity.class))).thenReturn(1);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             service.revise(1L, new CaseReviseRequest());
@@ -408,7 +403,7 @@ class KnowledgeCaseServiceTest {
             assertThatThrownBy(() -> service.revise(1L, req))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("无效的脱敏状态");
-            verify(vectorStore, never()).add(anyList());
+            verify(indexTaskService, never()).enqueue(any(), any(), anyString());
         }
 
         @Test
@@ -504,7 +499,7 @@ class KnowledgeCaseServiceTest {
             int generated = service.generateCandidates(10);
 
             assertThat(generated).isZero();
-            verify(caseMapper, never()).insert(any());
+            verify(caseMapper, never()).insert(any(KnowledgeCaseEntity.class));
         }
 
         @Test
@@ -512,7 +507,7 @@ class KnowledgeCaseServiceTest {
         void generate_noRecords() {
             when(diagnosisRecordMapper.selectList(any())).thenReturn(List.of());
             assertThat(service.generateCandidates(20)).isZero();
-            verify(caseMapper, never()).insert(any());
+            verify(caseMapper, never()).insert(any(KnowledgeCaseEntity.class));
         }
 
         @Test

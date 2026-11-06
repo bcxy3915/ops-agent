@@ -64,6 +64,21 @@ class KnowledgeQueryScopeTest {
 
             assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_DEPT", 5L, "u2"))).isTrue();
             assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_DEPT", 9L, "u2"))).isFalse();
+            // 部门管理员不能看到待企业审核文档
+            assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
+            assertThat(scope.canAccess(doc("t2", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("企业管理员：可见待企业审核文档")
+    void tenantReviewer_canSeePendingTenant() {
+        UserContext.set(new UserContext.CurrentUser("u1", "reviewer",
+                Set.of("TENANT_ADMIN"), Set.of("knowledge:review")));
+        try {
+            KnowledgeQueryScope.Scope scope = new KnowledgeQueryScope(null).user("t1", Set.of(), "u1");
             assertThat(scope.canAccess(doc("t1", "DEPT", "PENDING_TENANT", null, "u2"))).isTrue();
             assertThat(scope.canAccess(doc("t2", "DEPT", "PENDING_TENANT", null, "u2"))).isFalse();
         } finally {
@@ -81,6 +96,17 @@ class KnowledgeQueryScopeTest {
         assertThat(new KnowledgeQueryScope(null).tenant("t1").canAccess(conflict)).isTrue();
         assertThat(new KnowledgeQueryScope(null).user("t1", Set.of(5L), "u1").canAccess(conflict)).isTrue();
         assertThat(new KnowledgeQueryScope(null).user("t1", Set.of(6L), "u1").canAccess(conflict)).isFalse();
+    }
+
+    @Test
+    @DisplayName("平台管理员：仅可见平台公共知识，不穿透企业私有文档")
+    void platformAdmin_onlyPublicKnowledge() {
+        KnowledgeQueryScope.Scope scope = new KnowledgeQueryScope(null).platform();
+
+        assertThat(scope.canAccess(doc("0", "PUBLIC", "APPROVED", null, "system"))).isTrue();
+        assertThat(scope.canAccess(doc("t1", "PERSONAL", "APPROVED", 5L, "u1"))).isFalse();
+        assertThat(scope.canAccess(doc("t1", "TENANT", "APPROVED", null, "u1"))).isFalse();
+        assertThat(scope.canAccess(doc("t1", "DEPT", "APPROVED", 5L, "u1"))).isFalse();
     }
 
     private KnowledgeDocumentEntity doc(String tenantId, String visibility,

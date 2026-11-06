@@ -4,6 +4,10 @@ server:
 spring:
   profiles:
     active: local
+  # Spring Boot 4 默认 Jackson 3；项目 DTO/脱敏序列化器仍使用 Jackson 2
+  http:
+    converters:
+      preferred-json-mapper: jackson2
   application:
     name: ops-agent-core
   mvc:
@@ -12,8 +16,9 @@ spring:
 
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 25MB
+      # 与 ops-agent.knowledge.upload.max-size-mb 保持单一配置源；request 略大于 file 以容纳表单字段
+      max-file-size: ${ops-agent.knowledge.upload.max-size-mb:50}MB
+      max-request-size: ${ops-agent.knowledge.upload.max-request-mb:55}MB
 
   mail:
     # 邮件通知渠道的 SMTP 配置（T09/T11），通过环境变量注入
@@ -36,15 +41,14 @@ spring:
       api-key: ${AI_API_KEY:}
       base-url: https://api.deepseek.com
       chat:
-        options:
-          model: deepseek-chat
-          temperature: 0.7
-          timeout: 60s # LLM 调用超时（第三方容错）
+        model: deepseek-chat
+        temperature: 0.7
+        timeout: 60s # LLM 调用超时（第三方容错）
       embedding:
-        base-url: https://dashscope.aliyuncs.com/compatible-mode
+        # OpenAI SDK 会在 base-url 后追加 /embeddings，百炼兼容模式必须带 /v1，否则 404
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
         api-key: ${DASHSCOPE_API_KEY:}
-        options:
-          model: text-embedding-v3
+        model: text-embedding-v3
     vectorstore:
       pgvector:
         initialize-schema: true
@@ -73,6 +77,12 @@ ops-agent:
     rerank:
       enabled: false
       model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank
+    # 同文档竞争治理（设计文档 §10.3.10）：top-K 内单文档配额 + 邻近块合并，
+    # 防止同主题文档霸占 top-K 挤出期望文档；回退 = enabled: false
+    diversity:
+      enabled: true
+      max-per-doc: 3
+      merge-adjacent: true
   security:
     jwt:
       secret: ${JWT_SECRET:}
@@ -86,7 +96,42 @@ ops-agent:
   # 知识库
   knowledge:
     upload:
-      max-size-mb: 20
+      # 上传文件大小上限（multipart max-file-size 引用同一配置，勿单独修改）
+      max-size-mb: 50
+      # multipart max-request-size，需略大于 max-size-mb 以容纳表单字段
+      max-request-mb: 55
+    ingest:
+      # 解析后文本字符上限（超出显式拒绝，避免 maxNumChunks 静默截断）
+      max-chars: 10000000
+    # 文本切分策略（A/B 评测终局结论见 docs/design/text-split/文本切分策略-技术设计与评估-20261031.md §10.3.9）
+    split:
+      # 未命中类型路由时的默认策略（recursive / token）
+      default-strategy: recursive
+      # 目标块 token 预算（CL100K 近似，text-embedding-v3 实际分词略有偏差）
+      chunk-size-tokens: 480
+      # 相邻块重叠 token 数（约 17%，落在句边界）
+      overlap-tokens: 80
+      # 尾块最小字符数，不足并入前块
+      min-chunk-chars: 100
+      # 单块 token 硬上限
+      max-chunk-tokens: 800
+      # embedding 文本携带「标题｜章节」上下文头（展示文本不受影响）
+      keep-heading-path: true
+      # 围栏代码块与表格作为原子单元不被切断
+      preserve-code-block: true
+      markdown:
+        # MARKDOWN 类型策略覆盖（markdown-structural / recursive / token）
+        strategy: markdown-structural
+        # headingPath 最深采集层级
+        max-heading-level: 3
+    # 异步索引任务：审核/确认只写任务，分块与向量化由后台 worker 在独立事务中执行
+    index:
+      # 调度轮询间隔（毫秒）
+      poll-interval-ms: 5000
+      # 每轮最多处理任务数
+      max-per-round: 3
+      # 任务租约时长（分钟），需覆盖大文档完整索引耗时，过短会导致多实例重复执行
+      lease-minutes: 30
 
   crypto:
     # 密钥从 application-local.yml 或环境变量注入，这里只给默认值占位
@@ -150,3 +195,10 @@ management:
     # 未配置 SMTP 环境变量时，禁用邮件健康检查，避免启动时尝试连接报错
     mail:
       enabled: false
+
+# 日志级别：默认 INFO，可通过环境变量 LOG_LEVEL 统一调整
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+    # 业务包与第三方客户端保持同一默认级别，便于按包单独调试（如 DEBUG）
+    com.example.opsaiagent: ${LOG_LEVEL:INFO}

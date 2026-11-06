@@ -58,7 +58,6 @@ VALUES
     ('dept:read',           '部门查看',      'org'),
     ('user:manage',         '用户管理',      'org'),
     ('user:read',           '用户查看',      'org'),
-    ('role:manage',         '角色管理',      'org'),
     ('knowledge:read',      '知识查看',      'knowledge'),
     ('knowledge:write',     '知识上传/编辑', 'knowledge'),
     ('knowledge:review',    '知识审核',      'knowledge'),
@@ -86,7 +85,6 @@ SELECT r.id, p.id
 FROM (VALUES
     ('PLATFORM_ADMIN', 'tenant:manage'),
     ('PLATFORM_ADMIN', 'tenant:config'),
-    ('PLATFORM_ADMIN', 'role:manage'),
     ('PLATFORM_ADMIN', 'knowledge:read'),
     ('PLATFORM_ADMIN', 'service:read'),
     ('PLATFORM_ADMIN', 'alert:read'),

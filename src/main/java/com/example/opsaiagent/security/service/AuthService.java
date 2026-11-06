@@ -7,6 +7,8 @@ import com.example.opsaiagent.rbac.entity.UserIdentityEntity;
 import com.example.opsaiagent.rbac.service.PermissionService;
 import com.example.opsaiagent.rbac.service.TenantService;
 import com.example.opsaiagent.rbac.service.UserIdentityService;
+import com.example.opsaiagent.rbac.context.DeptContext;
+import com.example.opsaiagent.rbac.context.TenantContext;
 import com.example.opsaiagent.security.dto.LoginRequest;
 import com.example.opsaiagent.security.dto.LoginResponse;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
@@ -65,6 +67,10 @@ public class AuthService {
         if (user.getTenantId() != null && !tenantService.isActive(user.getTenantId())) {
             throw new BusinessException(ErrorCode.INVALID_PARAMETER, "所属企业已停用");
         }
+
+        // 登录接口没有 JWT 过滤器写入上下文，这里补写，供审计日志记录正确的租户/部门
+        TenantContext.set(user.getTenantId());
+        DeptContext.set(user.getDeptId());
 
         UserAuthorities authorities = user.getId() == null
                 ? UserAuthorities.empty()

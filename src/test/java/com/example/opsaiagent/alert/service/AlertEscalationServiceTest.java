@@ -12,6 +12,7 @@ import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.notification.service.NotificationCenter;
 import com.example.opsaiagent.oncall.service.OncallMemberService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -35,7 +39,8 @@ import static org.mockito.Mockito.when;
  * AlertEscalationService 单元测试
  * 覆盖（P0 规格 4）：
  * - 扫描时先执行静默到期恢复
- * - FIRING + UNACKNOWLEDGED 到期升级：更新事件级别 + 写升级记录 + 审计
+ * - FIRING + UNACKNOWLEDGED 到期升级：更新事件级别 + 写升级记录 + 审计 + 发送升级通知
+ * - 升级通知失败不影响升级主流程
  * - 未到期不升级 / 已升级级别跳过
  * - ACK + UNRESOLVED 以 acknowledgedAt 为基准
  * - 无启用规则 / 无级别 / 无待处理事件路径跳过
@@ -58,6 +63,8 @@ class AlertEscalationServiceTest {
     private AuditLogService auditLogService;
     @Mock
     private OncallMemberService oncallMemberService;
+    @Mock
+    private NotificationCenter notificationCenter;
 
     @InjectMocks
     private AlertEscalationService service;
@@ -157,6 +164,29 @@ class AlertEscalationServiceTest {
         assertThat(audit.getOperation()).isEqualTo(AuditOperation.ESCALATE_ALERT_EVENT.name());
         assertThat(audit.getTarget()).isEqualTo("alert_event:10");
         assertThat(audit.getResult()).contains("升级到级别 1");
+
+        // 升级通知（P1 值班联动：按级别发通知）
+        verify(notificationCenter).sendOnEvent(e, null, 1);
+    }
+
+    @Test
+    @DisplayName("scanAndEscalate：升级通知失败不影响升级主流程")
+    void scan_notificationFailureDoesNotBreakEscalation() {
+        when(ruleMapper.selectList(any(Wrapper.class))).thenReturn(List.of(rule(1L)));
+        when(levelMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(level(1, 300, "UNACKNOWLEDGED", "OPERATOR")));
+        AlertEventEntity e = event(18L, 1L, "FIRING", LocalDateTime.now().minusMinutes(10));
+        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(List.of(e));
+        doThrow(new RuntimeException("smtp down")).when(notificationCenter)
+                .sendOnEvent(any(), isNull(), anyInt());
+
+        service.scanAndEscalate();
+
+        // 升级本身仍完成：事件级别更新 + 升级记录 + 审计
+        assertThat(e.getEscalationLevel()).isEqualTo(1);
+        verify(eventMapper).updateById(e);
+        verify(escalationMapper).insert(any(AlertEscalationRecordEntity.class));
+        verify(auditLogService).save(any(AuditLogEntity.class));
     }
 
     @Test

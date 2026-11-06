@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -185,6 +186,9 @@ public class DiagnosisService {
         return chatClient.prompt()
                 .system(buildSystemPrompt(kbContext))
                 .user(userMessage)
+                // 全局 ChatClient 默认挂了聊天记忆 advisor，必须提供会话 ID；
+                // 诊断为单轮任务，用唯一 ID 避免混入其他会话历史
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, "diagnosis-" + System.nanoTime()))
                 .call()
                 .entity(DiagnosisResult.class);
     }
@@ -451,6 +455,8 @@ public class DiagnosisService {
         return chatClient.prompt()
                 .system("你是一名资深的 SRE 运维专家，基于给定的故障快照与已有诊断回答用户的追问。直接输出答案，不要输出 JSON。")
                 .user(user.toString())
+                // 同上：追问上下文已完整拼在消息里，用唯一会话 ID 走单轮
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, "followup-" + System.nanoTime()))
                 .call()
                 .content();
     }

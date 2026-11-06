@@ -13,6 +13,7 @@ import com.example.opsaiagent.alert.mapper.AlertRuleMapper;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.enums.AuditOperation;
 import com.example.opsaiagent.audit.service.AuditLogService;
+import com.example.opsaiagent.notification.service.NotificationCenter;
 import com.example.opsaiagent.oncall.service.OncallMemberService;
 import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ import java.util.Map;
  * 告警升级服务（P0 决策 3 / 规格 4）
  * - 每 30s 扫描 FIRING / ACKNOWLEDGED 事件，按规则多级升级路径自动升级
  * - 升级记录写 alert_escalation + 审计日志
+ * - 升级后按级别通知值班人（L1→备值班、L2→ADMIN，P1 值班联动）
  * - 顺带执行静默到期自动恢复（规格 2.1）
  */
 @Slf4j
@@ -45,6 +47,7 @@ public class AlertEscalationService {
     private final AlertEventService eventService;
     private final AuditLogService auditLogService;
     private final OncallMemberService oncallMemberService;
+    private final NotificationCenter notificationCenter;
 
     /**
      * 定时扫描：升级 + 静默到期恢复（规格 4.4：30s）
@@ -168,6 +171,13 @@ public class AlertEscalationService {
                 + "，收件人 " + recipientDesc);
         audit.setCreatedAt(now);
         auditLogService.save(audit);
+
+        // 升级后通知：按级别解析收件人（L1→备值班、L2→ADMIN），失败不影响升级主流程（项目惯例）
+        try {
+            notificationCenter.sendOnEvent(event, null, level.getLevelNo());
+        } catch (Exception e) {
+            log.warn("升级通知发送失败 eventId={} level={}: {}", event.getId(), level.getLevelNo(), e.getMessage());
+        }
 
         log.info("告警事件 {} 自动升级到级别 {}（{}），收件人 {}", event.getId(), level.getLevelNo(), reason, recipientDesc);
     }

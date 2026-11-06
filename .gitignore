@@ -47,4 +47,5 @@ application-local.yml
 
 /docs/design
 /docs/seed
+/docs/version
 .runtime/
