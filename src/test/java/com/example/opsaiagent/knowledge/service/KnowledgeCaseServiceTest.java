@@ -277,6 +277,7 @@ class KnowledgeCaseServiceTest {
             KnowledgeCaseEntity e = longPendingCase();
             e.setRealRootCause(null);
             when(caseMapper.selectById(1L)).thenReturn(e);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             KnowledgeCaseDetailResponse r = service.confirm(1L);
@@ -299,6 +300,7 @@ class KnowledgeCaseServiceTest {
             KnowledgeCaseEntity e = longPendingCase();
             e.setRealRootCause("人工确认的根因");
             when(caseMapper.selectById(1L)).thenReturn(e);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             service.confirm(1L);
@@ -316,6 +318,7 @@ class KnowledgeCaseServiceTest {
             e.setRealRootCause("");
             e.setEffectiveAction("");
             when(caseMapper.selectById(1L)).thenReturn(e);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
 
             KnowledgeCaseDetailResponse r = service.confirm(1L);
 
@@ -358,6 +361,7 @@ class KnowledgeCaseServiceTest {
         void revise_ok() {
             KnowledgeCaseEntity e = longPendingCase();
             when(caseMapper.selectById(1L)).thenReturn(e);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             CaseReviseRequest req = new CaseReviseRequest();
@@ -379,6 +383,7 @@ class KnowledgeCaseServiceTest {
         void revise_noChanges() {
             KnowledgeCaseEntity e = pendingCase();
             when(caseMapper.selectById(1L)).thenReturn(e);
+            when(alertEventMapper.selectById(100L)).thenReturn(alert());
             when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenReturn(1);
 
             service.revise(1L, new CaseReviseRequest());

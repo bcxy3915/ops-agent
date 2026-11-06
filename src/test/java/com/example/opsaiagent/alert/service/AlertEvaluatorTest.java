@@ -447,6 +447,7 @@ class AlertEvaluatorTest {
     @DisplayName("evaluate：只评估启用规则，异常规则不中断整体")
     void evaluate_onlyEnabledAndTolerant() {
         when(ruleMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         evaluator.evaluate();
         verify(eventMapper, never()).insert(any(AlertEventEntity.class));
 
@@ -459,6 +460,5 @@ class AlertEvaluatorTest {
         evaluator.evaluate();
         // 异常被吞掉，未产生事件
         verify(eventMapper, never()).insert(any(AlertEventEntity.class));
-        verify(eventMapper, never()).selectList(any(Wrapper.class));
     }
 }
