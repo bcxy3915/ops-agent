@@ -3,11 +3,16 @@ package com.example.opsaiagent.security.controller;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.context.DeptContext;
+import com.example.opsaiagent.rbac.context.TenantContext;
+import com.example.opsaiagent.rbac.context.UserContext;
 import com.example.opsaiagent.rbac.service.DeptService;
 import com.example.opsaiagent.security.dto.UserCreateRequest;
 import com.example.opsaiagent.security.dto.UserResponse;
 import com.example.opsaiagent.security.entity.OpsUserEntity;
 import com.example.opsaiagent.security.service.OpsUserService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +46,23 @@ class UserControllerTest {
 
     @InjectMocks
     private UserController controller;
+
+    /**
+     * 隔离 RBAC ThreadLocal，避免 CI 上被其他测试的租户上下文污染。
+     */
+    @BeforeEach
+    void setUp() {
+        TenantContext.clear();
+        DeptContext.clear();
+        UserContext.clear();
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
+        DeptContext.clear();
+        UserContext.clear();
+    }
 
     private OpsUserEntity user(String username) {
         OpsUserEntity u = new OpsUserEntity();
