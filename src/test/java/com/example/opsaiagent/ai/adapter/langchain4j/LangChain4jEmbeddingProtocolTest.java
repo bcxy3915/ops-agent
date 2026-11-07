@@ -1,4 +1,4 @@
-package com.example.opsaiagent.ai.adapter.springai;
+package com.example.opsaiagent.ai.adapter.langchain4j;
 
 import com.example.opsaiagent.knowledge.config.LangChain4jEmbeddingConfig;
 import com.example.opsaiagent.retrieval.RetrievalScope;
@@ -6,10 +6,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.document.MetadataMode;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
+import com.example.opsaiagent.knowledge.model.Document;
+import com.example.opsaiagent.knowledge.model.EmbeddingMetadataMode;
+import dev.langchain4j.data.segment.TextSegment;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -63,25 +63,22 @@ class LangChain4jEmbeddingProtocolTest {
             String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
             var model = new LangChain4jEmbeddingConfig().langChain4jEmbeddingModel(
                     baseUrl, "test-key", "test-embedding", 3, 3, "5s", 0);
-            var bridge = new LangChain4jEmbeddingBridge(model, "test-embedding", 3, MetadataMode.EMBED);
+
             List<String> texts = IntStream.range(0, 11).mapToObj(i -> "条目" + i).toList();
-            List<float[]> batch = bridge.embed(texts);
+            var batch = model.embedAll(texts.stream().map(TextSegment::from).toList()).content();
             assertThat(requests).hasSize(2);
             assertThat(requests.get(0).path("input")).hasSize(10);
             assertThat(requests.get(1).path("input")).hasSize(1);
             assertThat(batch).hasSize(11);
             for (int i = 0; i < batch.size(); i++) {
-                assertThat(batch.get(i)).containsExactly(i, 1, 0);
+                assertThat(batch.get(i).vector()).containsExactly(i, 1, 0);
             }
 
             JdbcTemplate jdbc = mock(JdbcTemplate.class);
             when(jdbc.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
-            PgVectorStore store = PgVectorStore.builder(jdbc, bridge)
-                    .dimensions(3).initializeSchema(false).build();
-            store.add(List.of(new Document("运维处理步骤", Map.of("source", "fixture.md"))));
-            assertThat(store.similaritySearch(SearchRequest.builder().query("检查服务")
-                    .topK(5).similarityThreshold(0.5)
-                    .filterExpression(RetrievalScope.publicOnly().filterExpression()).build())).isEmpty();
+            var store = new LangChain4jPgVectorStore(jdbc, model, mapper, 3, EmbeddingMetadataMode.EMBED);
+            store.write(List.of(new Document("运维处理步骤", Map.of("source", "fixture.md"))));
+            assertThat(store.search("检查服务", 5, RetrievalScope.publicOnly())).isEmpty();
             assertThat(requests).hasSize(4);
             assertThat(requests.get(2).path("input").toString()).contains("运维处理步骤");
             assertThat(requests.get(3).path("input").get(0).asText()).isEqualTo("检查服务");

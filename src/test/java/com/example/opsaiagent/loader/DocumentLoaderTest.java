@@ -14,7 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,7 +47,7 @@ import static org.mockito.Mockito.when;
 class DocumentLoaderTest {
 
     @Mock
-    private VectorStore vectorStore;
+    private KnowledgeVectorStore vectorStore;
 
     @Mock
     private ResourcePatternResolver resourcePatternResolver;
@@ -124,7 +124,7 @@ class DocumentLoaderTest {
 
         assertThat(result).containsEntry("status", "skipped");
         verify(jdbcTemplate, never()).queryForList(anyString());
-        verify(vectorStore, never()).add(any());
+        verify(vectorStore, never()).write(any());
     }
 
     // ==================== reload：全部已加载且指纹一致 ====================
@@ -141,7 +141,7 @@ class DocumentLoaderTest {
         assertThat(result).containsEntry("loaded", 0);
         assertThat(result).containsEntry("targets", 0);
         verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
-        verify(vectorStore, never()).add(any());
+        verify(vectorStore, never()).write(any());
     }
 
     // ==================== reload：缺失文档 ====================
@@ -160,7 +160,7 @@ class DocumentLoaderTest {
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
         // 缺失文档先删旧向量，再入库
         verify(jdbcTemplate).update(contains("DELETE FROM vector_store"), any(Object[].class));
-        verify(vectorStore, atLeastOnce()).add(any());
+        verify(vectorStore, atLeastOnce()).write(any());
     }
 
     // ==================== reload：同名内容变更 ====================
@@ -177,7 +177,7 @@ class DocumentLoaderTest {
         assertThat(result).containsEntry("targets", 1);
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
         verify(jdbcTemplate).update(contains("DELETE FROM vector_store"), any(Object[].class));
-        verify(vectorStore, atLeastOnce()).add(any());
+        verify(vectorStore, atLeastOnce()).write(any());
     }
 
     // ==================== reload：旧数据无指纹 ====================
@@ -193,7 +193,7 @@ class DocumentLoaderTest {
 
         assertThat(result).containsEntry("targets", 1);
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
-        verify(vectorStore, atLeastOnce()).add(any());
+        verify(vectorStore, atLeastOnce()).write(any());
     }
 
     // ==================== reload：残留清理 ====================
@@ -225,7 +225,7 @@ class DocumentLoaderTest {
         for (Object[] args : allArgs) {
             assertThat(args).doesNotContain("upload:5", "case:9");
         }
-        verify(vectorStore, atLeastOnce()).add(any());
+        verify(vectorStore, atLeastOnce()).write(any());
     }
 
     // ==================== reload：首次启动兜底 ====================
@@ -240,7 +240,7 @@ class DocumentLoaderTest {
 
         assertThat(result).containsEntry("status", "success");
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
-        verify(vectorStore, atLeastOnce()).add(any());
+        verify(vectorStore, atLeastOnce()).write(any());
     }
 
     // ==================== reload：内置文档元数据同步 ====================
@@ -321,7 +321,7 @@ class DocumentLoaderTest {
         Map<String, Object> result = loader.reload();
 
         assertThat(result).containsEntry("status", "failed");
-        verify(vectorStore, never()).add(any());
+        verify(vectorStore, never()).write(any());
     }
 
     // ==================== loadAndIndex ====================
@@ -332,7 +332,7 @@ class DocumentLoaderTest {
         int indexed = loader.loadAndIndex(Map.of());
 
         assertThat(indexed).isZero();
-        verify(vectorStore, never()).add(any());
+        verify(vectorStore, never()).write(any());
     }
 
     @Test
@@ -345,10 +345,10 @@ class DocumentLoaderTest {
 
         assertThat(indexed).isGreaterThan(0);
         ArgumentCaptor<List> batchCaptor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore, atLeastOnce()).add(batchCaptor.capture());
+        verify(vectorStore, atLeastOnce()).write(batchCaptor.capture());
         List<?> docs = batchCaptor.getAllValues().get(0);
         assertThat(docs).isNotEmpty();
-        org.springframework.ai.document.Document d = (org.springframework.ai.document.Document) docs.get(0);
+        com.example.opsaiagent.knowledge.model.Document d = (com.example.opsaiagent.knowledge.model.Document) docs.get(0);
         assertThat(d.getMetadata()).containsEntry("source", "test.md");
         assertThat(d.getMetadata()).containsEntry(DocumentLoader.HASH_METADATA_KEY, hash);
         assertThat(d.getMetadata())
@@ -366,7 +366,7 @@ class DocumentLoaderTest {
         int indexed = loader.loadAndIndex(Map.of("other.md", "hash"));
 
         assertThat(indexed).isZero();
-        verify(vectorStore, never()).add(any());
+        verify(vectorStore, never()).write(any());
     }
 
     // ==================== deleteBySources ====================

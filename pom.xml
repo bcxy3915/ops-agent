@@ -63,12 +63,6 @@
             </exclusions>
         </dependency>
 
-        <!-- Spring AI Pgvector 向量存储 -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
-        </dependency>
-
         <!-- PDF 文本抽取直接使用 PDFBox -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

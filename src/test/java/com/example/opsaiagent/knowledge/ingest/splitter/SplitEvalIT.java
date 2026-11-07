@@ -1,6 +1,6 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
-import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
@@ -13,10 +13,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import com.example.opsaiagent.knowledge.model.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.vectorstore.filter.Filter;
-import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -70,7 +67,7 @@ class SplitEvalIT {
     private static final String CLEANUP_SQL = "DELETE FROM vector_store WHERE metadata->>'evalDoc' = 'true'";
 
     @Autowired
-    private VectorStore vectorStore;
+    private EmbeddingModel embeddingClient;
     @Autowired
     private VectorIndexer vectorIndexer;
     @Autowired
@@ -86,8 +83,32 @@ class SplitEvalIT {
     @Autowired
     private RetrievalDiversifier diversifier;
 
-    @Value("${spring.ai.openai.embedding.model:text-embedding-v3}")
+    @Value("${ops-agent.ai.embedding.model:${spring.ai.openai.embedding.model:text-embedding-v3}}")
     private String embeddingModel;
+
+    /**
+     * 仅在隔离评测向量中按指定算法代次查询，避免向生产接口开放任意过滤条件。
+     * @param query 评测问题
+     * @param version 评测算法代次
+     * @return 相似度不低于零的前十个评测片段
+     */
+    private List<Document> searchEvaluationArm(String query, int version) {
+        String vector = java.util.Arrays.toString(embeddingClient.embed(query).content().vector());
+        return jdbcTemplate.query("SELECT * FROM (SELECT id, content, metadata, "
+                        + "embedding <=> CAST(? AS vector) AS distance FROM public.vector_store "
+                        + "WHERE metadata->>'evalDoc'='true' AND metadata->>'splitVersion'=?) candidates "
+                        + "WHERE distance <= 1 ORDER BY distance LIMIT 10", (rs, row) -> {
+                    try {
+                        Map<String, Object> metadata = new ObjectMapper().readValue(rs.getString("metadata"),
+                                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() { });
+                        double distance = rs.getDouble("distance");
+                        metadata.put("distance", distance);
+                        return new Document(rs.getString("id"), rs.getString("content"), metadata, 1 - distance);
+                    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                        throw new java.sql.SQLException("评测向量元数据解析失败", e);
+                    }
+                }, vector, Integer.toString(version));
+    }
 
     /** QA 评测条目（qa-golden.json） */
     private record EvalQuestion(String id, String docType, String query, String expectedDocId,
@@ -198,9 +219,6 @@ class SplitEvalIT {
                 + " 块 / 新策略 " + freshAll.size() + " 块");
 
         // 3. 逐 QA 双臂检索（top-10：top-5 判 Recall/ChunkHit，top-10 判 MRR）
-        FilterExpressionBuilder fb = new FilterExpressionBuilder();
-        Filter.Expression baseFilter = fb.and(fb.eq("evalDoc", "true"), fb.eq("splitVersion", 1)).build();
-        Filter.Expression freshFilter = fb.and(fb.eq("evalDoc", "true"), fb.eq("splitVersion", 2)).build();
 
         Map<String, TypeStats> typeStats = new TreeMap<>();
         List<PairResult> details = new ArrayList<>();
@@ -216,10 +234,8 @@ class SplitEvalIT {
                         + " 的 expectedDocId=" + question.expectedDocId() + " 不在文档池中，跳过");
                 continue;
             }
-            List<Document> baseTop = SpringAiDocumentMapper.fromSpring(vectorStore.similaritySearch(SearchRequest.builder()
-                    .query(question.query()).topK(10).filterExpression(baseFilter).build()));
-            List<Document> freshTop = SpringAiDocumentMapper.fromSpring(vectorStore.similaritySearch(SearchRequest.builder()
-                    .query(question.query()).topK(10).filterExpression(freshFilter).build()));
+            List<Document> baseTop = searchEvaluationArm(question.query(), 1);
+            List<Document> freshTop = searchEvaluationArm(question.query(), 2);
             if (diversifyMode) {
                 baseTop = diversifier.diversify(baseTop, 10);
                 freshTop = diversifier.diversify(freshTop, 10);

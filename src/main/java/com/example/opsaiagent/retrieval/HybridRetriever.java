@@ -1,7 +1,5 @@
 package com.example.opsaiagent.retrieval;
 
-import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
-
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
@@ -9,8 +7,7 @@ import com.example.opsaiagent.retrieval.rerank.RerankerClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.example.opsaiagent.knowledge.model.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
+
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -25,23 +22,12 @@ import java.util.List;
 @RequiredArgsConstructor
 public class HybridRetriever {
 
-    private final VectorStore vectorStore;
+    private final KnowledgeVectorStore knowledgeVectorStore;
     private final KeywordRetriever keywordRetriever;
     private final RrfFuser rrfFuser;
     private final RerankerClient rerankerClient;
     private final DataScope dataScope;
     private final RetrievalDiversifier diversifier;
-    private KnowledgeVectorStore knowledgeVectorStore;
-
-    /**
-     * 注入 LangChain4j 向量存储；缺省时继续使用原回退实现。
-     * @param store 知识向量存储
-     * @return 无返回值
-     */
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setKnowledgeVectorStore(KnowledgeVectorStore store) {
-        this.knowledgeVectorStore = store;
-    }
 
     /**
      * 混合检索（使用当前请求的数据范围）
@@ -102,17 +88,7 @@ public class HybridRetriever {
      */
     private List<Document> vectorSearch(String query, int topK, RetrievalScope scope) {
         try {
-            if (knowledgeVectorStore != null) {
-                return knowledgeVectorStore.search(query, topK, scope);
-            }
-            return SpringAiDocumentMapper.fromSpring(vectorStore.similaritySearch(
-                    SearchRequest.builder()
-                            .query(query)
-                            .topK(topK)
-                            .similarityThreshold(0.5)
-                            .filterExpression(scope.filterExpression())
-                            .build()
-            ));
+            return knowledgeVectorStore.search(query, topK, scope);
         } catch (Exception e) {
             log.error("向量检索失败", e);
             return List.of();

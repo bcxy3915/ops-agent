@@ -346,3 +346,15 @@ JDBC 存储改用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，移�
 Maven 移除 Spring AI PDF Reader，显式声明 PDFBox 3.0.7、CommonMark 0.22.0 与 JTokkit 1.1.0；旧 Markdown Reader 仅保留 test scope，用于迁移对照。运行时依赖树确认不含两个 Reader；Spring AI 模型和向量 starter 尚未删除。兼容规则来源与许可见 `docs/licenses/spring-ai-compatibility.md`。
 
 定向 **47 项通过**；默认全量 **1058 项通过**，含 LangChain4j 兼容测试全量 **1071 项通过**，均为 0 failures、0 errors、0 skipped。未执行真实模型、PostgreSQL 或页面验收，未修改本地密钥配置、数据库结构和向量索引。JaCoCo 历史执行数据警告不作为覆盖率依据。
+
+### 正式迁移第十一切片：删除 Spring AI 向量存储回退（2026-11-08）
+
+`HybridRetriever` 与 `VectorIndexer` 通过构造器强制依赖项目 `KnowledgeVectorStore`，删除可选 setter、Spring AI `VectorStore/SearchRequest` 与运行时文档转换分支。向量服务异常仍降级 BM25，写入异常继续向上传播，由原索引任务机制重试。分批大小、SQL 权限范围、事务边界与格式化规则保持不变。
+
+`LangChain4jEmbeddingConfig` 固定注册向量模型与 JDBC 存储，不受聊天 provider 控制；缺失数据库依赖时启动失败，不再悄悄回退。删除 `LangChain4jEmbeddingBridge` 及 Spring AI Pgvector starter，应用显式排除剩余聊天 starter 的 `OpenAiEmbeddingAutoConfiguration`。`SpringAiDocumentMapper` 移至测试源，生产知识链路已不引用 Spring AI 文档、向量存储和向量模型接口。聊天问答、记忆与工具注解仍保留 Spring AI 回退，默认聊天 provider 尚未改变。
+
+向量地址、密钥、模型、维度与元数据模式仍兼容原配置；聊天与向量使用独立凭据。本片删除 `initialize-schema/index-type` 的默认配置，不再由框架自动创建表或索引：新环境使用已有 `init-scripts/schema.sql`，已有环境直接复用 `public.vector_store`。本片没有执行任何数据库脚本、表结构变更或重建索引，实际列维度仍待数据库验收。
+
+协议夹具改为验证 LangChain4j 模型与项目 JDBC 存储，覆盖 11 条文本的 10＋1 批次、模型/维度参数、写入和查询调用；JDBC 仍为 Mock。`SplitEvalIT` 改用 LangChain4j 查询向量及仅限 evalDoc/splitVersion 的测试 SQL，避免移除旧 Bean 后无法运行；本片只编译该入口，没有运行真实模型评测。
+
+定向 **41 项通过**；清理旧构建产物后的默认全量 **1052 项通过**，含 LangChain4j 兼容测试全量 **1065 项通过**，均为 0 failures、0 errors、0 skipped。测试数量减少来自删除过渡 bridge 的六项测试，保留了正式存储的向量错误、权限过滤与失败处理验证。运行时依赖树已不含 Spring AI Pgvector starter、vector-store 和 pgvector 组件；仍有聊天 starter 及其模型公共依赖。未进行真实模型、数据库或页面验收。

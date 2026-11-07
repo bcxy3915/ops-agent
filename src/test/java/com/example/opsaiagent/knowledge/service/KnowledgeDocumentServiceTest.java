@@ -38,7 +38,7 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
@@ -78,7 +78,7 @@ class KnowledgeDocumentServiceTest {
     @Mock
     private KnowledgeChunkMapper chunkMapper;
     @Mock
-    private VectorStore vectorStore;
+    private KnowledgeVectorStore vectorStore;
     private DocumentParserStrategyFactory parserStrategyFactory;
     @Mock
     private JdbcTemplate jdbcTemplate;

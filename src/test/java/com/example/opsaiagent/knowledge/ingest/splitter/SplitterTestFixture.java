@@ -1,7 +1,7 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
-import org.springframework.ai.vectorstore.VectorStore;
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 
 import java.util.List;
 
@@ -25,7 +25,12 @@ public final class SplitterTestFixture {
         return new TextChunkStrategyResolver(List.of(markdown, recursive, token), properties);
     }
 
-    public static VectorIndexer vectorIndexer(VectorStore vectorStore) {
+    /**
+     * 组装使用项目向量接口的真实切分索引器。
+     * @param vectorStore 测试向量存储
+     * @return 使用真实策略链的索引器
+     */
+    public static VectorIndexer vectorIndexer(KnowledgeVectorStore vectorStore) {
         return new VectorIndexer(vectorStore, resolver(properties()));
     }
 }

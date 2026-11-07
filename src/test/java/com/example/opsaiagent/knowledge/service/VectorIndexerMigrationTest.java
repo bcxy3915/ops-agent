@@ -1,12 +1,9 @@
 package com.example.opsaiagent.knowledge.service;
 
-import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
-
 import com.example.opsaiagent.knowledge.ingest.splitter.TextChunkStrategyResolver;
 import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import org.junit.jupiter.api.Test;
 import com.example.opsaiagent.knowledge.model.Document;
-import org.springframework.ai.vectorstore.VectorStore;
 import java.util.List;
 import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.*;
@@ -20,28 +17,25 @@ class VectorIndexerMigrationTest {
      */
     @Test
     void migratedWriteBypassesSpringAiStore() {
-        VectorStore original = mock(VectorStore.class);
         KnowledgeVectorStore migrated = mock(KnowledgeVectorStore.class);
-        VectorIndexer indexer = new VectorIndexer(original, mock(TextChunkStrategyResolver.class));
-        indexer.setKnowledgeVectorStore(migrated);
+        VectorIndexer indexer = new VectorIndexer(migrated, mock(TextChunkStrategyResolver.class));
         List<Document> docs = IntStream.range(0, 11).mapToObj(i -> new Document("片段" + i)).toList();
         assertThat(indexer.write(docs)).isEqualTo(11);
         var order = inOrder(migrated);
         order.verify(migrated).write(docs.subList(0, 10));
         order.verify(migrated).write(docs.subList(10, 11));
-        verifyNoInteractions(original);
     }
 
     /**
-     * 验证默认配置保留原有写入链路。
+     * 验证写入失败向上层传播，禁止伪造成功条数。
      * @return 无返回值
      */
     @Test
-    void defaultWritePreservesOriginalStore() {
-        VectorStore original = mock(VectorStore.class);
-        VectorIndexer indexer = new VectorIndexer(original, mock(TextChunkStrategyResolver.class));
+    void writeFailurePropagates() {
+        KnowledgeVectorStore store = mock(KnowledgeVectorStore.class);
+        VectorIndexer indexer = new VectorIndexer(store, mock(TextChunkStrategyResolver.class));
         var docs = List.of(new Document("片段"));
-        assertThat(indexer.write(docs)).isEqualTo(1);
-        verify(original).add(SpringAiDocumentMapper.toSpring(docs));
+        doThrow(new IllegalStateException("存储失败")).when(store).write(docs);
+        assertThatThrownBy(() -> indexer.write(docs)).hasMessage("存储失败");
     }
 }

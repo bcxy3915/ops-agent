@@ -1,20 +1,17 @@
 package com.example.opsaiagent.knowledge.config;
 
-import com.example.opsaiagent.ai.adapter.springai.LangChain4jEmbeddingBridge;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.document.MetadataMode;
+
 import com.example.opsaiagent.knowledge.model.EmbeddingMetadataMode;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+
 import org.springframework.boot.convert.DurationStyle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 
-/** 将知识向量模型调用切换至 LangChain4j，兼容现有 Pgvector 存储。 */
+/** 知识向量固定使用 LangChain4j 与 JDBC，与聊天 provider 无关。 */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(prefix = "ops-agent.ai", name = "provider", havingValue = "langchain4j")
 public class LangChain4jEmbeddingConfig {
 
     /**
@@ -30,7 +27,6 @@ public class LangChain4jEmbeddingConfig {
      * @return 知识向量存储
      */
     @Bean
-    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(org.springframework.jdbc.core.JdbcTemplate.class)
     public com.example.opsaiagent.retrieval.KnowledgeVectorStore langChain4jKnowledgeVectorStore(
             org.springframework.jdbc.core.JdbcTemplate jdbc, EmbeddingModel model,
             com.fasterxml.jackson.databind.ObjectMapper mapper,
@@ -80,21 +76,4 @@ public class LangChain4jEmbeddingConfig {
                 .build();
     }
 
-    /**
-     * 将 LangChain4j 模型接入当前 Pgvector 存储的模型接口。
-     * @param model LangChain4j 向量模型
-     * @param modelName 模型名称
-     * @param dimensions 向量维度
-     * @param metadataMode 原有文档格式化规则
-     * @return 现有存储使用的向量模型适配层
-     */
-    @Bean
-    @Primary
-    public org.springframework.ai.embedding.EmbeddingModel langChain4jEmbeddingBridge(
-            EmbeddingModel model,
-            @Value("${ops-agent.ai.embedding.model:${spring.ai.openai.embedding.model:text-embedding-v3}}") String modelName,
-            @Value("${ops-agent.ai.embedding.dimensions:${spring.ai.vectorstore.pgvector.dimensions:1024}}") int dimensions,
-            @Value("${spring.ai.openai.embedding.metadata-mode:EMBED}") MetadataMode metadataMode) {
-        return new LangChain4jEmbeddingBridge(model, modelName, dimensions, metadataMode);
-    }
 }

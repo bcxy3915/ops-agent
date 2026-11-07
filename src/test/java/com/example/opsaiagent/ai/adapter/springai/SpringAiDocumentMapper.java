@@ -3,8 +3,12 @@ package com.example.opsaiagent.ai.adapter.springai;
 import com.example.opsaiagent.knowledge.model.Document;
 import java.util.List;
 
-/** 仅在尚未替换的 Reader、切分器和回退存储边界转换框架文档。 */
+/** 仅供迁移对照测试转换框架文档，不属于生产运行时。 */
 public final class SpringAiDocumentMapper {
+    /**
+     * 禁止实例化测试转换工具。
+     * @return 无返回值
+     */
     private SpringAiDocumentMapper() { }
 
     /**

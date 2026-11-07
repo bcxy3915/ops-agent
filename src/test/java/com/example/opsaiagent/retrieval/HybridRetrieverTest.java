@@ -1,7 +1,5 @@
 package com.example.opsaiagent.retrieval;
 
-import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
-
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
@@ -13,8 +11,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import com.example.opsaiagent.knowledge.model.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
 
 import java.util.List;
 import java.util.Map;
@@ -37,7 +33,7 @@ import static org.mockito.Mockito.when;
 class HybridRetrieverTest {
 
     @Mock
-    private VectorStore vectorStore;
+    private KnowledgeVectorStore vectorStore;
 
     @Mock
     private KeywordRetriever keywordRetriever;
@@ -63,8 +59,8 @@ class HybridRetrieverTest {
      */
     @Test
     void usesMigratedStoreAndPreservesBm25Fallback() {
-        KnowledgeVectorStore migrated = org.mockito.Mockito.mock(KnowledgeVectorStore.class);
-        hybridRetriever.setKnowledgeVectorStore(migrated);
+        KnowledgeVectorStore migrated = vectorStore;
+
         when(migrated.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenThrow(new IllegalStateException("模型不可用"));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
@@ -72,7 +68,7 @@ class HybridRetrieverTest {
         diversifierPassThrough();
         assertThat(hybridRetriever.retrieve("查询", 5)).extracting(Document::getText)
                 .containsExactly("关键字兜底");
-        org.mockito.Mockito.verifyNoInteractions(vectorStore);
+        verify(vectorStore).search(eq("查询"), eq(20), any(RetrievalScope.class));
     }
 
     /** diversify 直通桩：保留前 limit 个，便于断言后续编排行为 */
@@ -94,7 +90,7 @@ class HybridRetrieverTest {
     void retrieve_bothPathsFusedAndReranked() {
         Document v = doc("向量文档");
         Document b = doc("BM25文档");
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(SpringAiDocumentMapper.toSpring(v)));
+        when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class))).thenReturn(List.of(v));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(b));
         when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));
@@ -115,7 +111,7 @@ class HybridRetrieverTest {
         Document v = doc("向量文档");
         Document b = doc("BM25文档");
         Document kept = doc("治理后保留");
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(SpringAiDocumentMapper.toSpring(v)));
+        when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class))).thenReturn(List.of(v));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(b));
         when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));
@@ -133,7 +129,7 @@ class HybridRetrieverTest {
     void retrieve_vectorFailureFallsBackToBm25() {
         Document b = doc("BM25文档");
         List<Document> bm25Results = List.of(b, doc("BM25文档2"));
-        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+        when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class)))
                 .thenThrow(new RuntimeException("network error"));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(bm25Results);
@@ -151,7 +147,7 @@ class HybridRetrieverTest {
     @Test
     @DisplayName("retrieve：向量结果为空时直接返回 BM25 前 topK")
     void retrieve_vectorEmptyUsesBm25TopK() {
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+        when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class))).thenReturn(List.of());
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(doc("a"), doc("b"), doc("c"), doc("d")));
         diversifierPassThrough();
@@ -165,7 +161,7 @@ class HybridRetrieverTest {
     @Test
     @DisplayName("retrieve：BM25 无结果时返回空列表")
     void retrieve_bm25Empty() {
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+        when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class))).thenReturn(List.of());
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of());
 

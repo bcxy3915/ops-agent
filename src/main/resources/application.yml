@@ -51,9 +51,8 @@ spring:
         model: text-embedding-v3
     vectorstore:
       pgvector:
-        initialize-schema: true
+        # 迁移兼容配置：JDBC 存储读取维度与距离配置，不再自动建表或索引
         dimensions: 1024
-        index-type: HNSW
         distance-type: COSINE_DISTANCE
 
 mybatis-plus:
@@ -78,7 +77,7 @@ ops-agent:
     model: ${OPS_AI_MODEL:${spring.ai.openai.chat.options.model:deepseek-chat}}
     timeout: ${OPS_AI_TIMEOUT:60s}
     temperature: ${OPS_AI_TEMPERATURE:0.7}
-    # 知识向量模型使用独立地址与密钥；切换 LangChain4j 时保持存量模型与维度一致
+    # 知识向量模型固定使用 LangChain4j，与聊天 provider 无关；保持存量模型与维度一致
     embedding:
       base-url: ${OPS_EMBEDDING_BASE_URL:${spring.ai.openai.embedding.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}}
       api-key: ${OPS_EMBEDDING_API_KEY:${spring.ai.openai.embedding.api-key:}}
