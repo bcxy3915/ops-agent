@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import reactor.core.publisher.Flux;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -268,6 +269,20 @@ class LangChain4jCompatibilityPocTest {
         assertThat(events).extracting(ChatStreamEvent::data).containsExactly("流式", "网关", null);
         assertThat(requests.getFirst().path("messages").get(0).path("role").asText())
                 .isEqualTo("system");
+    }
+
+    @Test
+    void streamingGatewayPropagatesModelFailureWithoutEmittingDone() {
+        OpenAiStreamingChatModel model = OpenAiStreamingChatModel.builder()
+                .baseUrl(baseUrl).apiKey("poc-placeholder-not-a-secret")
+                .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
+        LangChain4jStreamingChatGateway gateway = new LangChain4jStreamingChatGateway(model);
+
+        assertThatThrownBy(() -> Flux.from(gateway.stream(
+                        new ChatRequest("session-1", "检查服务", "你是运维助手", null)))
+                .collectList().block(Duration.ofSeconds(10)))
+                .isNotNull();
+        assertThat(requests).hasSize(1);
     }
 
     private String toolResult(JsonNode request, String callId) {

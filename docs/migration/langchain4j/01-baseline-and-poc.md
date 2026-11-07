@@ -191,3 +191,9 @@ $env:MAVEN_OPTS='-Djdk.net.unixdomain.tmpdir="' + $sockTmp + '"'
 - `clear()` 只删除当前 session 的记忆，不影响其他 session。
 
 定向记忆和既有兼容性 PoC 共 **11 项通过，0 failures、0 errors、0 skipped**；启用 `langchain4j-poc` profile 的全量回归为 **1025 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。该增量证明了消息类型转换、窗口和内存存储隔离的框架可行性，但没有把数据库查询直接接入 LangChain4j：生产回填仍必须复用 `ConversationService.loadRecentMessages(sessionId, username, 20)` 的用户名归属校验，待迁移运行时具备可信的认证/租户上下文后再实现。当前 W5 的真实模型、Pgvector 持久化记忆和 MCP 接入阶段门仍未通过。
+
+### W6 首个增量：流式网关异常语义验证
+
+补充 LangChain4j 流式网关对照测试，验证正常响应仍按 `TOKEN → DONE` 输出，并验证模型端返回 HTTP 错误时流会传播异常且不会伪造 `DONE`。这保证后续接入现有 SSE 编排时，错误、取消和消息落库逻辑仍可由上层统一处理。当前适配器仍只转换模型 token，不负责业务侧 `citations` 事件；生产 SSE 入口仍由 `OpsAgentService` 的 Spring AI 实现负责，尚未切换默认运行时。
+
+W6 定向 PoC 共 **12 项通过，0 failures、0 errors、0 skipped**。该增量只完成流式协议边界验证，W6 阶段门仍未通过；在切换生产 SSE 前还需把引用事件、记忆回填、工具循环、取消保存和告警诊断放在同一条可回退链路中进行对照。
