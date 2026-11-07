@@ -7,8 +7,17 @@
 按《运维智能体后端开发周计划 v4》推进，不把相对周次理解为每次必须等待一周。
 
 - W1：代码依赖盘点、协议及配置冻结、回归矩阵、只读夹具和本地测试基线已建立。真实模型质量、延迟、Token 消耗及真实数据库检索指标尚未测量，W1 的线上效果基线仍待补充。
-- W2：完成隔离的本地 OpenAI 协议 PoC，验证同步、流式、结构化 DTO、连续两轮工具调用。尚未通过 W2 完整阶段门。
-- W3 以后：未实施；生产聊天、诊断和 RAG 仍使用 Spring AI。未引入 LangGraph4j、MCP 或生产写工具。
+- W2：隔离的本地 OpenAI 协议 PoC 已验证同步、流式、结构化 DTO、连续两轮工具调用；真实模型与 Pgvector 阶段门未通过。
+- W3：框架中立 DTO/Gateway 及 Spring AI 过渡适配器已建立；W4 结构化诊断已通过业务边界调用网关。
+- W5：四个只读工具绑定、消息类型映射、20 条窗口、session 隔离与重建恢复 PoC 已完成；生产记忆回填和工具授权执行器尚未切换。
+- W6：LangChain4j 流式 token、正常结束及异常传播已验证；引用、取消保存、工具循环与告警诊断尚未在 LangChain4j 生产链路闭环。
+- 当前阶段：已进入正式迁移第一切片。Spring AI 仍是默认实现；未引入 LangGraph4j、MCP 或生产写工具。
+
+### 正式迁移启动条件
+
+正式迁移从首次将 LangChain4j 作为可选生产运行时并接入一条真实业务链路开始，不以 PoC 测试数量或 MCP/多 Agent 完成度作为起点。后续每个切片仍需逐项补齐真实模型、数据隔离和回归验证；当前已先完成可配置网关切片，Spring AI 保留为默认回退。
+
+条件满足后，第一条正式切片是同步聊天与结构化诊断使用可配置的 LangChain4j Gateway；随后迁移会话记忆和四个只读工具，再切换 SSE，最后迁移 RAG/Pgvector 并清理 Spring AI。每个切片均先在测试环境验证，不双跑任何写操作。
 
 ## 2. 迁移影响矩阵
 
@@ -64,7 +73,7 @@
 
 ## 4. W2 隔离 PoC 的范围
 
-`pom.xml` 增加显式 `langchain4j-poc` profile，固定候选版本 1.23.0，只有 test scope 的 langchain4j / langchain4j-open-ai 依赖及 `src/poc/java` 测试源码。默认运行不启用该 profile；不注入新生产 Bean，不引入 LangChain4j starter，不更改 Boot 版本。
+`pom.xml` 保留 `langchain4j-poc` profile 以加载 `src/poc/java` 对照测试源码；LangChain4j 依赖已在正式迁移第一切片提升为生产编译依赖。PoC profile 不额外注入生产 Bean，不引入 LangChain4j starter，不更改 Boot 版本。
 
 版本来源：Maven Central 的 `dev/langchain4j/langchain4j-open-ai/maven-metadata.xml`，本次验证以实际下载及编译结果为准，不使用浮动版本。
 
@@ -125,7 +134,11 @@ New-Item -ItemType Directory -Force target/socket-tmp | Out-Null
 
 ## 7. 下一步和回退
 
-在 W2 环境条件补齐后补做阶段门；当前继续实现 W3 框架中立 DTO / Gateway。生产迁移仍按聊天、记忆/工具、流式/诊断、知识链路顺序逐项替换。W3 边界只被新测试或显式适配 Bean 使用，默认运行仍由 Spring AI 提供，回退方式为不启用新适配器。
+W2 阶段门仍待模型 endpoint 网络/TLS 和 PostgreSQL 5433 环境恢复。W3-W6 的接口与隔离适配器工作可继续推进，但在 W2 和 W6 启动条件通过前不注册 LangChain4j 生产 Bean。满足条件后按上文切片逐项替换；每个切片都保留 Spring AI 回退配置。
+
+### W2 阶段门复核补充（2026-11-07）
+
+再次检查本机运行环境：项目配置的 PostgreSQL `localhost:5433` 当前不可达，`5432` 虽可达但不是应用配置目标；当前进程环境中也没有发现可用于真实模型对照的模型凭据变量。此次只做端口和变量名检查，没有读取、输出或修改任何密钥，也没有连接或写入数据库。因此 W2 仍未通过，正式迁移启动条件不变。
 
 ### W3 首个增量（本轮）
 
@@ -153,6 +166,34 @@ New-Item -ItemType Directory -Force target/socket-tmp | Out-Null
 
 当前失败语义为：空白内容抛出“模型未返回结构化结果”，无法映射的内容抛出“模型返回的结构化结果格式非法”，保留底层异常作为原因。该增量只建立和验证适配器边界，**尚未将 `DiagnosisService` 切换到该网关**，因此现有诊断的模型降级、置信度和错误处理逻辑不变。接入诊断前还需补充空响应与下游失败降级对照测试，并逐项比对现有行为。
 
+## 正式迁移第一切片：同步聊天与结构化诊断网关
+
+本切片已开始正式迁移，但采用可配置切换方式，避免一次性替换所有链路：
+
+- `pom.xml` 将 `langchain4j` 和 `langchain4j-open-ai` 提升为生产编译依赖，版本固定为 `1.23.0`。
+- 新增生产 `LangChain4jChatGateway` 和 `LangChain4jStructuredOutputGateway`，沿用 W3 的项目 DTO 边界，不向业务层暴露框架类型。
+- 新增 `LangChain4jConfig`，使用 OpenAI 协议模型配置创建 LangChain4j 客户端，并注册同步聊天及结构化输出网关。
+- `ops-agent.ai.provider` 默认为 `spring-ai`；设置为 `langchain4j` 才启用本切片的 LangChain4j 网关。
+- `SpringAiStructuredOutputGateway` 和 Spring AI 同步聊天网关继续作为默认实现，便于回退。
+- 本切片不替换 SSE、会话记忆、只读工具、RAG/Pgvector，也不改变追问仍使用 `ChatClient` 的现状。
+
+配置示例：
+
+```yaml
+ops-agent:
+  ai:
+    provider: langchain4j
+    base-url: https://api.deepseek.com/v1
+    api-key: ${AI_API_KEY}
+    model: deepseek-chat
+    timeout: 60s
+    temperature: 0.7
+```
+
+切回 Spring AI 只需将 `provider` 改为 `spring-ai`，或移除该配置使用默认值。当前 LangChain4j 配置已通过生产源码编译；真实模型切换仍需在具备模型凭据的环境中验证同步响应、结构化 JSON 和错误超时语义。
+
+配置测试验证默认选择 Spring AI、指定 `langchain4j` 时选择 LangChain4j，定向配置与 PoC 共 **14 项通过**。默认 Spring AI 全量回归：**1016 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**（2026-11-07）。LangChain4j 生产配置尚未调用真实模型，线上模型行为仍待独立试跑。
+
 PoC 测试新增结构化 JSON 到业务 record DTO 的映射，以及非法 JSON 的明确失败断言。定向 PoC 7 项全部通过；启用 `langchain4j-poc` profile 的全量回归为 **1021 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。测试使用本地 OpenAI 协议夹具，不调用真实模型或外部服务，因此只证明边界映射与协议兼容，不证明真实模型输出稳定性。默认运行仍由 Spring AI 提供，回退方式为不启用 LangChain4j PoC profile。
 
 在当前 Windows/JDK 环境中，Surefire fork 的测试进程未继承 `MAVEN_OPTS` 指定的 Unix-domain socket 临时目录，导致本地 `HttpServer` 初始化失败。通过 `-DforkCount=0` 让测试与 Maven 共用 JVM 后，项目 `target/socket-tmp` 临时目录配置生效；此运行方式用于本机验证，不建议写入项目默认 Surefire 配置。
@@ -171,7 +212,7 @@ $env:MAVEN_OPTS='-Djdk.net.unixdomain.tmpdir="' + $sockTmp + '"'
 
 诊断单测改为验证网关返回成功、返回空结果、模型异常和知识库失败等路径；定向诊断与 LangChain4j PoC 共 29 项全部通过。启用 `langchain4j-poc` profile 的全量回归为 **1021 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。JaCoCo 报告提示历史执行数据与本轮 `DiagnosisService` 类不匹配，但不影响测试结果；正式覆盖率需先清理 `target` 后重新执行。
 
-当前仍未把 LangChain4j 适配器注册为生产 Bean，也未切换默认运行时；LangChain4j 真实模型、工具绑定、记忆、Pgvector 和 MCP 阶段门仍未通过。下一步是在独立 profile/配置下补真实模型对照和结构化输出兼容性验证，再评估生产 Bean 的切换。
+LangChain4j 适配器已注册为可选生产 Bean，但未切换默认运行时；LangChain4j 真实模型、工具绑定、记忆、Pgvector 和 MCP 阶段门仍未通过。下一步是在该配置下补真实模型对照和结构化输出兼容性验证。
 
 ### W5 第一个增量：四个本地只读工具绑定 PoC
 

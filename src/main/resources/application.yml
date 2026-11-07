@@ -70,6 +70,14 @@ mybatis-plus:
 
 
 ops-agent:
+  # 模型适配器：spring-ai 为默认值，迁移验证时可切换为 langchain4j
+  ai:
+    provider: ${OPS_AI_PROVIDER:spring-ai}
+    base-url: ${OPS_AI_BASE_URL:${spring.ai.openai.base-url:https://api.openai.com/v1}}
+    api-key: ${OPS_AI_API_KEY:${AI_API_KEY:}}
+    model: ${OPS_AI_MODEL:${spring.ai.openai.chat.options.model:deepseek-chat}}
+    timeout: ${OPS_AI_TIMEOUT:60s}
+    temperature: ${OPS_AI_TEMPERATURE:0.7}
   # 检索方式 type：in-memory / postgres / elasticsearch
   retrieval:
     keyword:

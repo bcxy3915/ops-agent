@@ -8,6 +8,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 /**
  * AI配置类
@@ -37,6 +38,7 @@ public class AiConfig {
      * @return 结构化输出网关
      */
     @Bean
+    @ConditionalOnProperty(prefix = "ops-agent.ai", name = "provider", havingValue = "spring-ai", matchIfMissing = true)
     public StructuredOutputGateway structuredOutputGateway(ChatClient chatClient) {
         return new SpringAiStructuredOutputGateway(chatClient);
     }

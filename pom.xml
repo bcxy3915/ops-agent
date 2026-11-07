@@ -29,6 +29,7 @@
     <properties>
         <java.version>21</java.version>
         <spring-ai.version>2.0.2</spring-ai.version>
+        <langchain4j.version>1.23.0</langchain4j.version>
         <mybatis-plus.version>3.5.18</mybatis-plus.version>
         <springdoc-openapi.version>3.2.0</springdoc-openapi.version>
         <jjwt.version>0.12.6</jjwt.version>
@@ -78,6 +79,18 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-markdown-document-reader</artifactId>
+        </dependency>
+
+        <!-- LangChain4j：按 provider 配置逐步接管生产模型调用 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j.version}</version>
         </dependency>
 
         <!-- WebFlux（流式输出支持） -->
@@ -284,27 +297,10 @@
         </plugins>
     </build>
 
-    <!-- 隔离的迁移 PoC：仅增加测试依赖和测试源码，不接管生产 Bean。 -->
+    <!-- 迁移 PoC 用于协议和高级能力对照测试。 -->
     <profiles>
         <profile>
             <id>langchain4j-poc</id>
-            <properties>
-                <langchain4j.version>1.23.0</langchain4j.version>
-            </properties>
-            <dependencies>
-                <dependency>
-                    <groupId>dev.langchain4j</groupId>
-                    <artifactId>langchain4j</artifactId>
-                    <version>${langchain4j.version}</version>
-                    <scope>test</scope>
-                </dependency>
-                <dependency>
-                    <groupId>dev.langchain4j</groupId>
-                    <artifactId>langchain4j-open-ai</artifactId>
-                    <version>${langchain4j.version}</version>
-                    <scope>test</scope>
-                </dependency>
-            </dependencies>
             <build>
                 <plugins>
                     <plugin>
