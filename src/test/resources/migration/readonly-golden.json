@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "purpose": "迁移对比用只读测试定义；所有 observations 均为夹具，不是真实服务或模型测量。尚未接入自动评测 runner。",
+  "cases": [
+    {"id":"health-up","phase":"migration","question":"fixture-service 健康吗？","observations":{"health":"UP"},"expectedTools":["queryServiceHealth"],"mustNotClaim":["服务不健康"]},
+    {"id":"health-down","phase":"migration","question":"fixture-service 健康吗？","observations":{"health":"DOWN"},"expectedTools":["queryServiceHealth"],"mustNotClaim":["无法获取状态","已自动修复"]},
+    {"id":"health-unregistered","phase":"migration","question":"missing-service 健康吗？","observations":{"health":"NOT_REGISTERED"},"expectedTools":["queryServiceHealth"],"mustNotClaim":["服务不健康","服务健康"]},
+    {"id":"health-unreachable","phase":"migration","question":"fixture-service 健康吗？","observations":{"health":"UNREACHABLE"},"expectedTools":["queryServiceHealth"],"mustNotClaim":["服务不健康","服务健康"]},
+    {"id":"metric-value","phase":"migration","question":"fixture-service 的 system.cpu.usage 是多少？","observations":{"metric":0.91},"expectedTools":["queryMetric"],"mustNotClaim":["已证实CPU是故障根因"]},
+    {"id":"metric-list","phase":"migration","question":"fixture-service 有哪些指标？","observations":{"metrics":["system.cpu.usage"]},"expectedTools":["listMetrics"]},
+    {"id":"service-list","phase":"migration","question":"哪些服务异常？","observations":{"services":["fixture-service"]},"expectedTools":["listServicesByStatus"]},
+    {"id":"knowledge-only","phase":"migration","question":"连接池耗尽时应该如何排查？","observations":{"retrievalSource":"fixture-runbook.md","approved":true},"expectedTools":[],"requiredCitationSources":["fixture-runbook.md"]},
+    {"id":"planner-up-stop","phase":"W7-W8-target","question":"检查 fixture-service；仅 DOWN 时查询 system.cpu.usage，只读。","observations":{"health":"UP"},"expectedTools":["queryServiceHealth"]},
+    {"id":"planner-down-continue","phase":"W7-W8-target","question":"检查 fixture-service；仅 DOWN 时查询 system.cpu.usage，只读。","observations":{"health":"DOWN","metric":0.91},"expectedTools":["queryServiceHealth","queryMetric"],"mustNotClaim":["已证实CPU是故障根因","已自动回滚"]},
+    {"id":"planner-unreachable-stop","phase":"W7-W8-target","question":"检查 fixture-service；仅 DOWN 时查询 system.cpu.usage，只读。","observations":{"health":"UNREACHABLE"},"expectedTools":["queryServiceHealth"]},
+    {"id":"planner-unknown-stop","phase":"W7-W8-target","question":"检查 fixture-service；仅 DOWN 时查询 system.cpu.usage，只读。","observations":{"health":"UNKNOWN"},"expectedTools":["queryServiceHealth"]}
+  ],
+  "retrievalIsolationCases": [
+    {"id":"public-approved","scope":{"tenantId":null,"deptIds":[],"userId":null},"metadata":{"visibility":"PUBLIC","reviewStatus":"APPROVED"},"expectedVisible":true},
+    {"id":"cross-tenant","scope":{"tenantId":"fixture-a","deptIds":null,"userId":"same-user"},"metadata":{"tenantId":"fixture-b","visibility":"TENANT","reviewStatus":"APPROVED"},"expectedVisible":false},
+    {"id":"dept-empty","scope":{"tenantId":"fixture-a","deptIds":[],"userId":"same-user"},"metadata":{"tenantId":"fixture-a","deptId":10,"visibility":"DEPT","reviewStatus":"APPROVED"},"expectedVisible":false},
+    {"id":"dept-all","scope":{"tenantId":"fixture-a","deptIds":null,"userId":"same-user"},"metadata":{"tenantId":"fixture-a","deptId":10,"visibility":"DEPT","reviewStatus":"APPROVED"},"expectedVisible":true},
+    {"id":"personal-same-name-other-tenant","scope":{"tenantId":"fixture-a","deptIds":[],"userId":"same-user"},"metadata":{"tenantId":"fixture-b","owner":"same-user","visibility":"PERSONAL","reviewStatus":"APPROVED"},"expectedVisible":false},
+    {"id":"unapproved-tenant","scope":{"tenantId":"fixture-a","deptIds":null,"userId":"same-user"},"metadata":{"tenantId":"fixture-a","visibility":"TENANT","reviewStatus":"REJECTED"},"expectedVisible":false}
+  ]
+}

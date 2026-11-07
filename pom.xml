@@ -284,4 +284,46 @@
         </plugins>
     </build>
 
+    <!-- 隔离的迁移 PoC：仅增加测试依赖和测试源码，不接管生产 Bean。 -->
+    <profiles>
+        <profile>
+            <id>langchain4j-poc</id>
+            <properties>
+                <langchain4j.version>1.23.0</langchain4j.version>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.langchain4j</groupId>
+                    <artifactId>langchain4j</artifactId>
+                    <version>${langchain4j.version}</version>
+                    <scope>test</scope>
+                </dependency>
+                <dependency>
+                    <groupId>dev.langchain4j</groupId>
+                    <artifactId>langchain4j-open-ai</artifactId>
+                    <version>${langchain4j.version}</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.1</version>
+                        <executions>
+                            <execution>
+                                <id>add-langchain4j-poc-tests</id>
+                                <phase>generate-test-sources</phase>
+                                <goals><goal>add-test-source</goal></goals>
+                                <configuration>
+                                    <sources><source>src/poc/java</source></sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

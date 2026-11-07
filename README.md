@@ -1,5 +1,10 @@
 ![Backend CI](https://github.com/bcxy3915/ops-agent/actions/workflows/ci.yml/badge.svg)
 
+> 当前分支：`migration/langchain4j`。已开始按 v4 周计划迁移，生产链路暂仍使用 Spring AI。
+> 已建立迁移基线及隔离的 LangChain4j 协议 PoC，真实模型与 Pgvector 兼容验证尚未完成。
+> 迁移范围、测试命令和进度见 [迁移执行记录](docs/migration/langchain4j/01-baseline-and-poc.md)。
+> 旧版本保留在 `maintenance/spring-ai`；下文历史功能与版本信息在迁移中逐项核对。
+
 <h1 align="center">Ops Agent</h1>
 
 <p align="center">

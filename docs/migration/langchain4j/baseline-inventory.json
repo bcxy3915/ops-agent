@@ -1,0 +1,85 @@
+{
+  "date": "2026-11-07",
+  "branch": "migration/langchain4j",
+  "baseCommit": "1d1a331b5262bea26921488af46fa62e7ee323ab",
+  "mainSpringAiFiles": [
+    "src/main\\java\\com\\example\\opsaiagent\\chat\\config\\AiConfig.java",
+    "src/main\\java\\com\\example\\opsaiagent\\chat\\config\\ChatMemoryConfig.java",
+    "src/main\\java\\com\\example\\opsaiagent\\chat\\controller\\ChatController.java",
+    "src/main\\java\\com\\example\\opsaiagent\\chat\\service\\OpsAgentService.java",
+    "src/main\\java\\com\\example\\opsaiagent\\diagnosis\\service\\DiagnosisPromptTemplate.java",
+    "src/main\\java\\com\\example\\opsaiagent\\diagnosis\\service\\DiagnosisService.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\parser\\DocumentParserStrategy.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\parser\\DocxDocumentParserStrategy.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\parser\\MarkdownDocumentParserStrategy.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\parser\\PdfDocumentParserStrategy.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\parser\\TxtDocumentParserStrategy.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\MarkdownStructuralSplitter.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\RecursiveBoundarySplitter.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\TextChunkStrategy.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\TextChunkStrategyResolver.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\TokenFallbackSplitter.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\loader\\DocumentLoader.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeDocumentIndexer.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeDocumentService.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeQualityService.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeRetrievalService.java",
+    "src/main\\java\\com\\example\\opsaiagent\\knowledge\\service\\VectorIndexer.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\bm25\\Bm25Index.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\bm25\\InMemoryBm25Retriever.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\diversity\\RetrievalDiversifier.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\fusion\\RrfFuser.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\HybridRetriever.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\KeywordRetriever.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\rerank\\DashScopeReranker.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\rerank\\NoopReranker.java",
+    "src/main\\java\\com\\example\\opsaiagent\\retrieval\\rerank\\RerankerClient.java",
+    "src/main\\java\\com\\example\\opsaiagent\\tools\\HealthCheckTools.java",
+    "src/main\\java\\com\\example\\opsaiagent\\tools\\MetricDiscoveryTools.java",
+    "src/main\\java\\com\\example\\opsaiagent\\tools\\MetricQueryTools.java",
+    "src/main\\java\\com\\example\\opsaiagent\\tools\\ServiceDiscoveryTools.java"
+  ],
+  "testSpringAiFiles": [
+    "src/test\\java\\com\\example\\opsaiagent\\controller\\ChatControllerTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\diagnosis\\service\\DiagnosisServiceTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\MarkdownStructuralSplitterTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\RecursiveBoundarySplitterTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\SplitEvalIT.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\SplitterTestFixture.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\ingest\\splitter\\TextChunkStrategyResolverTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeDocumentServiceTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeQualityServiceTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\knowledge\\service\\KnowledgeRetrievalServiceTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\loader\\DocumentLoaderTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\bm25\\Bm25IndexTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\bm25\\InMemoryBm25RetrieverTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\diversity\\RetrievalDiversifierTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\fusion\\RrfFuserTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\HybridRetrieverTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\rerank\\DashScopeRerankerTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\retrieval\\rerank\\NoopRerankerTest.java",
+    "src/test\\java\\com\\example\\opsaiagent\\service\\OpsAgentServiceTest.java"
+  ],
+  "sha256": [
+    {
+      "path": "pom.xml",
+      "hash": "F644405637F5A8A11A67B155DEC4BCE02C7AADF2DEC32EA8989D1AB7CB0E35A9"
+    },
+    {
+      "path": "src/main/resources/application.yml",
+      "hash": "DE7721207F8C3320F1293DE4EAFF5EAF30B644FB918A869BD8771B492B86A7EE"
+    },
+    {
+      "path": "src/main/java/com/example/opsaiagent/chat/service/OpsAgentService.java",
+      "hash": "1A97D6D358556C19CD71C706BFD77D6C736E53FC2593B1113CED07FC95A52318"
+    },
+    {
+      "path": "src/main/java/com/example/opsaiagent/diagnosis/service/DiagnosisPromptTemplate.java",
+      "hash": "6D96C19F7E56AF89CF4388BF94B283B815462BD492091A7821389575E0CF6C07"
+    },
+    {
+      "path": "src/main/java/com/example/opsaiagent/retrieval/RetrievalScope.java",
+      "hash": "A41C035C8DE45435BF49E06322ACB7FE983BFD4D3021EEC4D786FBC972419087"
+    }
+  ]
+}

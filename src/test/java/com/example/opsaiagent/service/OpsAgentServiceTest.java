@@ -214,7 +214,7 @@ class OpsAgentServiceTest {
     // ==================== askStream ====================
 
     @Test
-    @DisplayName("askStream：先推 citations 事件再逐字输出，登录用户保存会话与消息")
+    @DisplayName("askStream：答案后推送 citations，登录用户保存会话与消息")
     void askStream_authenticated() {
         mockAuthenticated();
         when(hybridRetriever.retrieve(anyString(), anyInt()))
@@ -291,6 +291,24 @@ class OpsAgentServiceTest {
         verify(conversationService, never()).saveAssistantMessage(anyString(), anyString());
     }
 
+    @Test
+    @DisplayName("流式取消：保存已输出的部分答案，不发送完成标记")
+    void askStream_cancelPersistsPartialAnswer() {
+        mockAuthenticated();
+        when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
+        when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
+        mockStreamChain(Flux.concat(Flux.just("已获取的部分答案"), Flux.never()));
+
+        StepVerifier.create(service.askStreamWithCitations("sess-1", "检查服务"))
+                .expectNextMatches(event -> event.event() == null
+                        && "已获取的部分答案".equals(event.data()))
+                .thenCancel()
+                .verify(java.time.Duration.ofSeconds(5));
+
+        verify(conversationService, timeout(1000))
+                .saveAssistantMessage("sess-1", "已获取的部分答案");
+    }
+
     // ==================== 聊天记忆回填 ====================
 
     @Test
@@ -340,7 +358,7 @@ class OpsAgentServiceTest {
     // ==================== askStreamWithCitations ====================
 
     @Test
-    @DisplayName("askStreamWithCitations：首个事件为 citations，含 event 名称与 JSON 数据")
+    @DisplayName("askStreamWithCitations：答案、citations、DONE 依次输出")
     void askStreamWithCitations_eventOrder() {
         mockAuthenticated();
         when(hybridRetriever.retrieve(anyString(), anyInt()))

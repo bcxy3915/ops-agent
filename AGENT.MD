@@ -251,6 +251,13 @@ docker compose up -d
 
 ## 10. 文档维护
 
+### LangChain4j 迁移工作入口
+
+- `migration/langchain4j` 按 v4 周计划推进；实际进度与验证边界见 `docs/migration/langchain4j/01-baseline-and-poc.md`。
+- Maven profile `langchain4j-poc` 仅引入测试依赖与 `src/poc/java`，不接管生产 Bean；未启用时仍运行现有 Spring AI 实现。
+- 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。
+- SSE 保留实际顺序“答案 → citations → DONE”；原周计划的引用先发描述须以代码与回归测试为准。
+
 项目结构、常用命令或开发约定变化时，同步更新本文。涉及依赖版本、API 与配置的描述，应以仓库当前文件为依据，避免复制过时说明。
 
 - 本文维护长期协作规则、关键契约和可执行命令；临时排查记录、完整评测结果与任务进度放入对应专题资料，避免将一次性现象固化为通用规则。

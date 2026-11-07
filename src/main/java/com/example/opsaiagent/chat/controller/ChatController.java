@@ -86,11 +86,11 @@ public class ChatController {
 
     /**
      * 根据问题返回答案（流式，SSE 增加 citations 事件）
-     * @return SSE 事件流：citations 事件 + 答案 token + [DONE]
+     * @return SSE 事件流：答案 token + citations 事件 + [DONE]
      */
     @Operation(
             summary = "流式问答（SSE）",
-            description = "先推送 citations 引用事件，再逐字返回答案。返回 text/event-stream，前端用 fetch + ReadableStream 消费（POST 传参，避免长文本撑爆请求头）。"
+            description = "逐字返回答案后推送 citations 引用事件，最后发送 [DONE]。返回 text/event-stream，前端用 fetch + ReadableStream 消费（POST 传参，避免长文本撑爆请求头）。"
     )
     @RateLimit(key = "askStream", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")

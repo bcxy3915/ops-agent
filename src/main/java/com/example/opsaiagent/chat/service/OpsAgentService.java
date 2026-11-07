@@ -172,10 +172,10 @@ public class OpsAgentService {
     }
 
     /**
-     * 根据问题生成答案 流式问答：先推送 citations 事件，再逐字返回答案
+     * 根据问题生成答案，逐字返回答案后推送引用。
      * SSE 事件：
-     *   - event=citations, data=引用列表 JSON（首个事件）
      *   - 默认事件（onmessage）：答案 token
+     *   - event=citations, data=引用列表 JSON
      *   - 最后追加 data=[DONE]
      * @param sessionId 会话ID
      * @param question 问题
