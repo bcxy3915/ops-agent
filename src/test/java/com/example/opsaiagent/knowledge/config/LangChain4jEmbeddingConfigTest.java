@@ -60,4 +60,44 @@ class LangChain4jEmbeddingConfigTest {
                             "向量模型维度必须与现有 Pgvector 配置一致");
                 });
     }
+
+    /**
+     * 验证数据库依赖齐备时正式注册已迁移存储，默认分支不注册。
+     * @return 无返回值
+     */
+    @Test
+    void registersMigratedStoreOnlyForLangChain4j() {
+        var databaseRunner = runner
+                .withBean(org.springframework.jdbc.core.JdbcTemplate.class,
+                        () -> org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class))
+                .withBean(com.fasterxml.jackson.databind.ObjectMapper.class,
+                        com.fasterxml.jackson.databind.ObjectMapper::new);
+        databaseRunner.run(context -> assertThat(context)
+                .doesNotHaveBean(com.example.opsaiagent.retrieval.KnowledgeVectorStore.class));
+        databaseRunner.withPropertyValues("ops-agent.ai.provider=langchain4j").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(com.example.opsaiagent.retrieval.KnowledgeVectorStore.class);
+            assertThat(context.getBean(com.example.opsaiagent.retrieval.KnowledgeVectorStore.class))
+                    .isInstanceOf(com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jPgVectorStore.class);
+        });
+    }
+
+    /**
+     * 验证自定义表名不会静默写入默认表。
+     * @return 无返回值
+     */
+    @Test
+    void unsupportedTableFailsExplicitly() {
+        runner.withBean(org.springframework.jdbc.core.JdbcTemplate.class,
+                        () -> org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class))
+                .withBean(com.fasterxml.jackson.databind.ObjectMapper.class,
+                        com.fasterxml.jackson.databind.ObjectMapper::new)
+                .withPropertyValues("ops-agent.ai.provider=langchain4j",
+                        "spring.ai.vectorstore.pgvector.table-name=other_vectors")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasRootCauseMessage(
+                            "当前迁移适配仅支持 public.vector_store 和 COSINE_DISTANCE");
+                });
+    }
 }

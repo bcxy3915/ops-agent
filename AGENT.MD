@@ -256,7 +256,8 @@ docker compose up -d
 - `migration/langchain4j` 按 v4 周计划推进；实际进度与验证边界见 `docs/migration/langchain4j/01-baseline-and-poc.md`。
 - Maven profile `langchain4j-poc` 用于引入 `src/poc/java` 兼容测试，生产实现由 `ops-agent.ai.provider` 选择（默认 `spring-ai`，迁移链路使用 `langchain4j`）；启用该测试 profile 不等于切换生产 provider。
 - LangChain4j 同步与流式 Agent 共用用户隔离的记忆仓库、混合检索与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须预加载 LangChain4j 记忆，避免冷启动重复回填当前问题。
-- `knowledge/config/LangChain4jEmbeddingConfig` 在选择 LangChain4j 时注册向量模型，并通过主候选 `LangChain4jEmbeddingBridge` 为当前 Pgvector 组件生成写入与查询向量。该层仍是 Spring AI 存储接口的过渡适配，不代表存储与 `Document` 类型已迁移；剩余入口与验收要求见 `docs/migration/langchain4j/02-remaining-migration-checklist.md`。切换 SDK 时保持向量模型、维度和文档格式化规则一致。
+- `knowledge/config/LangChain4jEmbeddingConfig` 在选择 LangChain4j 时注册向量模型；主候选 `LangChain4jEmbeddingBridge` 暂为尚未清理的 Spring AI 存储组件提供兼容。业务向量读写已优先切到下一条描述的 JDBC 实现；剩余入口与验收要求见 `docs/migration/langchain4j/02-remaining-migration-checklist.md`。切换 SDK 时保持向量模型、维度和文档格式化规则一致。
+- LangChain4j 的向量读写生产入口现优先使用 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`；Spring AI 存储仅留作回退与暂存自动配置。新接口仍携带 `Document`，后续统一项目文档类型时应收敛到既有框架无关边界。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
 - 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。
 - SSE 保留实际顺序“答案 → citations → DONE”；原周计划的引用先发描述须以代码与回归测试为准。
 

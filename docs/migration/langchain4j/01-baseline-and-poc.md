@@ -310,3 +310,17 @@ Spring AI 向量存储、`Document` 和原生自动配置仍在；通过 `@Prima
 完整剩余迁移入口、配置项及验收边界见 [剩余迁移清单](02-remaining-migration-checklist.md)。本轮定向 **15 项通过**，含本地 HTTP 协议夹具与 Mock JDBC 的实际 Pgvector 组件衔接验证。
 
 全量回归：含 LangChain4j 兼容测试 **1051 项通过**；默认测试集 **1038 项通过**，均为 0 failures、0 errors、0 skipped。`git diff --check` 通过。真实 PostgreSQL、真实 embedding 模型及页面上传检索尚未验收；JaCoCo 的历史执行数据警告不作为本轮覆盖率依据。
+
+### 正式迁移第八切片：向量存储读写（2026-11-08）
+
+新增 `KnowledgeVectorStore` 过渡边界和 `LangChain4jPgVectorStore`，使用 LangChain4j embedding 与 JDBC 直接读写现有 `public.vector_store`。`HybridRetriever` 和 `VectorIndexer` 在该 Bean 存在时绕过 Spring AI `VectorStore`；未选择 LangChain4j 的默认路径不变。
+
+写入复用原 UUID、正文、JSON metadata 与 embedding 列，采用 `ON CONFLICT (id)` 更新；每批最多 10 条，保留原 embedding 内容格式化，验证向量数量、维度与有限值。存储写入方法带事务，参与现有索引 worker 事务；本片不修改原按 source 删除逻辑，不新增表或重建索引。
+
+检索通过参数化 SQL 将 `APPROVED` 与 PUBLIC/TENANT/DEPT/PERSONAL 范围放在排序和 topK 之前；保留余弦相似度阈值 0.5，返回 `score=1-distance` 与原有 metadata.distance。部门集合为 null 表示同租户全部部门，空集合不生成 DEPT 分支；个人知识必须同时匹配租户与 owner。无租户时仅公开已审核知识。
+
+本片仅支持当前项目的 `public.vector_store` 和 `COSINE_DISTANCE`；显式配置其他表名、schema 或距离算法时启动失败，避免静默查询错误表。真实表的维度与 ID 类型未通过本轮 Mock 验证。Spring AI 存储 Bean 及其初始化配置仍保留在依赖图中，不应将生产调用绕过它等同于已彻底移除 starter。Document/MetadataMode 也留待下一切片替换。
+
+测试包括 JDBC 参数与结果映射、UUID/原文保留、分批写入、异常向量、权限范围、Bean 选择、生产入口绕过原存储和模型失败后的 BM25 降级；均使用 Mock，不证明真实 PostgreSQL 的 SQL 执行和事务回滚已经验收。
+
+本片全量验证：默认测试集 **1050 项通过**，含 LangChain4j 兼容测试 **1063 项通过**，均为 0 failures、0 errors、0 skipped；`git diff --check` 通过。未运行真实数据库或真实模型验收，JaCoCo 历史数据警告仍不作为覆盖率结论。

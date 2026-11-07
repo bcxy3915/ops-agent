@@ -17,6 +17,36 @@ import org.springframework.context.annotation.Primary;
 public class LangChain4jEmbeddingConfig {
 
     /**
+     * 注册直接使用 JDBC 的 LangChain4j 向量存储。
+     * @param jdbc 数据库客户端
+     * @param model LangChain4j 向量模型
+     * @param mapper JSON 映射器
+     * @param dimensions 向量维度
+     * @param metadataMode 文档格式化方式
+     * @param schemaName 现有向量表所在 schema
+     * @param tableName 现有向量表名
+     * @param distanceType 现有距离算法
+     * @return 知识向量存储
+     */
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(org.springframework.jdbc.core.JdbcTemplate.class)
+    public com.example.opsaiagent.retrieval.KnowledgeVectorStore langChain4jKnowledgeVectorStore(
+            org.springframework.jdbc.core.JdbcTemplate jdbc, EmbeddingModel model,
+            com.fasterxml.jackson.databind.ObjectMapper mapper,
+            @Value("${ops-agent.ai.embedding.dimensions:${spring.ai.vectorstore.pgvector.dimensions:1024}}") int dimensions,
+            @Value("${spring.ai.openai.embedding.metadata-mode:EMBED}") MetadataMode metadataMode,
+            @Value("${spring.ai.vectorstore.pgvector.schema-name:public}") String schemaName,
+            @Value("${spring.ai.vectorstore.pgvector.table-name:vector_store}") String tableName,
+            @Value("${spring.ai.vectorstore.pgvector.distance-type:COSINE_DISTANCE}") String distanceType) {
+        if (!"public".equals(schemaName) || !"vector_store".equals(tableName)
+                || !"COSINE_DISTANCE".equals(distanceType)) {
+            throw new IllegalArgumentException("当前迁移适配仅支持 public.vector_store 和 COSINE_DISTANCE");
+        }
+        return new com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jPgVectorStore(
+                jdbc, model, mapper, dimensions, metadataMode);
+    }
+
+    /**
      * 创建专用于知识入库和检索的 LangChain4j 向量模型。
      * @param baseUrl 向量服务地址，独立于聊天服务
      * @param apiKey 向量服务密钥

@@ -55,6 +55,24 @@ class HybridRetrieverTest {
     @InjectMocks
     private HybridRetriever hybridRetriever;
 
+    /**
+     * 验证 LangChain4j 分支直接使用项目向量接口，不再调用 Spring AI 存储。
+     * @return 无返回值
+     */
+    @Test
+    void usesMigratedStoreAndPreservesBm25Fallback() {
+        KnowledgeVectorStore migrated = org.mockito.Mockito.mock(KnowledgeVectorStore.class);
+        hybridRetriever.setKnowledgeVectorStore(migrated);
+        when(migrated.search(eq("查询"), eq(20), any(RetrievalScope.class)))
+                .thenThrow(new IllegalStateException("模型不可用"));
+        when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
+                .thenReturn(List.of(doc("关键字兜底")));
+        diversifierPassThrough();
+        assertThat(hybridRetriever.retrieve("查询", 5)).extracting(Document::getText)
+                .containsExactly("关键字兜底");
+        org.mockito.Mockito.verifyNoInteractions(vectorStore);
+    }
+
     /** diversify 直通桩：保留前 limit 个，便于断言后续编排行为 */
     private void diversifierPassThrough() {
         when(diversifier.diversify(any(), anyInt()))

@@ -43,6 +43,17 @@ public class VectorIndexer {
 
     private final VectorStore vectorStore;
     private final TextChunkStrategyResolver strategyResolver;
+    private com.example.opsaiagent.retrieval.KnowledgeVectorStore knowledgeVectorStore;
+
+    /**
+     * 注入已迁移的向量写入接口。
+     * @param store 知识向量存储
+     * @return 无返回值
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setKnowledgeVectorStore(com.example.opsaiagent.retrieval.KnowledgeVectorStore store) {
+        this.knowledgeVectorStore = store;
+    }
 
     /**
      * 将单段文本切分为块；切分后若为空（短文本可能被切分器丢弃），保留一个块兜底保证可检索。
@@ -109,7 +120,11 @@ public class VectorIndexer {
         int indexed = 0;
         for (int i = 0; i < docs.size(); i += BATCH_SIZE) {
             List<Document> batch = docs.subList(i, Math.min(i + BATCH_SIZE, docs.size()));
-            vectorStore.add(batch);
+            if (knowledgeVectorStore != null) {
+                knowledgeVectorStore.write(batch);
+            } else {
+                vectorStore.add(batch);
+            }
             indexed += batch.size();
         }
         return indexed;

@@ -6,13 +6,13 @@
 
 同步问答、SSE 流式 Agent、工具循环、会话记忆、RAG 内容检索接入、结构化诊断和诊断追问，均已有 LangChain4j 生产实现。通过 `ops-agent.ai.provider=langchain4j` 选择；当前默认仍为 `spring-ai`。
 
-本轮进一步接入 LangChain4j embedding 模型：现有 Pgvector 的文档写入与查询向量生成均经过 `LangChain4jEmbeddingBridge`。这是模型调用切片，Pgvector 存储本身仍是 Spring AI 实现，知识链路也仍使用 Spring AI `Document`。
+embedding 切片先通过 `LangChain4jEmbeddingBridge` 接管向量生成；后续存储切片已新增 `KnowledgeVectorStore` 与 `LangChain4jPgVectorStore`，生产依赖齐备时，LangChain4j 分支的 `HybridRetriever` 和 `VectorIndexer` 直接调用 JDBC 存储，绕过 Spring AI `VectorStore`。默认回退与自动配置仍保留，知识链路也仍使用 Spring AI `Document`。
 
 ## 2. 剩余项与顺序
 
 | 优先级 | 当前依赖与入口 | 迁移内容 | 验收重点 |
 | --- | --- | --- | --- |
-| P1 | `HybridRetriever` 的 `VectorStore/SearchRequest`、`VectorIndexer` 的 `VectorStore.add` | 向量读写统一经过项目接口，接入 LangChain4j embedding 与兼容现有表的存储实现，隔离 Spring AI 存储 SPI | 复用 `vector_store` 的 ID、content、metadata、embedding；审核状态、公开/租户/部门/个人范围一致；相似度阈值、topK、批次和失败降级一致 |
+| P1（已接线，待真实数据库验收） | LangChain4j 分支使用 `KnowledgeVectorStore`；Spring AI 回退仍依赖 `VectorStore/SearchRequest` | JDBC 存储已接管读写；后续补真实数据库验证并清理原存储自动配置 | 复用 `vector_store` 的 ID、content、metadata、embedding；审核状态、公开/租户/部门/个人范围一致；相似度阈值、topK、批次和失败降级一致 |
 | P2 | BM25、融合、重排、引用、诊断与入库链路中的 `org.springframework.ai.document.Document` | 统一项目文档类型，在框架适配层转换为 LangChain4j `TextSegment/Content` | 保留 ID、正文、完整 metadata、评分和引用映射；各算法仍能使用可变 metadata，不丢失来源与权限字段 |
 | P3 | `MarkdownDocumentParserStrategy` 的 `MarkdownDocumentReader`、`TokenFallbackSplitter` 的 `TokenTextSplitter` | 替换 Markdown 解析与 token 兜底切分；其他解析器只调整文档类型接口 | Markdown 代码块/引用内容不丢失；切分重叠、硬上限、metadata 和降级策略保持；运行三套现有切分契约测试 |
 | P4 | `OpsAgentService` 的 Spring AI 分支、`AiConfig`、`ChatMemoryConfig`、`ai/adapter/springai` 和原工具注解 | 实际环境验收完成后，移除回退分支、聊天模型和记忆配置、工具注解及过渡 embedding 适配层 | 默认配置可启动；无 Spring AI 业务入口；SSE 顺序、取消、冷启动记忆、工具权限及诊断失败降级保持 |
@@ -20,7 +20,7 @@
 
 P1 与 P2 可以连续推进，存储侧通过适配层衔接；P4、P5 应在前面的生产链路验证后清理，避免移除回退依赖时让知识入库无法运行。
 
-`ai/api/VectorIndex` 与 `KnowledgeSearch` 已定义项目边界，但当前向量读写尚未通过它们完成生产接线。P1 应优先复用并完善这些接口，不能将“接口存在”当成存储迁移已完成。
+`ai/api/VectorIndex` 与 `KnowledgeSearch` 已定义框架无关边界。当前存储切片先通过 `KnowledgeVectorStore` 隔离存储实现，暂时沿用 `Document` 与 `RetrievalScope`，避免一次改动全部调用方；P2 统一文档类型时应合并这些接口，避免长期保留重复边界。
 
 ## 3. 可以继续复用的能力
 

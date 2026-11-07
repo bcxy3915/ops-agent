@@ -29,6 +29,17 @@ public class HybridRetriever {
     private final RerankerClient rerankerClient;
     private final DataScope dataScope;
     private final RetrievalDiversifier diversifier;
+    private KnowledgeVectorStore knowledgeVectorStore;
+
+    /**
+     * 注入 LangChain4j 向量存储；缺省时继续使用原回退实现。
+     * @param store 知识向量存储
+     * @return 无返回值
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setKnowledgeVectorStore(KnowledgeVectorStore store) {
+        this.knowledgeVectorStore = store;
+    }
 
     /**
      * 混合检索（使用当前请求的数据范围）
@@ -89,6 +100,9 @@ public class HybridRetriever {
      */
     private List<Document> vectorSearch(String query, int topK, RetrievalScope scope) {
         try {
+            if (knowledgeVectorStore != null) {
+                return knowledgeVectorStore.search(query, topK, scope);
+            }
             return vectorStore.similaritySearch(
                     SearchRequest.builder()
                             .query(query)
