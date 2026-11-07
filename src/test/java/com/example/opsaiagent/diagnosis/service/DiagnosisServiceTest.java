@@ -1,6 +1,8 @@
 package com.example.opsaiagent.diagnosis.service;
 
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
+import com.example.opsaiagent.ai.api.ChatRequest;
+import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
@@ -45,6 +47,9 @@ class DiagnosisServiceTest {
     private ChatClient chatClient;
 
     @Mock
+    private StructuredOutputGateway structuredOutputGateway;
+
+    @Mock
     private DiagnosisRecordMapper diagnosisMapper;
 
     @Mock
@@ -71,7 +76,8 @@ class DiagnosisServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient, objectMapper,
+        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient,
+                structuredOutputGateway, objectMapper,
                 hybridRetriever, documentMapper, caseMapper, new DiagnosisScope(null, null));
         snapshot = new FailureSnapshotEntity();
         snapshot.setId(100L);
@@ -101,7 +107,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("基于快照诊断成功：调用 LLM 结构化输出并落库 SUCCESS")
     void diagnose_success() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
+        when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
                 .thenReturn(sampleResult());
         when(hybridRetriever.retrieve(anyString(), eq(3))).thenReturn(List.of(
                 new Document("CPU 打满通常是流量突增或死循环导致", Map.of("source", "ops-runbook"))));
@@ -122,7 +128,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("知识库检索失败降级：诊断仍成功（T17 容错）")
     void diagnose_kbRetrieveFails_stillSucceeds() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
+        when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
                 .thenReturn(sampleResult());
         when(hybridRetriever.retrieve(anyString(), eq(3))).thenThrow(new RuntimeException("kb down"));
 
@@ -136,7 +142,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("LLM 调用失败：记录 FAILED 并填充错误信息，不抛异常")
     void diagnose_llmFails_recordsFailed() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
+        when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
                 .thenThrow(new RuntimeException("LLM timeout"));
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
@@ -150,7 +156,7 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("LLM 返回 null：按失败处理落库")
     void diagnose_llmReturnsNull_failed() {
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
+        when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
                 .thenReturn(null);
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
@@ -164,7 +170,7 @@ class DiagnosisServiceTest {
     @DisplayName("按快照 ID 诊断：先查快照再诊断")
     void diagnoseBySnapshot_loadsSnapshot() {
         when(snapshotService.getById(100L)).thenReturn(snapshot);
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().entity(DiagnosisResult.class))
+        when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
                 .thenReturn(sampleResult());
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 

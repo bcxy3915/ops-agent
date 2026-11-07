@@ -1,5 +1,7 @@
 package com.example.opsaiagent.migration;
 
+import com.example.opsaiagent.ai.api.ChatRequest;
+import com.example.opsaiagent.ai.api.ChatStreamEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -26,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import reactor.core.publisher.Flux;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -91,6 +94,21 @@ class LangChain4jCompatibilityPocTest {
                 .isEqualTo("检查测试服务");
     }
 
+    @Test
+    void synchronousGatewayMapsProjectRequestAndResponse() throws Exception {
+        responses.add(completion("{\"role\":\"assistant\",\"content\":\"网关可用\"}", "stop"));
+        LangChain4jChatGateway gateway = new LangChain4jChatGateway(model());
+
+        var response = gateway.chat(new ChatRequest("session-1", "检查服务", "你是运维助手", null));
+
+        assertThat(response.answer()).isEqualTo("网关可用");
+        assertThat(response.provider()).isEqualTo("langchain4j");
+        assertThat(requests.getFirst().path("messages").get(0).path("role").asText())
+                .isEqualTo("system");
+        assertThat(requests.getFirst().path("messages").get(1).path("content").asText())
+                .isEqualTo("检查服务");
+    }
+
     interface DiagnosisAssistant {
         HealthSummary diagnose(String question);
     }
@@ -108,6 +126,23 @@ class LangChain4jCompatibilityPocTest {
         assertThat(assistant.diagnose("返回测试服务状态"))
                 .isEqualTo(new HealthSummary("fixture-service", "DOWN"));
         assertThat(requests).hasSize(1);
+    }
+
+    @Test
+    void structuredOutputGatewayMapsJsonAndRejectsMalformedOutput() throws Exception {
+        String dto = json.writeValueAsString(new HealthSummary("fixture-service", "DOWN"));
+        responses.add(completion(json.writeValueAsString(
+                java.util.Map.of("role", "assistant", "content", dto)), "stop"));
+        LangChain4jStructuredOutputGateway gateway = new LangChain4jStructuredOutputGateway(model(), json);
+
+        assertThat(gateway.generate(new ChatRequest("diag-1", "诊断故障", "输出 JSON", null),
+                HealthSummary.class)).isEqualTo(new HealthSummary("fixture-service", "DOWN"));
+
+        responses.add(completion("{\"role\":\"assistant\",\"content\":\"not-json\"}", "stop"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> gateway.generate(
+                        new ChatRequest("diag-2", "诊断故障", "输出 JSON", null), HealthSummary.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("模型返回的结构化结果格式非法");
     }
 
     interface OpsAssistant {
@@ -183,6 +218,29 @@ class LangChain4jCompatibilityPocTest {
         assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo("服务健康");
         assertThat(tokens.toString()).isEqualTo("服务健康");
         assertThat(requests.getFirst().path("stream").asBoolean()).isTrue();
+    }
+
+    @Test
+    void streamingGatewayMapsTokensAndAppendsDoneEvent() throws Exception {
+        streaming = true;
+        responses.add("data: " + chunk("{\"role\":\"assistant\",\"content\":\"流式\"}", null)
+                + "\n\ndata: " + chunk("{\"content\":\"网关\"}", null)
+                + "\n\ndata: " + chunk("{}", "stop") + "\n\ndata: [DONE]\n\n");
+        OpenAiStreamingChatModel model = OpenAiStreamingChatModel.builder()
+                .baseUrl(baseUrl).apiKey("poc-placeholder-not-a-secret")
+                .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
+        LangChain4jStreamingChatGateway gateway = new LangChain4jStreamingChatGateway(model);
+
+        List<ChatStreamEvent> events = Flux.from(gateway.stream(
+                        new ChatRequest("session-1", "检查服务", "你是运维助手", null)))
+                .collectList().block(Duration.ofSeconds(10));
+
+        assertThat(events).extracting(ChatStreamEvent::type)
+                .containsExactly(ChatStreamEvent.Type.TOKEN, ChatStreamEvent.Type.TOKEN,
+                        ChatStreamEvent.Type.DONE);
+        assertThat(events).extracting(ChatStreamEvent::data).containsExactly("流式", "网关", null);
+        assertThat(requests.getFirst().path("messages").get(0).path("role").asText())
+                .isEqualTo("system");
     }
 
     private String toolResult(JsonNode request, String callId) {

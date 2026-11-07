@@ -133,4 +133,42 @@ New-Item -ItemType Directory -Force target/socket-tmp | Out-Null
 
 本增量未替换生产 Bean，未改变现有聊天、诊断、RAG 或数据库行为；下一步是为这些接口补 Spring AI 过渡适配器和 LangChain4j 对照适配器，并在 W2 阶段门条件恢复后运行真实对照。
 
+### W3 第二个增量（本轮）
+
+已新增 Spring AI 过渡适配器：`SpringAiChatGateway` 和 `SpringAiStreamingChatGateway`。适配器只依赖 W3 项目接口，分别封装同步调用和流式调用；流式适配器在 token 完成后追加 `DONE` 事件。适配器未注册为默认 Bean，也未替换现有 `OpsAgentService`，因此当前生产链路和回退方式不变。
+
+编译验证通过；完整测试回归继续作为本轮出口。
+
+### W3 第三个增量（本轮）
+
+已在 `langchain4j-poc` profile 中新增 `LangChain4jChatGateway` 和 `LangChain4jStreamingChatGateway` 对照适配器。它们将同一组项目 DTO 转换为 LangChain4j 1.23.0 的 `ChatRequest`，同步适配器转换文本响应，流式适配器桥接 `Flow.Publisher` 并追加 `DONE` 事件；生产主源码和默认运行时不引入 LangChain4j 依赖。
+
+新增对照测试覆盖同步请求消息映射、流式 token 映射和结束事件顺序；PoC profile 下 6 项测试全部通过。真实模型、生产工具绑定、历史记忆和 Pgvector 仍需在 W2 阶段门条件恢复后单独验证。
+
 本次不改业务运行配置、数据库结构和真实凭据，不重启服务。回退 PoC 只需不启用 Maven profile；默认运行仍是旧实现。所有更改由用户手动提交。
+
+### W4 第一个增量：结构化输出网关
+
+已在框架中立边界 `StructuredOutputGateway` 上增加 Spring AI 过渡适配器 `SpringAiStructuredOutputGateway`，并在 `langchain4j-poc` profile 下增加 `LangChain4jStructuredOutputGateway`。两套适配器都接收相同的 `ChatRequest` 与目标 DTO 类型，不让框架类型进入业务边界；LangChain4j 适配器通过现有同步聊天网关取得模型文本，并使用项目已有的 Jackson `ObjectMapper` 映射 DTO。
+
+当前失败语义为：空白内容抛出“模型未返回结构化结果”，无法映射的内容抛出“模型返回的结构化结果格式非法”，保留底层异常作为原因。该增量只建立和验证适配器边界，**尚未将 `DiagnosisService` 切换到该网关**，因此现有诊断的模型降级、置信度和错误处理逻辑不变。接入诊断前还需补充空响应与下游失败降级对照测试，并逐项比对现有行为。
+
+PoC 测试新增结构化 JSON 到业务 record DTO 的映射，以及非法 JSON 的明确失败断言。定向 PoC 7 项全部通过；启用 `langchain4j-poc` profile 的全量回归为 **1021 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。测试使用本地 OpenAI 协议夹具，不调用真实模型或外部服务，因此只证明边界映射与协议兼容，不证明真实模型输出稳定性。默认运行仍由 Spring AI 提供，回退方式为不启用 LangChain4j PoC profile。
+
+在当前 Windows/JDK 环境中，Surefire fork 的测试进程未继承 `MAVEN_OPTS` 指定的 Unix-domain socket 临时目录，导致本地 `HttpServer` 初始化失败。通过 `-DforkCount=0` 让测试与 Maven 共用 JVM 后，项目 `target/socket-tmp` 临时目录配置生效；此运行方式用于本机验证，不建议写入项目默认 Surefire 配置。
+
+```powershell
+New-Item -ItemType Directory -Force target/socket-tmp | Out-Null
+$sockTmp = Join-Path $PWD 'target/socket-tmp'
+$env:MAVEN_OPTS='-Djdk.net.unixdomain.tmpdir="' + $sockTmp + '"'
+.\mvnw.cmd -Plangchain4j-poc -Dtest=LangChain4jCompatibilityPocTest -DforkCount=0 test
+.\mvnw.cmd -Plangchain4j-poc -DforkCount=0 test
+```
+
+### W4 第二个增量：诊断结构化调用接入
+
+`DiagnosisService` 的主诊断调用已切换到 `StructuredOutputGateway`；Spring AI 适配器使用诊断请求的唯一会话 ID，保持原有记忆隔离。追问仍保留 `ChatClient` 文本调用，因为它不是结构化 DTO 输出。诊断落库、知识检索、引用生成、`FAILED` 降级和异常消息语义均未改变。
+
+诊断单测改为验证网关返回成功、返回空结果、模型异常和知识库失败等路径；定向诊断与 LangChain4j PoC 共 29 项全部通过。启用 `langchain4j-poc` profile 的全量回归为 **1021 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。JaCoCo 报告提示历史执行数据与本轮 `DiagnosisService` 类不匹配，但不影响测试结果；正式覆盖率需先清理 `target` 后重新执行。
+
+当前仍未把 LangChain4j 适配器注册为生产 Bean，也未切换默认运行时；LangChain4j 真实模型、工具绑定、记忆、Pgvector 和 MCP 阶段门仍未通过。下一步是在独立 profile/配置下补真实模型对照和结构化输出兼容性验证，再评估生产 Bean 的切换。

@@ -1,5 +1,7 @@
 package com.example.opsaiagent.chat.config;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiStructuredOutputGateway;
+import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -26,5 +28,16 @@ public class AiConfig {
                         MessageChatMemoryAdvisor.builder(chatMemory).build()
                 )
                 .build();
+    }
+
+    /**
+     * 配置 Spring AI 结构化输出网关。
+     *
+     * @param chatClient 聊天客户端
+     * @return 结构化输出网关
+     */
+    @Bean
+    public StructuredOutputGateway structuredOutputGateway(ChatClient chatClient) {
+        return new SpringAiStructuredOutputGateway(chatClient);
     }
 }

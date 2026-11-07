@@ -3,6 +3,8 @@ package com.example.opsaiagent.diagnosis.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisReferenceResponse;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
+import com.example.opsaiagent.ai.api.ChatRequest;
+import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.mapper.DiagnosisRecordMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
@@ -46,6 +48,7 @@ public class DiagnosisService {
     private final FailureSnapshotService snapshotService;
     private final DiagnosisPromptTemplate promptTemplate;
     private final ChatClient chatClient;
+    private final StructuredOutputGateway structuredOutputGateway;
     private final ObjectMapper objectMapper;
     private final HybridRetriever hybridRetriever;
     private final KnowledgeDocumentMapper documentMapper;
@@ -183,14 +186,9 @@ public class DiagnosisService {
     protected DiagnosisResult callLlm(String snapshotJson, String context, RetrievalScope scope) {
         String userMessage = promptTemplate.renderUserMessage(snapshotJson);
         String kbContext = context == null ? retrieveContext(snapshotJson, scope) : context;
-        return chatClient.prompt()
-                .system(buildSystemPrompt(kbContext))
-                .user(userMessage)
-                // 全局 ChatClient 默认挂了聊天记忆 advisor，必须提供会话 ID；
-                // 诊断为单轮任务，用唯一 ID 避免混入其他会话历史
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, "diagnosis-" + System.nanoTime()))
-                .call()
-                .entity(DiagnosisResult.class);
+        return structuredOutputGateway.generate(new ChatRequest(
+                "diagnosis-" + System.nanoTime(), userMessage, buildSystemPrompt(kbContext), null),
+                DiagnosisResult.class);
     }
 
     /**
