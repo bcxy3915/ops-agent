@@ -110,8 +110,27 @@ New-Item -ItemType Directory -Force target/socket-tmp | Out-Null
 
 增量执行期间修改注释后出现过 JaCoCo 历史数据不匹配提示。正式生成覆盖率报告时应在没有占用 target 的进程下执行 clean test；本次不报告覆盖率数值。
 
-## 6. 下一步和回退
+## 6. W2 阶段门复核（2026-11-07）
 
-下一步继续 W2 的真实模型与 Pgvector 原数据兼容验证，之后才进入 W3 框架中立 DTO / Gateway。生产迁移将按聊天、记忆/工具、流式/诊断、知识链路顺序逐项替换。
+本轮按“真实模型 + 原数据兼容”要求做了环境探测，结果如下：
+
+| 检查项 | 结果 | 说明 |
+| --- | --- | --- |
+| 真实模型同步/流式/结构化/多轮工具 | 未通过阶段门 | 本机使用已存在的 DashScope 环境凭据发起有界 HTTPS 请求时 TLS 握手失败；没有得到模型响应，也没有记录或输出凭据。DeepSeek key 未出现在环境变量中，不能替换测试目标。 |
+| 应用 PostgreSQL | 未通过阶段门 | `application.yml` 指向 `localhost:5433/opsdb`，该端口当前不可达；`5432` 的可达性不代表应用数据库可用。未尝试启动 Docker，也未触碰业务数据。 |
+| Pgvector 适配器依赖 | 已确认可解析 | `dev.langchain4j:langchain4j-pgvector:1.23.0-beta33` 可从 Maven Central 获取；该版本为 beta，不能据此证明与 Spring AI `vector_store` 兼容。 |
+| schema 对照 | 已完成静态核对 | 当前表为 `id uuid / content text / metadata jsonb / embedding vector(1024)`；LangChain4j 默认 builder 采用独立列布局，不能直接复用而不做适配。 |
+
+结论：W2 **未通过**，未满足真实模型和数据库兼容的迁移前提。后续真实验证必须在 PostgreSQL 5433 恢复、TLS/模型 endpoint 可用后，用隔离表和最小数据集完成；现有 `vector_store` 不清表、不重建索引。
+
+## 7. 下一步和回退
+
+在 W2 环境条件补齐后补做阶段门；当前继续实现 W3 框架中立 DTO / Gateway。生产迁移仍按聊天、记忆/工具、流式/诊断、知识链路顺序逐项替换。W3 边界只被新测试或显式适配 Bean 使用，默认运行仍由 Spring AI 提供，回退方式为不启用新适配器。
+
+### W3 首个增量（本轮）
+
+已新增 `ai/api` 业务边界：`ChatGateway`、`StreamingChatGateway`、`StructuredOutputGateway`、`ToolExecutor`、`KnowledgeSearch`、`VectorIndex` 及其请求/响应、工具、检索和索引 DTO。边界使用 JDK `Flow.Publisher` 和项目 DTO，不泄漏 Spring AI / LangChain4j 类型；流式 DTO 固定 `TOKEN → CITATIONS → DONE` 的顺序语义。`AiBoundaryContractTest` 已覆盖不可变上下文、事件顺序和空向量拒绝。
+
+本增量未替换生产 Bean，未改变现有聊天、诊断、RAG 或数据库行为；下一步是为这些接口补 Spring AI 过渡适配器和 LangChain4j 对照适配器，并在 W2 阶段门条件恢复后运行真实对照。
 
 本次不改业务运行配置、数据库结构和真实凭据，不重启服务。回退 PoC 只需不启用 Maven profile；默认运行仍是旧实现。所有更改由用户手动提交。
