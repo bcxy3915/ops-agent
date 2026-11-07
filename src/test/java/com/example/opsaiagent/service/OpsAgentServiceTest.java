@@ -398,4 +398,101 @@ class OpsAgentServiceTest {
                 .expectNextMatches(ev -> "[DONE]".equals(ev.data()))
                 .verifyComplete();
     }
-}
+    /**
+     * 创建可控的 LangChain4j 流式测试夹具。
+     * @param complete 是否正常结束
+     * @param failure 是否模拟错误
+     * @param handle 模型取消句柄
+     * @return 流式测试夹具
+     */
+    private dev.langchain4j.service.TokenStream langChainStream(boolean complete, boolean failure,
+            dev.langchain4j.model.chat.response.StreamingHandle handle) {
+        var stream = org.mockito.Mockito.mock(dev.langchain4j.service.TokenStream.class,
+                org.mockito.Answers.RETURNS_SELF);
+        java.util.concurrent.atomic.AtomicReference<java.util.function.BiConsumer<
+                dev.langchain4j.model.chat.response.PartialResponse,
+                dev.langchain4j.model.chat.response.PartialResponseContext>> partial =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<java.util.function.Consumer<
+                dev.langchain4j.model.chat.response.ChatResponse>> done =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<java.util.function.Consumer<Throwable>> error =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        org.mockito.Mockito.doAnswer(call -> { partial.set(call.getArgument(0)); return stream; })
+                .when(stream).onPartialResponseWithContext(any());
+        org.mockito.Mockito.doAnswer(call -> { done.set(call.getArgument(0)); return stream; })
+                .when(stream).onCompleteResponse(any());
+        org.mockito.Mockito.doAnswer(call -> { error.set(call.getArgument(0)); return stream; })
+                .when(stream).onError(any());
+        org.mockito.Mockito.doAnswer(call -> {
+            partial.get().accept(new dev.langchain4j.model.chat.response.PartialResponse("回答"),
+                    new dev.langchain4j.model.chat.response.PartialResponseContext(handle));
+            if (failure) { error.get().accept(new IllegalStateException("模型失败")); }
+            else if (complete) { done.get().accept(null); }
+            return null;
+        }).when(stream).start();
+        var assistant = org.mockito.Mockito.mock(
+                com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant.class);
+        when(assistant.askStream(anyString(), anyString(), anyString())).thenReturn(stream);
+        service.setLangChain4jOpsStreamingAssistant(assistant);
+        when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
+        when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
+        return stream;
+    }
+
+    /**
+     * 验证流式事件顺序和历史回填先于当前问题落库。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("LangChain4j 流按答案、引用、DONE 输出并在保存当前问题前回填记忆")
+    void langChainStreamPreservesContractAndHistoryOrder() {
+        mockAuthenticated();
+        var store = org.mockito.Mockito.mock(dev.langchain4j.store.memory.chat.ChatMemoryStore.class);
+        service.setLangChain4jMemoryStore(store);
+        langChainStream(true, false, org.mockito.Mockito.mock(
+                dev.langchain4j.model.chat.response.StreamingHandle.class));
+        StepVerifier.create(service.askStreamWithCitations("lc-session", "问题"))
+                .expectNextMatches(ev -> "回答".equals(ev.data()))
+                .expectNextMatches(ev -> "citations".equals(ev.event()) && "[]".equals(ev.data()))
+                .expectNextMatches(ev -> "[DONE]".equals(ev.data()))
+                .verifyComplete();
+        var order = org.mockito.Mockito.inOrder(store, conversationService);
+        order.verify(store).getMessages(
+                com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of("admin", "lc-session"));
+        order.verify(conversationService).saveUserMessage("lc-session", "问题");
+        verify(conversationService, timeout(1000)).saveAssistantMessage("lc-session", "回答");
+        verify(chatMemory, never()).get(anyString());
+    }
+
+    /**
+     * 验证模型错误不会输出成功结束事件。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("LangChain4j 模型失败保留部分答案且不伪造引用和 DONE")
+    void langChainStreamFailureHasNoSuccessTail() {
+        mockAuthenticated();
+        langChainStream(false, true, org.mockito.Mockito.mock(
+                dev.langchain4j.model.chat.response.StreamingHandle.class));
+        StepVerifier.create(service.askStreamWithCitations("lc-session", "问题"))
+                .expectNextMatches(ev -> "回答".equals(ev.data()))
+                .expectErrorMessage("模型失败").verify();
+        verify(conversationService, timeout(1000)).saveAssistantMessage("lc-session", "回答");
+    }
+
+    /**
+     * 验证客户端取消会传播到模型并保存部分答案。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("LangChain4j 客户端取消会取消模型并保存部分答案")
+    void langChainStreamCancellationStopsModel() {
+        mockAuthenticated();
+        var handle = org.mockito.Mockito.mock(dev.langchain4j.model.chat.response.StreamingHandle.class);
+        langChainStream(false, false, handle);
+        StepVerifier.create(service.askStreamWithCitations("lc-session", "问题"))
+                .expectNextMatches(ev -> "回答".equals(ev.data())).thenCancel().verify();
+        verify(handle, timeout(1000)).cancel();
+        verify(conversationService, timeout(1000)).saveAssistantMessage("lc-session", "回答");
+    }}

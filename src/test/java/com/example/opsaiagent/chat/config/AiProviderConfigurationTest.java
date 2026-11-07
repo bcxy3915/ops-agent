@@ -59,6 +59,34 @@ class AiProviderConfigurationTest {
                 });
     }
 
+    /**
+     * 验证生产依赖齐备时同步与流式 Agent 均实际注册。
+     * @return 无返回值
+     */
+    @Test
+    void registersBothAgentsWithRetrievalAndToolDependencies() {
+        contextRunner
+                .withBean(com.example.opsaiagent.chat.service.ConversationService.class,
+                        () -> mock(com.example.opsaiagent.chat.service.ConversationService.class))
+                .withBean(com.example.opsaiagent.retrieval.HybridRetriever.class,
+                        () -> mock(com.example.opsaiagent.retrieval.HybridRetriever.class))
+                .withBean(com.example.opsaiagent.tools.HealthCheckTools.class,
+                        () -> mock(com.example.opsaiagent.tools.HealthCheckTools.class))
+                .withBean(com.example.opsaiagent.tools.MetricQueryTools.class,
+                        () -> mock(com.example.opsaiagent.tools.MetricQueryTools.class))
+                .withBean(com.example.opsaiagent.tools.MetricDiscoveryTools.class,
+                        () -> mock(com.example.opsaiagent.tools.MetricDiscoveryTools.class))
+                .withBean(com.example.opsaiagent.tools.ServiceDiscoveryTools.class,
+                        () -> mock(com.example.opsaiagent.tools.ServiceDiscoveryTools.class))
+                .withPropertyValues("ops-agent.ai.provider=langchain4j", "ops-agent.ai.api-key=test-key")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(
+                            com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant.class);
+                    assertThat(context).hasSingleBean(
+                            com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant.class);
+                });
+    }
     @Configuration(proxyBeanMethods = false)
     static class TestDependencies {
 

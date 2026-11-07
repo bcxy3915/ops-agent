@@ -21,8 +21,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
+import com.example.opsaiagent.ai.api.ChatGateway;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -47,7 +46,7 @@ public class DiagnosisService {
     private final DiagnosisRecordMapper diagnosisMapper;
     private final FailureSnapshotService snapshotService;
     private final DiagnosisPromptTemplate promptTemplate;
-    private final ChatClient chatClient;
+    private final ChatGateway chatGateway;
     private final StructuredOutputGateway structuredOutputGateway;
     private final ObjectMapper objectMapper;
     private final HybridRetriever hybridRetriever;
@@ -437,6 +436,10 @@ public class DiagnosisService {
 
     /**
      * 追问调用：系统提示词 + 快照 + 原诊断摘要 + 问题，返回文本回答
+     * @param snapshotJson 故障快照 JSON
+     * @param base 原诊断记录
+     * @param question 追问问题
+     * @return 模型回答
      */
     protected String callFollowUpLlm(String snapshotJson, DiagnosisRecordEntity base, String question) {
         StringBuilder user = new StringBuilder();
@@ -450,13 +453,9 @@ public class DiagnosisService {
             user.append("已有诊断摘要：").append(base.getSummary()).append("\n");
         }
         user.append("追问问题：").append(question);
-        return chatClient.prompt()
-                .system("你是一名资深的 SRE 运维专家，基于给定的故障快照与已有诊断回答用户的追问。直接输出答案，不要输出 JSON。")
-                .user(user.toString())
-                // 同上：追问上下文已完整拼在消息里，用唯一会话 ID 走单轮
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, "followup-" + System.nanoTime()))
-                .call()
-                .content();
+        return chatGateway.chat(new ChatRequest("followup-" + java.util.UUID.randomUUID(), user.toString(),
+                "你是一名资深的 SRE 运维专家，基于给定的故障快照与已有诊断回答用户的追问。直接输出答案，不要输出 JSON。",
+                Map.of())).answer();
     }
 
     private void applyResult(DiagnosisRecordEntity record, DiagnosisResult result) throws JsonProcessingException {

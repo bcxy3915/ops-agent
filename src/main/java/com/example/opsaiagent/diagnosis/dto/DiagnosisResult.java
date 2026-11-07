@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * LLM 智能诊断结果（T14）
  * 结构化输出：根因 / 证据 / 置信度 / 建议 / 摘要。
- * 通过 Spring AI ChatClient.entity() 配合 JSON Schema 约束解析。
+ * 通过项目统一的 StructuredOutputGateway 解析。
  */
 @Data
 @Builder

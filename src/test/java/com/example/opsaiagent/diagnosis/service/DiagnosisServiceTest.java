@@ -21,7 +21,8 @@ import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.client.ChatClient;
+import com.example.opsaiagent.ai.api.ChatGateway;
+import com.example.opsaiagent.ai.api.ChatResponse;
 import org.springframework.ai.document.Document;
 
 import java.util.List;
@@ -44,7 +45,7 @@ import static org.mockito.Mockito.when;
 class DiagnosisServiceTest {
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
-    private ChatClient chatClient;
+    private ChatGateway chatGateway;
 
     @Mock
     private StructuredOutputGateway structuredOutputGateway;
@@ -76,7 +77,7 @@ class DiagnosisServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatClient,
+        service = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate, chatGateway,
                 structuredOutputGateway, objectMapper,
                 hybridRetriever, documentMapper, caseMapper, new DiagnosisScope(null, null));
         snapshot = new FailureSnapshotEntity();
@@ -203,8 +204,8 @@ class DiagnosisServiceTest {
         base.setSummary("CPU 持续打满");
         when(diagnosisMapper.selectById(1L)).thenReturn(base);
         when(snapshotService.getById(100L)).thenReturn(snapshot);
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().content())
-                .thenReturn("可以重点排查最近一次发版，回滚验证即可。");
+        when(chatGateway.chat(any(ChatRequest.class)))
+                .thenReturn(new ChatResponse("可以重点排查最近一次发版，回滚验证即可。", Map.of(), "test"));
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 
         DiagnosisRecordEntity record = service.followUp(1L, "怎么快速止损？");
@@ -249,7 +250,7 @@ class DiagnosisServiceTest {
         base.setSnapshotId(100L);
         when(diagnosisMapper.selectById(1L)).thenReturn(base);
         when(snapshotService.getById(100L)).thenReturn(snapshot);
-        when(chatClient.prompt().system(anyString()).user(anyString()).advisors(any(Consumer.class)).call().content())
+        when(chatGateway.chat(any(ChatRequest.class)))
                 .thenThrow(new RuntimeException("LLM timeout"));
         when(diagnosisMapper.insert(any(DiagnosisRecordEntity.class))).thenReturn(1);
 

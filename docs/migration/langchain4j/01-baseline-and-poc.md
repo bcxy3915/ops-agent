@@ -276,3 +276,27 @@ LangChain4j `OpsAssistant` 已通过 `AiServices.contentRetriever(...)` 接入�
 该 Bean 使用 `@ConditionalOnBean(HybridRetriever.class)`，轻量配置上下文缺少向量检索依赖时不会阻断应用启动；Spring AI provider 仍不创建 LangChain4j RAG Agent，默认回退行为保持不变。新增测试覆盖空查询、空文档、空文本过滤、metadata/score 转换及 topK 委托。
 
 本切片验证结果：LangChain4j profile 全量回归 **1035 项，0 failures、0 errors、0 skipped**；默认 Spring AI 全量回归 **1023 项，0 failures、0 errors、0 skipped**。测试未调用真实模型和真实 PostgreSQL，真实权限范围、生产向量库延迟以及检索增强后的模型回答仍需在实际环境阶段验收。
+
+### 正式迁移第六切片：流式 Agent、诊断追问与提示词（2026-11-08）
+
+新增生产 `OpsStreamingAssistant`，由 LangChain4j `AiServices` 接管流式模型、20 条会话窗口、混合检索与四个只读工具，最大工具轮次仍为 8。`OpsAgentService.askStreamWithCitations` 在该 Bean 存在时调用 LangChain4j，继续输出“答案 token → citations → [DONE]”。模型异常会传播错误且不伪造成功尾部；正常完成、异常和客户端取消均保存已生成的部分答案。
+
+异步模型回调使用 `ContextAwareStreamingChatModel` 捕获并恢复租户、部门、用户和认证快照，回调结束恢复线程原上下文，工具循环与下一轮请求继续使用原请求权限。助手消息落库同样显式恢复请求上下文。冷启动时在 `saveUserMessage` 之前预加载 LangChain4j 记忆，避免把当前问题同时当作历史和新消息注入；同步 LangChain4j 问答不再额外预热 Spring AI 记忆。
+
+流式取消使用 LangChain4j 回调提供的 `StreamingHandle`，并在执行工具前检查取消状态。首个文本或工具片段尚未返回、没有取得句柄时，无法立即主动终止底层 HTTP 请求；后续片段到达会取消，后续工具不再开始。此限制不应描述为已经完全实现底层请求即时中断。
+
+`DiagnosisService` 追问改用框架无关的 `ChatGateway`，保持单轮提示词、唯一会话 ID、诊断记录关联与失败落库。Spring AI 回退网关显式使用请求会话 ID，避免默认记忆键混入其他追问。聊天与诊断提示词不再依赖 Spring AI `PromptTemplate`，以固定占位符替换保持快照 JSON 原样传入。
+
+新增验证覆盖：流式成功事件顺序、失败无成功尾部、取消模型与部分答案保存、历史预加载顺序、异步租户上下文恢复及同步/流式 Agent 的生产 Bean 注册。本地 OpenAI 协议夹具验证了“RAG → 健康查询 → 指标查询 → 流式回答”，两个工具轮次均保留请求租户。夹具不会连接真实模型、数据库或业务服务，真实页面与实际模型表现仍待验收。
+
+尚未替换的生产依赖：
+
+| 范围 | 当前状态 | 后续切片 |
+| --- | --- | --- |
+| Pgvector、embedding 与索引写入 | 仍依赖 Spring AI VectorStore | 通过向量边界接入 LangChain4j embedding / 存储实现，保留现有表结构与权限过滤 |
+| Document 数据类型、解析与切分 | 检索与知识入库仍使用 Spring AI Document，token 兜底及部分解析器仍有框架依赖 | 先统一项目文档类型，再替换解析与 token 切分适配 |
+| Spring AI ChatClient、记忆和工具注解 | 保留 provider 回退路径；LangChain4j 问答不再执行其模型调用 | 向量与知识入库迁移通过后，再清理回退实现、配置与 Maven 依赖 |
+
+`langchain4j-poc` 是测试源 profile，不是生产 provider 开关；必须设置 `ops-agent.ai.provider=langchain4j` 才启用已迁移生产链路。当前新增流式 RAG 仍与 citations 各检索一次，沿用上一切片记录的优化项。
+
+本切片验证结果：定向测试 **52 项通过**；启用 langchain4j-poc 测试源的全量回归 **1041 项通过**；默认测试集全量回归 **1028 项通过**，均为 0 failures、0 errors、0 skipped。git diff --check 通过。两种 Maven 测试方式均包含 Mock/本地协议夹具，不代表运行中的应用已切换 provider 或已完成真实环境验收。JaCoCo 仍有历史执行数据与当前类不匹配提示，本次不据此报告覆盖率。

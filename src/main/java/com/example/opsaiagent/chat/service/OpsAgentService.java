@@ -4,6 +4,7 @@ import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
 import com.example.opsaiagent.chat.entity.MessageEntity;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
@@ -24,15 +25,17 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
+import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.model.chat.response.StreamingHandle;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
+import java.util.concurrent.atomic.AtomicReference;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -68,6 +71,18 @@ public class OpsAgentService {
 
     private OpsAssistant langChain4jOpsAssistant;
     private LangChain4jKnowledgeContentRetriever langChain4jKnowledgeContentRetriever;
+    private OpsStreamingAssistant langChain4jOpsStreamingAssistant;
+    private ChatMemoryStore langChain4jMemoryStore;
+
+    /**
+     * 注入用户隔离的 LangChain4j 记忆仓库。
+     * @param store 会话记忆仓库
+     * @return 无返回值
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLangChain4jMemoryStore(ChatMemoryStore store) {
+        this.langChain4jMemoryStore = store;
+    }
 
     /**
      * 注入可选的 LangChain4j 运维助手，仅在选择 LangChain4j provider 时存在。
@@ -89,6 +104,17 @@ public class OpsAgentService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setLangChain4jKnowledgeContentRetriever(LangChain4jKnowledgeContentRetriever contentRetriever) {
         this.langChain4jKnowledgeContentRetriever = contentRetriever;
+    }
+
+    /**
+     * 注入可选的 LangChain4j 流式运维助手。
+     *
+     * @param assistant LangChain4j 流式运维助手
+     * @return 无返回值
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLangChain4jOpsStreamingAssistant(OpsStreamingAssistant assistant) {
+        this.langChain4jOpsStreamingAssistant = assistant;
     }
 
     /**
@@ -143,7 +169,9 @@ public class OpsAgentService {
         log.info("问题: {}", question);
 
         // 0.冷启动回填聊天记忆（进程重启/多实例切换后内存记忆为空）
-        warmUpMemory(sessionId, SecurityUtils.getCurrentUsername());
+        if (langChain4jOpsAssistant == null) {
+            warmUpMemory(sessionId, SecurityUtils.getCurrentUsername());
+        }
 
         // 1.混合检索
         List<Document> documents = langChain4jOpsAssistant != null && langChain4jKnowledgeContentRetriever != null
@@ -158,15 +186,14 @@ public class OpsAgentService {
                 Objects.requireNonNull(d.getText()).substring(0, Math.min(150, d.getText().length()))));
 
         // 3.Prompt 模板填充
-        PromptTemplate template = new PromptTemplate(SYSTEM_PROMPT);
-        String systemPrompt = template.render(Map.of("context", context));
+        String systemPrompt = SYSTEM_PROMPT.replace("{context}", context);
 
         // 4.调用聊天模型生成答案
         String answer;
         if (langChain4jOpsAssistant != null) {
             String username = SecurityUtils.getCurrentUsername();
             String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
-            String ragSystemPrompt = new PromptTemplate(SYSTEM_PROMPT).render(Map.of("context", ""));
+            String ragSystemPrompt = SYSTEM_PROMPT.replace("{context}", "");
             answer = langChain4jOpsAssistant.ask(
                     LangChain4jMemoryId.of(memoryUsername, sessionId), question, ragSystemPrompt);
         } else {
@@ -224,13 +251,21 @@ public class OpsAgentService {
     public Flux<ServerSentEvent<String>> askStreamWithCitations(String sessionId, String question) {
         RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
         return Flux.defer(() -> {
+            RbacContextSnapshot previous = RbacContextSnapshot.capture();
             snapshot.restore();
-            return doAskStreamWithCitations(sessionId, question);
-        }).doFinally(signal -> snapshot.clear());
+            try {
+                return doAskStreamWithCitations(sessionId, question);
+            } finally {
+                previous.restore();
+            }
+        });
     }
 
     /**
      * 在恢复的请求上下文中构建 SSE 流。
+     * @param sessionId 会话 ID
+     * @param question 用户问题
+     * @return SSE 事件流
      */
     private Flux<ServerSentEvent<String>> doAskStreamWithCitations(String sessionId, String question) {
         // 1. 拿当前用户名
@@ -240,7 +275,11 @@ public class OpsAgentService {
         if (username != null) {
             try {
                 // 必须在 saveUserMessage 之前回填，避免当前问题被当成历史重复注入
-                warmUpMemory(sessionId, username);
+                if (langChain4jOpsStreamingAssistant != null && langChain4jMemoryStore != null) {
+                    langChain4jMemoryStore.getMessages(LangChain4jMemoryId.of(username, sessionId));
+                } else {
+                    warmUpMemory(sessionId, username);
+                }
                 conversationService.ensureConversation(sessionId, username, question);
                 conversationService.saveUserMessage(sessionId, question);
             } catch (Exception e) {
@@ -262,9 +301,13 @@ public class OpsAgentService {
         String citationsJson = toJson(citations);
 
         // 4.拼接 System Prompt
-        String systemPrompt = new PromptTemplate(SYSTEM_PROMPT).render(Map.of("context", context));
+        String systemPrompt = SYSTEM_PROMPT.replace("{context}", context);
 
         // 5.流式调用：token 事件（答案先出）→ citations 事件（知识来源最后附上）→ [DONE]
+        if (langChain4jOpsStreamingAssistant != null) {
+            return streamWithLangChain4j(sessionId, question, username, citationsJson,
+                    SYSTEM_PROMPT.replace("{context}", ""));
+        }
         StringBuilder answerBuffer = new StringBuilder();
         Flux<ServerSentEvent<String>> citationsEvent = Flux.just(
                 ServerSentEvent.builder("").event("citations").data(citationsJson).build());
@@ -289,6 +332,89 @@ public class OpsAgentService {
                     if (username != null && !answer.isEmpty()) {
                         try {
                             conversationService.saveAssistantMessage(sessionId, answer);
+                        } catch (Exception e) {
+                            log.error("保存 AI 消息失败", e);
+                        }
+                    }
+                });
+    }
+
+    /**
+     * 使用 LangChain4j 流式 Agent 生成 SSE 事件。
+     *
+     * @param sessionId 会话 ID
+     * @param question 用户问题
+     * @param username 当前用户名
+     * @param citationsJson 引用 JSON
+     * @param systemPrompt 系统提示词
+     * @return SSE 事件流
+     */
+    private Flux<ServerSentEvent<String>> streamWithLangChain4j(String sessionId, String question,
+                                                                  String username, String citationsJson,
+                                                                  String systemPrompt) {
+        RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
+        String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
+        StringBuilder answerBuffer = new StringBuilder();
+        Flux<String> tokens = Flux.create(sink -> {
+            AtomicReference<StreamingHandle> handle = new AtomicReference<>();
+            sink.onCancel(() -> {
+                StreamingHandle current = handle.get();
+                if (current != null) {
+                    current.cancel();
+                }
+            });
+            RbacContextSnapshot previous = RbacContextSnapshot.capture();
+            snapshot.restore();
+            try {
+                TokenStream stream = langChain4jOpsStreamingAssistant.askStream(
+                        LangChain4jMemoryId.of(memoryUsername, sessionId), question, systemPrompt);
+                stream.onPartialResponseWithContext((response, context) -> {
+                            handle.set(context.streamingHandle());
+                            if (sink.isCancelled()) {
+                                context.streamingHandle().cancel();
+                            } else {
+                                sink.next(response.text());
+                            }
+                        })
+                        .onPartialToolCallWithContext((tool, context) -> {
+                            handle.set(context.streamingHandle());
+                            if (sink.isCancelled()) {
+                                context.streamingHandle().cancel();
+                            }
+                        })
+                        .beforeToolExecution(tool -> {
+                            if (sink.isCancelled()) {
+                                throw new java.util.concurrent.CancellationException("客户端已取消问答");
+                            }
+                        })
+                        .onCompleteResponse(response -> sink.complete())
+                        .onError(sink::error)
+                        .start();
+            } catch (Exception e) {
+                sink.error(e);
+            } finally {
+                previous.restore();
+            }
+        });
+        Flux<ServerSentEvent<String>> tokenEvents = tokens
+                .doOnNext(answerBuffer::append)
+                .map(token -> ServerSentEvent.builder(token).build());
+        Flux<ServerSentEvent<String>> tailEvents = Flux.just(
+                ServerSentEvent.builder("").event("citations").data(citationsJson).build(),
+                ServerSentEvent.builder("[DONE]").build());
+        return Flux.concat(tokenEvents, tailEvents)
+                .publishOn(Schedulers.boundedElastic(), true, 256)
+                .doFinally(signal -> {
+                    String answer = answerBuffer.toString();
+                    if (username != null && !answer.isEmpty()) {
+                        try {
+                            RbacContextSnapshot previous = RbacContextSnapshot.capture();
+                            try {
+                                snapshot.restore();
+                                conversationService.saveAssistantMessage(sessionId, answer);
+                            } finally {
+                                previous.restore();
+                            }
                         } catch (Exception e) {
                             log.error("保存 AI 消息失败", e);
                         }

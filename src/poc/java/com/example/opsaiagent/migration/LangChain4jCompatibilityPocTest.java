@@ -291,6 +291,75 @@ class LangChain4jCompatibilityPocTest {
         assertThat(requests).hasSize(1);
     }
 
+    /**
+     * 验证生产流式 Agent 的 RAG、连续工具轮次和异步权限上下文。
+     * @return 无返回值
+     * @throws Exception 夹具或模型调用异常
+     */
+    @Test
+    void streamingAgentRetrievesKnowledgeAndExecutesToolsWithRequestContext() throws Exception {
+        streaming = true;
+        responses.add(streamingToolCall("health-1", "queryServiceHealth",
+                "{\"serviceName\":\"fixture-service\"}"));
+        responses.add(streamingToolCall("metric-1", "queryMetric",
+                "{\"serviceName\":\"fixture-service\",\"metricName\":\"cpu\"}"));
+        responses.add("data: " + chunk("{\"role\":\"assistant\",\"content\":\"只读诊断完成\"}", null)
+                + "\n\ndata: " + chunk("{}", "stop") + "\n\ndata: [DONE]\n\n");
+        var health = mock(HealthCheckTools.class);
+        var metric = mock(MetricQueryTools.class);
+        when(health.queryServiceHealth("fixture-service")).thenAnswer(call -> {
+            assertThat(com.example.opsaiagent.rbac.context.TenantContext.get()).isEqualTo("fixture-tenant");
+            return "DOWN";
+        });
+        when(metric.queryMetric("fixture-service", "cpu")).thenAnswer(call -> {
+            assertThat(com.example.opsaiagent.rbac.context.TenantContext.get()).isEqualTo("fixture-tenant");
+            return "0.91";
+        });
+        var model = OpenAiStreamingChatModel.builder().baseUrl(baseUrl).apiKey("test-key")
+                .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
+        var assistant = AiServices.builder(
+                        com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant.class)
+                .streamingChatModel(new com.example.opsaiagent.ai.adapter.langchain4j.ContextAwareStreamingChatModel(model))
+                .chatMemoryProvider(id -> MessageWindowChatMemory.builder().id(id).maxMessages(20).build())
+                .tools(new LangChain4jReadOnlyToolBindings(health, metric,
+                        mock(MetricDiscoveryTools.class), mock(ServiceDiscoveryTools.class)))
+                .contentRetriever(query -> List.of(dev.langchain4j.rag.content.Content.from("测试运维知识")))
+                .maxToolCallingRoundTrips(8)
+                .build();
+        CompletableFuture<String> result = new CompletableFuture<>();
+        var tokens = new StringBuilder();
+        com.example.opsaiagent.rbac.context.TenantContext.set("fixture-tenant");
+        try {
+            assistant.askStream(LangChain4jMemoryId.of("alice", "stream-session"), "检查测试服务", "运维助手")
+                    .onPartialResponseWithContext((response, context) -> tokens.append(response.text()))
+                    .onCompleteResponse(response -> result.complete(response.aiMessage().text()))
+                    .onError(result::completeExceptionally).start();
+        } finally {
+            com.example.opsaiagent.rbac.context.TenantContext.clear();
+        }
+        assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo("只读诊断完成");
+        assertThat(tokens.toString()).isEqualTo("只读诊断完成");
+        assertThat(requests).hasSize(3);
+        assertThat(requests.getFirst().toString()).contains("测试运维知识");
+        assertThat(toolResult(requests.get(1), "health-1")).isEqualTo("DOWN");
+        assertThat(toolResult(requests.get(2), "metric-1")).isEqualTo("0.91");
+    }
+
+    /**
+     * 构造只用于本地测试的流式工具调用响应。
+     * @param id 工具调用标识
+     * @param name 工具名称
+     * @param arguments 参数 JSON
+     * @return SSE 测试响应
+     * @throws Exception JSON 序列化异常
+     */
+    private String streamingToolCall(String id, String name, String arguments) throws Exception {
+        String delta = json.writeValueAsString(java.util.Map.of("role", "assistant", "tool_calls",
+                List.of(java.util.Map.of("index", 0, "id", id, "type", "function", "function",
+                        java.util.Map.of("name", name, "arguments", arguments)))));
+        return "data: " + chunk(delta, null) + "\n\ndata: " + chunk("{}", "tool_calls")
+                + "\n\ndata: [DONE]\n\n";
+    }
     private String toolResult(JsonNode request, String callId) {
         for (JsonNode message : request.path("messages")) {
             if (callId.equals(message.path("tool_call_id").asText())) {

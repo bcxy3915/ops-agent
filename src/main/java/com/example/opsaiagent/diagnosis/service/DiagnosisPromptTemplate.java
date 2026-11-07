@@ -1,14 +1,14 @@
 package com.example.opsaiagent.diagnosis.service;
 
-import org.springframework.ai.chat.prompt.PromptTemplate;
+
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
+
 
 /**
  * LLM 智能诊断提示词模板（T14）
  * 输入故障快照聚合数据，约束模型输出结构化诊断（根因/证据/置信度/建议）。
- * 实际 JSON Schema 约束由 ChatClient.entity(DiagnosisResult.class) 自动生成。
+ * 结构化结果通过项目统一模型网关解析。
  */
 @Component
 public class DiagnosisPromptTemplate {
@@ -33,9 +33,13 @@ public class DiagnosisPromptTemplate {
             - 输出为合法 JSON，不要输出任何 JSON 之外的文字。
             """;
 
-    /** 组装用户消息：把快照 JSON 原样传入 */
+    /**
+     * 组装用户消息，把快照 JSON 原样传入。
+     * @param snapshotJson 故障快照 JSON
+     * @return 诊断用户消息
+     */
     public String renderUserMessage(String snapshotJson) {
-        return new PromptTemplate("""
+        return """
                 请对以下故障快照进行诊断：
 
                 ```json
@@ -43,6 +47,6 @@ public class DiagnosisPromptTemplate {
                 ```
 
                 请输出结构化诊断结果。
-                """).render(Map.of("snapshot", snapshotJson == null ? "{}" : snapshotJson));
+                """.replace("{snapshot}", snapshotJson == null ? "{}" : snapshotJson);
     }
 }

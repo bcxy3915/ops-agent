@@ -254,7 +254,8 @@ docker compose up -d
 ### LangChain4j 迁移工作入口
 
 - `migration/langchain4j` 按 v4 周计划推进；实际进度与验证边界见 `docs/migration/langchain4j/01-baseline-and-poc.md`。
-- Maven profile `langchain4j-poc` 仅引入测试依赖与 `src/poc/java`，不接管生产 Bean；未启用时仍运行现有 Spring AI 实现。
+- Maven profile `langchain4j-poc` 用于引入 `src/poc/java` 兼容测试，生产实现由 `ops-agent.ai.provider` 选择（默认 `spring-ai`，迁移链路使用 `langchain4j`）；启用该测试 profile 不等于切换生产 provider。
+- LangChain4j 同步与流式 Agent 共用用户隔离的记忆仓库、混合检索与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须预加载 LangChain4j 记忆，避免冷启动重复回填当前问题。
 - 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。
 - SSE 保留实际顺序“答案 → citations → DONE”；原周计划的引用先发描述须以代码与回归测试为准。
 

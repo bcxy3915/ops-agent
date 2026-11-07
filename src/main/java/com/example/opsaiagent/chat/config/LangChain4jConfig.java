@@ -5,6 +5,8 @@ import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStructuredOutput
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
+import com.example.opsaiagent.ai.adapter.langchain4j.ContextAwareStreamingChatModel;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever;
 import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
@@ -157,11 +159,12 @@ public class LangChain4jConfig {
      * @param chatModel LangChain4j 聊天模型
      * @param chatMemoryStore 用户隔离的会话记忆仓库
      * @param tools 四个现有只读运维工具
+     * @param contentRetriever LangChain4j 知识内容检索器
      * @return LangChain4j 运维助手
      */
     @Bean
     @ConditionalOnBean({ConversationService.class, HealthCheckTools.class, MetricQueryTools.class,
-            MetricDiscoveryTools.class, ServiceDiscoveryTools.class, LangChain4jKnowledgeContentRetriever.class})
+            MetricDiscoveryTools.class, ServiceDiscoveryTools.class, HybridRetriever.class})
     public OpsAssistant langChain4jOpsAssistant(ChatModel chatModel,
                                                 ChatMemoryStore chatMemoryStore,
                                                 LangChain4jReadOnlyToolBindings tools,
@@ -173,6 +176,39 @@ public class LangChain4jConfig {
                 .build();
         return AiServices.builder(OpsAssistant.class)
                 .chatModel(chatModel)
+                .chatMemoryProvider(memoryProvider)
+                .tools(tools)
+                .contentRetriever(contentRetriever)
+                .maxToolCallingRoundTrips(8)
+                .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
+                .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
+                .build();
+    }
+
+    /**
+     * 注册带有会话记忆、知识检索和只读工具的 LangChain4j 流式运维助手。
+     *
+     * @param streamingChatModel LangChain4j 流式聊天模型
+     * @param chatMemoryStore 用户隔离的会话记忆仓库
+     * @param tools 四个现有只读运维工具
+     * @param contentRetriever LangChain4j 知识内容检索器
+     * @return LangChain4j 流式运维助手
+     */
+    @Bean
+    @ConditionalOnBean({ConversationService.class, HealthCheckTools.class, MetricQueryTools.class,
+            MetricDiscoveryTools.class, ServiceDiscoveryTools.class, HybridRetriever.class})
+    public OpsStreamingAssistant langChain4jOpsStreamingAssistant(
+            OpenAiStreamingChatModel streamingChatModel,
+            ChatMemoryStore chatMemoryStore,
+            LangChain4jReadOnlyToolBindings tools,
+            LangChain4jKnowledgeContentRetriever contentRetriever) {
+        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
+                .id(memoryId)
+                .maxMessages(20)
+                .chatMemoryStore(chatMemoryStore)
+                .build();
+        return AiServices.builder(OpsStreamingAssistant.class)
+                .streamingChatModel(new ContextAwareStreamingChatModel(streamingChatModel))
                 .chatMemoryProvider(memoryProvider)
                 .tools(tools)
                 .contentRetriever(contentRetriever)

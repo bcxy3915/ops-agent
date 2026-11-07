@@ -25,6 +25,8 @@ public class SpringAiChatGateway implements ChatGateway {
         String answer = chatClient.prompt()
                 .system(request.systemPrompt())
                 .user(request.question())
+                .advisors(advisor -> advisor.param(
+                        org.springframework.ai.chat.memory.ChatMemory.CONVERSATION_ID, request.sessionId()))
                 .call()
                 .content();
         return new ChatResponse(answer, Map.of(), "spring-ai");
