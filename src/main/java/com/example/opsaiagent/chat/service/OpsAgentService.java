@@ -2,6 +2,7 @@ package com.example.opsaiagent.chat.service;
 
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.chat.entity.MessageEntity;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
@@ -66,6 +67,7 @@ public class OpsAgentService {
     private final ObjectMapper objectMapper;
 
     private OpsAssistant langChain4jOpsAssistant;
+    private LangChain4jKnowledgeContentRetriever langChain4jKnowledgeContentRetriever;
 
     /**
      * 注入可选的 LangChain4j 运维助手，仅在选择 LangChain4j provider 时存在。
@@ -76,6 +78,17 @@ public class OpsAgentService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setLangChain4jOpsAssistant(OpsAssistant assistant) {
         this.langChain4jOpsAssistant = assistant;
+    }
+
+    /**
+     * 注入可选的 LangChain4j RAG 内容检索器。
+     *
+     * @param contentRetriever LangChain4j 知识内容检索器
+     * @return 无返回值
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLangChain4jKnowledgeContentRetriever(LangChain4jKnowledgeContentRetriever contentRetriever) {
+        this.langChain4jKnowledgeContentRetriever = contentRetriever;
     }
 
     /**
@@ -133,7 +146,9 @@ public class OpsAgentService {
         warmUpMemory(sessionId, SecurityUtils.getCurrentUsername());
 
         // 1.混合检索
-        List<Document> documents = hybridRetriever.retrieve(question, 5);
+        List<Document> documents = langChain4jOpsAssistant != null && langChain4jKnowledgeContentRetriever != null
+                ? langChain4jKnowledgeContentRetriever.retrieveDocuments(question)
+                : hybridRetriever.retrieve(question, 5);
         String context = buildContext(documents);
 
         // 打印召回的片段
@@ -151,8 +166,9 @@ public class OpsAgentService {
         if (langChain4jOpsAssistant != null) {
             String username = SecurityUtils.getCurrentUsername();
             String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
+            String ragSystemPrompt = new PromptTemplate(SYSTEM_PROMPT).render(Map.of("context", ""));
             answer = langChain4jOpsAssistant.ask(
-                    LangChain4jMemoryId.of(memoryUsername, sessionId), question, systemPrompt);
+                    LangChain4jMemoryId.of(memoryUsername, sessionId), question, ragSystemPrompt);
         } else {
             answer = chatClient.prompt()
                     .system(systemPrompt)

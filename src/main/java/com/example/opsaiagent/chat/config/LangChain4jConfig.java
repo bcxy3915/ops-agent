@@ -5,6 +5,7 @@ import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStructuredOutput
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever;
 import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import com.example.opsaiagent.ai.api.StreamingChatGateway;
@@ -15,6 +16,7 @@ import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
 import com.example.opsaiagent.tools.ServiceDiscoveryTools;
 import com.example.opsaiagent.tools.langchain4j.LangChain4jReadOnlyToolBindings;
+import com.example.opsaiagent.retrieval.HybridRetriever;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
@@ -159,10 +161,11 @@ public class LangChain4jConfig {
      */
     @Bean
     @ConditionalOnBean({ConversationService.class, HealthCheckTools.class, MetricQueryTools.class,
-            MetricDiscoveryTools.class, ServiceDiscoveryTools.class})
+            MetricDiscoveryTools.class, ServiceDiscoveryTools.class, LangChain4jKnowledgeContentRetriever.class})
     public OpsAssistant langChain4jOpsAssistant(ChatModel chatModel,
                                                 ChatMemoryStore chatMemoryStore,
-                                                LangChain4jReadOnlyToolBindings tools) {
+                                                LangChain4jReadOnlyToolBindings tools,
+                                                LangChain4jKnowledgeContentRetriever contentRetriever) {
         ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
                 .id(memoryId)
                 .maxMessages(20)
@@ -172,10 +175,24 @@ public class LangChain4jConfig {
                 .chatModel(chatModel)
                 .chatMemoryProvider(memoryProvider)
                 .tools(tools)
+                .contentRetriever(contentRetriever)
                 .maxToolCallingRoundTrips(8)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
                 .build();
+    }
+
+    /**
+     * 注册基于现有混合检索的 LangChain4j RAG 内容检索器。
+     *
+     * @param hybridRetriever 现有向量、BM25、融合和重排检索服务
+     * @return LangChain4j RAG 内容检索器
+     */
+    @Bean
+    @ConditionalOnBean(HybridRetriever.class)
+    public LangChain4jKnowledgeContentRetriever langChain4jKnowledgeContentRetriever(
+            HybridRetriever hybridRetriever) {
+        return new LangChain4jKnowledgeContentRetriever(hybridRetriever, 5);
     }
 
     /**

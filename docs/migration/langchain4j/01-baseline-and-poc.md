@@ -266,3 +266,13 @@ W6 定向 PoC 共 **12 项通过，0 failures、0 errors、0 skipped**。该增�
 `ConversationChatMemoryStoreTest` 覆盖 20 条历史窗口、同 session 不同用户隔离、清理隔离及包含分隔符的身份编码。定向记忆与 Provider 配置测试 **5 项通过**。会话记忆已由第四切片同步 Agent 接入，并在调用时显式传入可信用户名与 sessionId 编码后的 memory ID。现有 SSE 流式入口、引用事件和消息落库行为尚未改变。
 
 当前仍保留 JaCoCo 执行数据与最新编译类不匹配的历史警告，不影响测试结论；正式覆盖率统计应在清理 `target` 后重新执行。下一切片再处理 SSE 流式 Agent 接入，需同时保持引用事件、工具循环、取消、消息落库和 `[DONE]` 顺序契约。
+
+### 正式迁移第五切片：RAG 内容检索接入
+
+新增生产 `LangChain4jKnowledgeContentRetriever`，实现 LangChain4j `ContentRetriever`，复用现有 `HybridRetriever` 的向量检索、BM25、RRF 融合、去重和重排能力。Spring AI `Document` 会转换为 LangChain4j `TextSegment` 和 `Content`，保留来源等 metadata，并将 `score` 转换为 `ContentMetadata.SCORE`；空文本片段会被过滤，空查询不会访问检索服务。
+
+LangChain4j `OpsAssistant` 已通过 `AiServices.contentRetriever(...)` 接入该检索器。LangChain4j 模式下，Agent 的 RAG 内容由框架检索增强管线注入；`OpsAgentService` 仍保留一次混合检索，用于生成结构化引用和命中流水，确保现有前端 citations 契约不变。当前因此会产生一次额外检索，后续可通过请求级检索缓存或统一 `RetrievalAugmentor` 同时产出上下文和引用，减少重复查询。
+
+该 Bean 使用 `@ConditionalOnBean(HybridRetriever.class)`，轻量配置上下文缺少向量检索依赖时不会阻断应用启动；Spring AI provider 仍不创建 LangChain4j RAG Agent，默认回退行为保持不变。新增测试覆盖空查询、空文档、空文本过滤、metadata/score 转换及 topK 委托。
+
+本切片验证结果：LangChain4j profile 全量回归 **1035 项，0 failures、0 errors、0 skipped**；默认 Spring AI 全量回归 **1023 项，0 failures、0 errors、0 skipped**。测试未调用真实模型和真实 PostgreSQL，真实权限范围、生产向量库延迟以及检索增强后的模型回答仍需在实际环境阶段验收。
