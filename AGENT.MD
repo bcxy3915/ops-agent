@@ -113,7 +113,7 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略做文本抽取，不单独引入其他 Reader。其中内置加载的 Markdown 直接读原文（保留标题结构交给切分策略），上传的 Markdown 由 `MarkdownDocumentParserStrategy` 抽取纯文本后存入 `raw_content`。
 - 切分由 `VectorIndexer` 统一收口；解析后文本受 `ops-agent.knowledge.ingest.max-chars`（默认 1000 万字符）限制，超长必须显式拒绝，禁止用 `maxNumChunks` 之类参数静默截断。
 - 切分策略位于 `knowledge/ingest/splitter`（策略模式，设计文档 `docs/design/text-split/`）：`TextChunkStrategy` 接口（name / order / supports / split）+ `TextChunkStrategyResolver` 四级路由——`strategyOverride` 显式指定 → docType 覆盖配置 → `supports` 自然匹配 → `default-strategy`；未知名与策略异常一律降级 `token` 兜底，切分永不失败。新增策略须登记唯一 name 并保持 order 语义（小者优先）。
-- 路由现状：MARKDOWN → `markdown-structural`（自研 ATX 标题行扫描，不依赖 `MarkdownDocumentReader` 行为；headingPath 复用 `metadata.section`，零 DDL）；TXT / PDF / DOCX → `recursive`（段落→行→句终分隔符阶梯，冒号不切；围栏代码块与表格行是原子单元；相邻块携带整句 overlap；尾块不足 minChunkChars 并入前块）；`token` 仅作兜底（包装旧 `TokenTextSplitter` 口径）。
+- 路由现状：MARKDOWN → `markdown-structural`（自研 ATX 标题行扫描，不依赖 `MarkdownDocumentReader` 行为；headingPath 复用 `metadata.section`，零 DDL）；TXT / PDF / DOCX → `recursive`（段落→行→句终分隔符阶梯，冒号不切；围栏代码块与表格行是原子单元；相邻块携带整句 overlap；尾块不足 minChunkChars 并入前块）；`token` 仅作兜底（直接使用 JTokkit，保留旧固定窗口、trim、短块过滤与分块元数据口径，达到块数上限显式失败）。
 - 策略四条不变量由单测强制：块按序拼接（去相邻重叠）与原文完全一致、不产空白块、每块不超 `max-chunk-tokens`、输出块携带输入文档全部 metadata。修改切分算法须运行 `RecursiveBoundarySplitterTest`、`MarkdownStructuralSplitterTest` 和 `TextChunkStrategyResolverTest`。
 - 切分配置唯一来源 `ops-agent.knowledge.split.*`（`application.yml`）。回退旧 TokenTextSplitter 口径：`default-strategy: token` + `markdown.strategy: token`，不要通过改代码回退。
 - 每个向量块自动打 `splitStrategy`（策略名）与 `splitVersion`（算法代次，当前 2）标记，供 A/B 评测隔离、检索排查与存量重索引识别；调整算法代次时同步更新 `TextChunkStrategy.CURRENT_SPLIT_VERSION`。
@@ -257,7 +257,7 @@ docker compose up -d
 - Maven profile `langchain4j-poc` 用于引入 `src/poc/java` 兼容测试，生产实现由 `ops-agent.ai.provider` 选择（默认 `spring-ai`，迁移链路使用 `langchain4j`）；启用该测试 profile 不等于切换生产 provider。
 - LangChain4j 同步与流式 Agent 共用用户隔离的记忆仓库、混合检索与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须预加载 LangChain4j 记忆，避免冷启动重复回填当前问题。
 - `knowledge/config/LangChain4jEmbeddingConfig` 在选择 LangChain4j 时注册向量模型；主候选 `LangChain4jEmbeddingBridge` 暂为尚未清理的 Spring AI 存储组件提供兼容。业务向量读写已优先切到下一条描述的 JDBC 实现；剩余入口与验收要求见 `docs/migration/langchain4j/02-remaining-migration-checklist.md`。切换 SDK 时保持向量模型、维度和文档格式化规则一致。
-- LangChain4j 的向量读写生产入口现优先使用 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`；Spring AI 存储仅留作回退与暂存自动配置。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；框架文档只通过 `SpringAiDocumentMapper` 在 Reader、token 兜底、embedding 格式化和回退存储边界转换。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
+- LangChain4j 的向量读写生产入口现优先使用 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`；Spring AI 存储仅留作回退与暂存自动配置。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；`SpringAiDocumentMapper` 仅用于回退存储边界。Markdown 解析直接使用 CommonMark；token 兜底直接使用 JTokkit；JDBC 向量写入使用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，必须保持存量向量输入格式。旧 Markdown Reader 仅作测试依赖对照，Spring AI embedding bridge 仍留待回退清理。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
 - 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。
 - SSE 保留实际顺序“答案 → citations → DONE”；原周计划的引用先发描述须以代码与回归测试为准。
 

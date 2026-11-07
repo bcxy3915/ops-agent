@@ -334,3 +334,15 @@ Spring AI 向量存储、`Document` 和原生自动配置仍在；通过 `@Prima
 该切片完成业务文档类型替换，尚未移除 Spring AI：`MetadataMode` 与 embedding 默认内容格式化、Markdown Reader、TokenTextSplitter、回退模型/记忆/存储与 Maven starter 仍需后续清理。早期预留的 `ai/api/VectorIndex`、`KnowledgeSearch` 本片未接入生产，实际向量边界仍为 `KnowledgeVectorStore`。
 
 新增测试验证文档往返转换、权限元数据保留、输入元数据隔离、空元数据与空评分，以及向量评分和重排评分优先级；现有切分与检索测试继续验证原契约。默认全量 **1054 项通过**，含 LangChain4j 兼容测试全量 **1067 项通过**，均为 0 failures、0 errors、0 skipped。测试使用 Mock 与本地协议夹具，未执行真实 PostgreSQL、真实模型或页面验收；未重建向量索引。JaCoCo 历史数据警告不作为覆盖率结论。
+
+### 正式迁移第十切片：解析、token 兜底与向量内容格式化（2026-11-08）
+
+`MarkdownDocumentParserStrategy` 直接使用 CommonMark 解析，按 UTF-8 读取资源，保留迁移前的标题分组、代码块、引用、列表、换行与 category/title/lang 元数据行为。每次调用独立持有解析状态。内置 Markdown 仍由原加载入口读取原文，结构化切分不变。
+
+`TokenFallbackSplitter` 直接使用 JTokkit 的 CL100K_BASE，保留固定 500 token 窗口、200 字符之后的英文句末/换行截断、trim、长度大于 5 的短块过滤，以及 parent_document_id/chunk_index/total_chunks 和原评分。递归与 Markdown 结构化策略未更改，token 兜底仍不使用路由参数改写固定旧口径。达到 100000 块时显式失败，避免旧实现追加超大尾块；未更改普通文本分块代次或触发重索引。这里保留的是旧 token 兜底语义，不将其描述为无损拼接算法。
+
+JDBC 存储改用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，移除文档转回框架类型才能格式化的依赖。新旧默认模板对照覆盖全部元数据模式、空元数据、哈希碰撞、模板占位符与元数据顺序；保留系统元数据行分隔符和正文前双换行，避免改变已有模型的输入文本。框架自定义模板不在新路径支持范围内，旧 embedding bridge 保留原行为，随回退清理。
+
+Maven 移除 Spring AI PDF Reader，显式声明 PDFBox 3.0.7、CommonMark 0.22.0 与 JTokkit 1.1.0；旧 Markdown Reader 仅保留 test scope，用于迁移对照。运行时依赖树确认不含两个 Reader；Spring AI 模型和向量 starter 尚未删除。兼容规则来源与许可见 `docs/licenses/spring-ai-compatibility.md`。
+
+定向 **47 项通过**；默认全量 **1058 项通过**，含 LangChain4j 兼容测试全量 **1071 项通过**，均为 0 failures、0 errors、0 skipped。未执行真实模型、PostgreSQL 或页面验收，未修改本地密钥配置、数据库结构和向量索引。JaCoCo 历史执行数据警告不作为覆盖率依据。

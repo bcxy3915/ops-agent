@@ -4,6 +4,7 @@ import com.example.opsaiagent.ai.adapter.springai.LangChain4jEmbeddingBridge;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.document.MetadataMode;
+import com.example.opsaiagent.knowledge.model.EmbeddingMetadataMode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.convert.DurationStyle;
@@ -34,7 +35,7 @@ public class LangChain4jEmbeddingConfig {
             org.springframework.jdbc.core.JdbcTemplate jdbc, EmbeddingModel model,
             com.fasterxml.jackson.databind.ObjectMapper mapper,
             @Value("${ops-agent.ai.embedding.dimensions:${spring.ai.vectorstore.pgvector.dimensions:1024}}") int dimensions,
-            @Value("${spring.ai.openai.embedding.metadata-mode:EMBED}") MetadataMode metadataMode,
+            @Value("${spring.ai.openai.embedding.metadata-mode:EMBED}") EmbeddingMetadataMode metadataMode,
             @Value("${spring.ai.vectorstore.pgvector.schema-name:public}") String schemaName,
             @Value("${spring.ai.vectorstore.pgvector.table-name:vector_store}") String tableName,
             @Value("${spring.ai.vectorstore.pgvector.distance-type:COSINE_DISTANCE}") String distanceType) {

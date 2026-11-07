@@ -1,6 +1,6 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
-import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+import com.example.opsaiagent.knowledge.model.EmbeddingContentFormatter;
 
 import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.example.opsaiagent.retrieval.RetrievalScope;
@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import com.example.opsaiagent.knowledge.model.Document;
-import org.springframework.ai.document.MetadataMode;
+import com.example.opsaiagent.knowledge.model.EmbeddingMetadataMode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -26,7 +26,7 @@ public class LangChain4jPgVectorStore implements KnowledgeVectorStore {
     private final EmbeddingModel model;
     private final ObjectMapper mapper;
     private final int dimensions;
-    private final MetadataMode metadataMode;
+    private final EmbeddingMetadataMode metadataMode;
 
     /**
      * 创建兼容现有数据格式的向量存储。
@@ -38,7 +38,7 @@ public class LangChain4jPgVectorStore implements KnowledgeVectorStore {
      * @return 无返回值
      */
     public LangChain4jPgVectorStore(JdbcTemplate jdbc, EmbeddingModel model, ObjectMapper mapper,
-                                  int dimensions, MetadataMode metadataMode) {
+                                  int dimensions, EmbeddingMetadataMode metadataMode) {
         if (dimensions <= 0) {
             throw new IllegalArgumentException("向量维度必须大于零");
         }
@@ -60,7 +60,7 @@ public class LangChain4jPgVectorStore implements KnowledgeVectorStore {
         for (int start = 0; start < documents.size(); start += 10) {
             List<Document> batch = documents.subList(start, Math.min(start + 10, documents.size()));
             var vectors = model.embedAll(batch.stream()
-                    .map(doc -> TextSegment.from(SpringAiDocumentMapper.toSpring(doc).getFormattedContent(metadataMode))).toList()).content();
+                    .map(doc -> TextSegment.from(EmbeddingContentFormatter.format(doc, metadataMode))).toList()).content();
             if (vectors == null || vectors.size() != batch.size()) {
                 throw new IllegalStateException("向量模型返回数量与输入文档数量不一致");
             }

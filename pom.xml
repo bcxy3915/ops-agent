@@ -69,16 +69,30 @@
             <artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
         </dependency>
 
-        <!-- Spring AI PDF 文档读取器 -->
+        <!-- PDF 文本抽取直接使用 PDFBox -->
         <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-pdf-document-reader</artifactId>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.7</version>
         </dependency>
 
-        <!-- Spring AI Markdown 文档读取器 -->
+        <!-- Markdown 与 token 处理直接声明通用库 -->
+        <dependency>
+            <groupId>org.commonmark</groupId>
+            <artifactId>commonmark</artifactId>
+            <version>0.22.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+
+        <!-- 仅用于迁移对照测试，生产不再使用旧 Reader -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-markdown-document-reader</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <!-- LangChain4j：按 provider 配置逐步接管生产模型调用 -->

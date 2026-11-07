@@ -7,7 +7,7 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.Test;
 import com.example.opsaiagent.knowledge.model.Document;
-import org.springframework.ai.document.MetadataMode;
+import com.example.opsaiagent.knowledge.model.EmbeddingMetadataMode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.mockito.ArgumentCaptor;
@@ -27,7 +27,7 @@ class LangChain4jPgVectorStoreTest {
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
     private final EmbeddingModel model = mock(EmbeddingModel.class);
     private final LangChain4jPgVectorStore store = new LangChain4jPgVectorStore(
-            jdbc, model, new ObjectMapper(), 3, MetadataMode.EMBED);
+            jdbc, model, new ObjectMapper(), 3, EmbeddingMetadataMode.EMBED);
 
     /**
      * 设置查询向量及空结果夹具。

@@ -13,16 +13,16 @@ embedding 切片先通过 `LangChain4jEmbeddingBridge` 接管向量生成；后�
 | 优先级 | 当前依赖与入口 | 迁移内容 | 验收重点 |
 | --- | --- | --- | --- |
 | P1（已接线，待真实数据库验收） | LangChain4j 分支使用 `KnowledgeVectorStore`；Spring AI 回退仍依赖 `VectorStore/SearchRequest` | JDBC 存储已接管读写；后续补真实数据库验证并清理原存储自动配置 | 复用 `vector_store` 的 ID、content、metadata、embedding；审核状态、公开/租户/部门/个人范围一致；相似度阈值、topK、批次和失败降级一致 |
-| P2（已完成业务类型替换） | BM25、融合、重排、引用、诊断与入库链路统一使用项目 `Document` | 原 Reader、token 兜底、embedding 格式化与回退存储边界使用 `SpringAiDocumentMapper`；后续随 P3/P4 清理 | 保留 ID、正文、完整 metadata、评分和引用映射；各算法仍能使用可变 metadata，不丢失来源与权限字段 |
-| P3 | `MarkdownDocumentParserStrategy` 的 `MarkdownDocumentReader`、`TokenFallbackSplitter` 的 `TokenTextSplitter` | 替换 Markdown 解析与 token 兜底切分；其他解析器只调整文档类型接口 | Markdown 代码块/引用内容不丢失；切分重叠、硬上限、metadata 和降级策略保持；运行三套现有切分契约测试 |
+| P2（已完成业务类型替换） | BM25、融合、重排、引用、诊断与入库链路统一使用项目 `Document` | `SpringAiDocumentMapper` 仅留在回退存储边界；随 P4 清理 | 保留 ID、正文、完整 metadata、评分和引用映射；各算法仍能使用可变 metadata，不丢失来源与权限字段 |
+| P3（已完成生产替换） | Markdown 直接解析 CommonMark，token 兜底直接使用 JTokkit，JDBC 格式化使用项目实现 | 旧 Markdown Reader 仅为测试对照依赖；原框架格式化仅留在待删除的 embedding bridge | 旧新实现的文本、元数据、分块和默认向量输入对照；现有三套切分契约回归 |
 | P4 | `OpsAgentService` 的 Spring AI 分支、`AiConfig`、`ChatMemoryConfig`、`ai/adapter/springai` 和原工具注解 | 实际环境验收完成后，移除回退分支、聊天模型和记忆配置、工具注解及过渡 embedding 适配层 | 默认配置可启动；无 Spring AI 业务入口；SSE 顺序、取消、冷启动记忆、工具权限及诊断失败降级保持 |
-| P5 | `pom.xml` 中 Spring AI BOM、模型/向量 starter、Markdown/PDF reader，以及 `spring.ai.*` 配置 | 移除框架依赖，显式声明仍使用的 PDFBox、JTokkit 等库，将有效配置统一到项目配置 | 主源码及生产依赖树不再使用 Spring AI；配置继承明确；无需重新初始化数据库或自动重建索引 |
+| P5（部分完成） | Spring AI BOM、模型/向量 starter、测试用 Markdown reader，以及 `spring.ai.*` 配置 | PDF reader 已移除，PDFBox/CommonMark/JTokkit 已显式声明；后续清理回退和对照测试依赖，将有效配置统一到项目配置 | 主源码及生产依赖树不再使用 Spring AI；配置继承明确；无需重新初始化数据库或自动重建索引 |
 
 P1 与 P2 可以连续推进，存储侧通过适配层衔接；P4、P5 应在前面的生产链路验证后清理，避免移除回退依赖时让知识入库无法运行。
 
 `ai/api/VectorIndex` 与 `KnowledgeSearch` 是早期预留的框架无关接口。实际生产读写边界为 `KnowledgeVectorStore`，已使用项目 `Document` 与可信 `RetrievalScope`。本片未将预留接口接入生产；后续清理接口时需核对其删除语义和权限上下文，避免长期保留重复边界。
 
-embedding 的 `MetadataMode` 与默认内容格式化仍来自 Spring AI，JDBC 存储通过适配器临时复用该规则，避免无意改变已有向量的输入文本。它需要在移除 Maven 依赖前单独替换并验证格式一致性。
+JDBC 存储已使用项目 `EmbeddingMetadataMode` 与 `EmbeddingContentFormatter`，不再将项目文档转换为 Spring AI 文档以格式化。保留默认模板、系统元数据换行、正文前双换行与元数据收集顺序；所有模式均有旧新对照测试。旧 `LangChain4jEmbeddingBridge` 继续使用 Spring AI 默认格式化，后续随回退存储删除，不支持在新 JDBC 路径注入框架自定义模板。
 
 ## 3. 可以继续复用的能力
 
