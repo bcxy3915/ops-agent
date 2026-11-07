@@ -1,6 +1,8 @@
 package com.example.opsaiagent.chat.service;
 
 import com.example.opsaiagent.chat.dto.AskResponse;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.chat.entity.MessageEntity;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
@@ -31,6 +33,7 @@ import reactor.core.scheduler.Schedulers;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -61,6 +64,19 @@ public class OpsAgentService {
     private final KnowledgeRetrievalService knowledgeRetrievalService;
     private final KnowledgeHitLogService knowledgeHitLogService;
     private final ObjectMapper objectMapper;
+
+    private OpsAssistant langChain4jOpsAssistant;
+
+    /**
+     * 注入可选的 LangChain4j 运维助手，仅在选择 LangChain4j provider 时存在。
+     *
+     * @param assistant LangChain4j 运维助手
+     * @return 无返回值
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLangChain4jOpsAssistant(OpsAssistant assistant) {
+        this.langChain4jOpsAssistant = assistant;
+    }
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
@@ -131,13 +147,21 @@ public class OpsAgentService {
         String systemPrompt = template.render(Map.of("context", context));
 
         // 4.调用聊天模型生成答案
-        String answer = chatClient.prompt()
-                .system(systemPrompt)
-                .user(question)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
-                .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
-                .call()
-                .content();
+        String answer;
+        if (langChain4jOpsAssistant != null) {
+            String username = SecurityUtils.getCurrentUsername();
+            String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
+            answer = langChain4jOpsAssistant.ask(
+                    LangChain4jMemoryId.of(memoryUsername, sessionId), question, systemPrompt);
+        } else {
+            answer = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(question)
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
+                    .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
+                    .call()
+                    .content();
+        }
         log.info("RAG 问答完成，召回 {} 个片段", documents.size());
 
         // 5.构建结构化引用

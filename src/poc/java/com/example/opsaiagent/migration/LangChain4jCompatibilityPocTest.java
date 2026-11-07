@@ -2,6 +2,8 @@ package com.example.opsaiagent.migration;
 
 import com.example.opsaiagent.ai.api.ChatRequest;
 import com.example.opsaiagent.ai.api.ChatStreamEvent;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
@@ -15,6 +17,7 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.service.tool.ToolArgumentsErrorHandler;
 import dev.langchain4j.service.tool.ToolExecutionErrorHandler;
 import org.junit.jupiter.api.AfterEach;
@@ -151,10 +154,6 @@ class LangChain4jCompatibilityPocTest {
                 .hasMessage("模型返回的结构化结果格式非法");
     }
 
-    interface OpsAssistant {
-        String ask(String question);
-    }
-
     @Test
     void consecutiveToolRoundsFeedRealToolResultsBackIntoModelContext() throws Exception {
         responses.add(toolCall("health-1", "queryServiceHealth",
@@ -170,11 +169,13 @@ class LangChain4jCompatibilityPocTest {
         LangChain4jReadOnlyToolBindings tools = new LangChain4jReadOnlyToolBindings(
                 healthTools, metricTools, mock(MetricDiscoveryTools.class), mock(ServiceDiscoveryTools.class));
         OpsAssistant assistant = AiServices.builder(OpsAssistant.class).chatModel(model()).tools(tools)
+                .chatMemoryProvider(id -> MessageWindowChatMemory.builder().id(id).maxMessages(20).build())
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
                 .build();
 
-        assertThat(assistant.ask("先查健康，DOWN时再查CPU，只读"))
+        assertThat(assistant.ask(LangChain4jMemoryId.of("alice", "session-1"),
+                "先查健康，DOWN时再查CPU，只读", "你是运维助手"))
                 .isEqualTo("DOWN，CPU为0.91，根因尚未证实");
 
         verify(healthTools).queryServiceHealth("fixture-service");
@@ -206,11 +207,13 @@ class LangChain4jCompatibilityPocTest {
         LangChain4jReadOnlyToolBindings tools = new LangChain4jReadOnlyToolBindings(
                 healthTools, metricTools, metricDiscoveryTools, serviceDiscoveryTools);
         OpsAssistant assistant = AiServices.builder(OpsAssistant.class).chatModel(model()).tools(tools)
+                .chatMemoryProvider(id -> MessageWindowChatMemory.builder().id(id).maxMessages(20).build())
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
                 .build();
 
-        assertThat(assistant.ask("依次调用四个只读工具" )).isEqualTo("只读工具调用完成");
+        assertThat(assistant.ask(LangChain4jMemoryId.of("alice", "session-1"),
+                "依次调用四个只读工具", "你是运维助手")).isEqualTo("只读工具调用完成");
         verify(healthTools).queryServiceHealth("fixture-service");
         verify(metricTools).queryMetric("fixture-service", "system.cpu.usage");
         verify(metricDiscoveryTools).listMetrics("fixture-service");

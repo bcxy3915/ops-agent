@@ -247,10 +247,22 @@ W6 定向 PoC 共 **12 项通过，0 failures、0 errors、0 skipped**。该增�
 
 本切片定向配置与 PoC 共 **14 项通过**，默认 Spring AI 全量回归 **1016 项通过，0 failures、0 errors、0 skipped**。
 
+### 正式迁移第四切片：Agent 运行时与同步问答接入
+
+新增生产 `OpsAssistant` 接口，并在 LangChain4j 配置中通过 `AiServices` 注册 Agent。Agent 按调用参数接收 memory ID，使用上一切片的 20 条会话记忆和四个只读工具，最大工具轮次限制为 8；工具参数错误和执行错误均采用显式失败策略，避免把底层异常静默吞掉。
+
+同步 `OpsAgentService.askWithCitations` 已增加 provider 分流：选择 `langchain4j` 时仍先执行现有混合检索和引用流水，再将检索上下文拼入系统提示，并以“用户名 + sessionId”编码后的记忆 ID 调用 LangChain4j Agent；默认 `spring-ai` 分支保持原 ChatClient、ChatMemory 和工具调用行为。未认证请求使用一次性匿名记忆 ID，避免不同请求意外共享会话。
+
+本切片只切换同步问答，尚未切换 SSE 流式问答。流式链路还需把 LangChain4j `AiServices` 的流式事件、工具事件、引用事件、取消保存和 `[DONE]` 顺序统一接入，完成后再切换，避免丢失现有协议行为。
+
+第四切片定向测试 **27 项通过，0 failures、0 errors、0 skipped**；LangChain4j 配置全量回归 **1031 项通过**，默认 Spring AI 配置全量回归 **1019 项通过**，均无失败、错误或跳过项，确认默认回退链路仍可用。测试使用本地 OpenAI 协议夹具，不调用真实模型；真实模型响应、生产 PostgreSQL 冷启动回填和线上工具权限仍需在实际环境进行阶段验收。
+
 ### 正式迁移第三切片：会话记忆与只读工具
 
 新增生产 `ConversationChatMemoryStore`、`LangChain4jMemoryHistoryMapper` 和 `LangChain4jMemoryId`。记忆 ID 同时编码用户名与 sessionId，避免同会话标识在不同用户间共享；冷启动通过 `ConversationService.loadRecentMessages(sessionId, username, 20)` 回填，继续使用现有会话归属校验；消息窗口固定为 20 条。`clear()` 仅清除当前记忆键，并在该运行时内阻止从数据库立即回填；用户或其他会话的记忆不受影响。
 
 四个 LangChain4j 只读工具绑定已提升至生产 `LangChain4jReadOnlyToolBindings`，复用已有健康检查、指标查询、指标发现和服务发现业务实现。PoC 工具循环现在直接验证该生产门面。LangChain4j 配置仅在 `ops-agent.ai.provider=langchain4j` 时注册记忆仓库、窗口和工具 Bean；Spring AI 默认链路不变。
 
-`ConversationChatMemoryStoreTest` 覆盖 20 条历史窗口、同 session 不同用户隔离、清理隔离及包含分隔符的身份编码。定向记忆与 Provider 配置测试 **5 项通过**。真实生产聊天入口仍未切换：当前 `OpsAgentService` 尚未注入 LangChain4j ChatMemory，也未把用户身份写入 LangChain4j memory ID；这将与下一切片的 Agent/流式调用一起接入，确保异步执行时显式携带可信用户身份。现有 SSE、引用、工具循环和消息落库行为尚未改变。
+`ConversationChatMemoryStoreTest` 覆盖 20 条历史窗口、同 session 不同用户隔离、清理隔离及包含分隔符的身份编码。定向记忆与 Provider 配置测试 **5 项通过**。会话记忆已由第四切片同步 Agent 接入，并在调用时显式传入可信用户名与 sessionId 编码后的 memory ID。现有 SSE 流式入口、引用事件和消息落库行为尚未改变。
+
+当前仍保留 JaCoCo 执行数据与最新编译类不匹配的历史警告，不影响测试结论；正式覆盖率统计应在清理 `target` 后重新执行。下一切片再处理 SSE 流式 Agent 接入，需同时保持引用事件、工具循环、取消、消息落库和 `[DONE]` 顺序契约。

@@ -4,6 +4,7 @@ import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jChatGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStructuredOutputGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import com.example.opsaiagent.ai.api.StreamingChatGateway;
@@ -20,6 +21,10 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.memory.chat.ChatMemoryProvider;
+import dev.langchain4j.service.AiServices;
+import dev.langchain4j.service.tool.ToolArgumentsErrorHandler;
+import dev.langchain4j.service.tool.ToolExecutionErrorHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -141,6 +146,35 @@ public class LangChain4jConfig {
         return MessageWindowChatMemory.builder()
                 .maxMessages(20)
                 .chatMemoryStore(chatMemoryStore)
+                .build();
+    }
+
+    /**
+     * 注册带有会话记忆和只读工具的 LangChain4j 运维助手。
+     *
+     * @param chatModel LangChain4j 聊天模型
+     * @param chatMemoryStore 用户隔离的会话记忆仓库
+     * @param tools 四个现有只读运维工具
+     * @return LangChain4j 运维助手
+     */
+    @Bean
+    @ConditionalOnBean({ConversationService.class, HealthCheckTools.class, MetricQueryTools.class,
+            MetricDiscoveryTools.class, ServiceDiscoveryTools.class})
+    public OpsAssistant langChain4jOpsAssistant(ChatModel chatModel,
+                                                ChatMemoryStore chatMemoryStore,
+                                                LangChain4jReadOnlyToolBindings tools) {
+        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
+                .id(memoryId)
+                .maxMessages(20)
+                .chatMemoryStore(chatMemoryStore)
+                .build();
+        return AiServices.builder(OpsAssistant.class)
+                .chatModel(chatModel)
+                .chatMemoryProvider(memoryProvider)
+                .tools(tools)
+                .maxToolCallingRoundTrips(8)
+                .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
+                .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
                 .build();
     }
 
