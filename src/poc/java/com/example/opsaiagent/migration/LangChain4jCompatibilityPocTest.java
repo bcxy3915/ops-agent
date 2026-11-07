@@ -6,6 +6,7 @@ import com.example.opsaiagent.tools.HealthCheckTools;
 import com.example.opsaiagent.tools.MetricDiscoveryTools;
 import com.example.opsaiagent.tools.MetricQueryTools;
 import com.example.opsaiagent.tools.ServiceDiscoveryTools;
+import com.example.opsaiagent.tools.langchain4j.LangChain4jReadOnlyToolBindings;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -257,7 +258,8 @@ class LangChain4jCompatibilityPocTest {
         OpenAiStreamingChatModel model = OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl).apiKey("poc-placeholder-not-a-secret")
                 .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
-        LangChain4jStreamingChatGateway gateway = new LangChain4jStreamingChatGateway(model);
+        com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway gateway =
+                new com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway(model);
 
         List<ChatStreamEvent> events = Flux.from(gateway.stream(
                         new ChatRequest("session-1", "检查服务", "你是运维助手", null)))
@@ -276,7 +278,8 @@ class LangChain4jCompatibilityPocTest {
         OpenAiStreamingChatModel model = OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl).apiKey("poc-placeholder-not-a-secret")
                 .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
-        LangChain4jStreamingChatGateway gateway = new LangChain4jStreamingChatGateway(model);
+        com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway gateway =
+                new com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway(model);
 
         assertThatThrownBy(() -> Flux.from(gateway.stream(
                         new ChatRequest("session-1", "检查服务", "你是运维助手", null)))

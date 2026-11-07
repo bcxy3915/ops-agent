@@ -7,6 +7,9 @@ import com.example.opsaiagent.ai.adapter.springai.SpringAiStructuredOutputGatewa
 import com.example.opsaiagent.ai.adapter.springai.SpringAiChatGatewayConfig;
 import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
+import com.example.opsaiagent.ai.api.StreamingChatGateway;
+import com.example.opsaiagent.ai.adapter.springai.SpringAiStreamingChatGateway;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -29,9 +32,11 @@ class AiProviderConfigurationTest {
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(ChatGateway.class);
             assertThat(context).hasSingleBean(StructuredOutputGateway.class);
+            assertThat(context).hasSingleBean(StreamingChatGateway.class);
             assertThat(context.getBean(ChatGateway.class)).isInstanceOf(SpringAiChatGateway.class);
             assertThat(context.getBean(StructuredOutputGateway.class))
                     .isInstanceOf(SpringAiStructuredOutputGateway.class);
+            assertThat(context.getBean(StreamingChatGateway.class)).isInstanceOf(SpringAiStreamingChatGateway.class);
         });
     }
 
@@ -45,9 +50,12 @@ class AiProviderConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasSingleBean(ChatGateway.class);
                     assertThat(context).hasSingleBean(StructuredOutputGateway.class);
+                    assertThat(context).hasSingleBean(StreamingChatGateway.class);
                     assertThat(context.getBean(ChatGateway.class)).isInstanceOf(LangChain4jChatGateway.class);
                     assertThat(context.getBean(StructuredOutputGateway.class))
                             .isInstanceOf(LangChain4jStructuredOutputGateway.class);
+                    assertThat(context.getBean(StreamingChatGateway.class))
+                            .isInstanceOf(LangChain4jStreamingChatGateway.class);
                 });
     }
 

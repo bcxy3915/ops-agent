@@ -238,3 +238,19 @@ LangChain4j 适配器已注册为可选生产 Bean，但未切换默认运行时
 补充 LangChain4j 流式网关对照测试，验证正常响应仍按 `TOKEN → DONE` 输出，并验证模型端返回 HTTP 错误时流会传播异常且不会伪造 `DONE`。这保证后续接入现有 SSE 编排时，错误、取消和消息落库逻辑仍可由上层统一处理。当前适配器仍只转换模型 token，不负责业务侧 `citations` 事件；生产 SSE 入口仍由 `OpsAgentService` 的 Spring AI 实现负责，尚未切换默认运行时。
 
 W6 定向 PoC 共 **12 项通过，0 failures、0 errors、0 skipped**。该增量只完成流式协议边界验证，W6 阶段门仍未通过；在切换生产 SSE 前还需把引用事件、记忆回填、工具循环、取消保存和告警诊断放在同一条可回退链路中进行对照。
+
+### 正式迁移第二切片：流式模型网关
+
+已将 LangChain4j 流式适配器提升到主源码，并在 `LangChain4jConfig` 中注册 `StreamingChatGateway`；Spring AI 侧同步注册同名项目网关，均由 `ops-agent.ai.provider` 条件选择。现有 LangChain4j 流式 PoC 已改为验证生产适配器，覆盖中文 token、`DONE` 和模型 HTTP 失败不伪造 `DONE`。
+
+本切片暂不改造 `OpsAgentService.askStreamWithCitations`。当前该入口还在同一次模型调用中依赖 Spring AI 的 ChatMemory、四个只读工具和工具循环；直接替换为裸流式网关会丢失工具调用及记忆行为。下一切片先迁移 LangChain4j 记忆回填和只读工具绑定，再把 SSE 的引用、取消、消息落库和工具循环接入该网关。
+
+本切片定向配置与 PoC 共 **14 项通过**，默认 Spring AI 全量回归 **1016 项通过，0 failures、0 errors、0 skipped**。
+
+### 正式迁移第三切片：会话记忆与只读工具
+
+新增生产 `ConversationChatMemoryStore`、`LangChain4jMemoryHistoryMapper` 和 `LangChain4jMemoryId`。记忆 ID 同时编码用户名与 sessionId，避免同会话标识在不同用户间共享；冷启动通过 `ConversationService.loadRecentMessages(sessionId, username, 20)` 回填，继续使用现有会话归属校验；消息窗口固定为 20 条。`clear()` 仅清除当前记忆键，并在该运行时内阻止从数据库立即回填；用户或其他会话的记忆不受影响。
+
+四个 LangChain4j 只读工具绑定已提升至生产 `LangChain4jReadOnlyToolBindings`，复用已有健康检查、指标查询、指标发现和服务发现业务实现。PoC 工具循环现在直接验证该生产门面。LangChain4j 配置仅在 `ops-agent.ai.provider=langchain4j` 时注册记忆仓库、窗口和工具 Bean；Spring AI 默认链路不变。
+
+`ConversationChatMemoryStoreTest` 覆盖 20 条历史窗口、同 session 不同用户隔离、清理隔离及包含分隔符的身份编码。定向记忆与 Provider 配置测试 **5 项通过**。真实生产聊天入口仍未切换：当前 `OpsAgentService` 尚未注入 LangChain4j ChatMemory，也未把用户身份写入 LangChain4j memory ID；这将与下一切片的 Agent/流式调用一起接入，确保异步执行时显式携带可信用户身份。现有 SSE、引用、工具循环和消息落库行为尚未改变。
