@@ -300,3 +300,13 @@ LangChain4j `OpsAssistant` 已通过 `AiServices.contentRetriever(...)` 接入�
 `langchain4j-poc` 是测试源 profile，不是生产 provider 开关；必须设置 `ops-agent.ai.provider=langchain4j` 才启用已迁移生产链路。当前新增流式 RAG 仍与 citations 各检索一次，沿用上一切片记录的优化项。
 
 本切片验证结果：定向测试 **52 项通过**；启用 langchain4j-poc 测试源的全量回归 **1041 项通过**；默认测试集全量回归 **1028 项通过**，均为 0 failures、0 errors、0 skipped。git diff --check 通过。两种 Maven 测试方式均包含 Mock/本地协议夹具，不代表运行中的应用已切换 provider 或已完成真实环境验收。JaCoCo 仍有历史执行数据与当前类不匹配提示，本次不据此报告覆盖率。
+
+### 正式迁移第七切片：embedding 模型调用（2026-11-08）
+
+新增 `LangChain4jEmbeddingConfig` 和过渡 `LangChain4jEmbeddingBridge`：选择 LangChain4j 后，现有 Pgvector 的写入向量和查询向量由 LangChain4j 生成。保留旧文档格式化、10 条分批、模型名称与维度；校验返回数量、维度、非有限值与单次请求参数。维度探测直接返回配置值，不为此发送模型请求。
+
+Spring AI 向量存储、`Document` 和原生自动配置仍在；通过 `@Primary` 明确当前存储的模型候选。该切片完成模型调用替换，尚未移除存储框架依赖，也未执行 DDL、真实模型请求或重建已有索引。
+
+完整剩余迁移入口、配置项及验收边界见 [剩余迁移清单](02-remaining-migration-checklist.md)。本轮定向 **15 项通过**，含本地 HTTP 协议夹具与 Mock JDBC 的实际 Pgvector 组件衔接验证。
+
+全量回归：含 LangChain4j 兼容测试 **1051 项通过**；默认测试集 **1038 项通过**，均为 0 failures、0 errors、0 skipped。`git diff --check` 通过。真实 PostgreSQL、真实 embedding 模型及页面上传检索尚未验收；JaCoCo 的历史执行数据警告不作为本轮覆盖率依据。
