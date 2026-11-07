@@ -172,3 +172,22 @@ $env:MAVEN_OPTS='-Djdk.net.unixdomain.tmpdir="' + $sockTmp + '"'
 诊断单测改为验证网关返回成功、返回空结果、模型异常和知识库失败等路径；定向诊断与 LangChain4j PoC 共 29 项全部通过。启用 `langchain4j-poc` profile 的全量回归为 **1021 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。JaCoCo 报告提示历史执行数据与本轮 `DiagnosisService` 类不匹配，但不影响测试结果；正式覆盖率需先清理 `target` 后重新执行。
 
 当前仍未把 LangChain4j 适配器注册为生产 Bean，也未切换默认运行时；LangChain4j 真实模型、工具绑定、记忆、Pgvector 和 MCP 阶段门仍未通过。下一步是在独立 profile/配置下补真实模型对照和结构化输出兼容性验证，再评估生产 Bean 的切换。
+
+### W5 第一个增量：四个本地只读工具绑定 PoC
+
+新增 `LangChain4jReadOnlyToolBindings`，仅位于 `src/poc/java`，通过 LangChain4j `@Tool` / `@P` 暴露现有的 `HealthCheckTools`、`MetricQueryTools`、`MetricDiscoveryTools` 和 `ServiceDiscoveryTools`。工具实现继续复用原服务注册、HTTP 查询和错误处理逻辑；PoC 脚本模型的连续工具调用现已委托到这些项目工具，测试验证了四类工具名、参数和委托结果回填。
+
+定向诊断与 PoC 测试 30 项通过；启用 `langchain4j-poc` profile 的全量回归为 **1022 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。测试中的现有工具用 Mockito 隔离，因此验证的是 LangChain4j 工具 schema 与绑定、调用轮次及结果回填，不代表真实服务注册表权限、HTTP 端点或真实模型行为已经通过迁移验收。
+
+该工具门面未注册生产 Bean，也未提供额外权限，PoC profile 关闭时不可用。W5 尚未完成：LangChain4j `ChatMemory` 与 `ops_message` 冷启动回填的兼容适配仍待实现；跨用户/租户会话隔离须在接入记忆前验证。真实模型及 Pgvector 阶段门仍未通过，不能据此认定 W5 或初步迁移阶段完成。
+
+### W5 第二个增量：会话记忆窗口与历史消息映射 PoC
+
+新增 `LangChain4jMemoryHistoryMapper` 和 `LangChain4jChatMemoryPocTest`，在不注册生产 Bean 的前提下验证会话记忆迁移的关键边界：
+
+- `ops_message` 中的 `USER`、`ASSISTANT` 消息可映射为 LangChain4j `UserMessage`、`AiMessage`，空内容会被过滤；
+- `MessageWindowChatMemory` 配置为最近 20 条消息，超过窗口后只保留最新消息；
+- `ChatMemoryStore` 按 session ID 保存，重建同一 session 可以恢复历史，另一个 session 无法读取；
+- `clear()` 只删除当前 session 的记忆，不影响其他 session。
+
+定向记忆和既有兼容性 PoC 共 **11 项通过，0 failures、0 errors、0 skipped**；启用 `langchain4j-poc` profile 的全量回归为 **1025 项，0 failures、0 errors、0 skipped，BUILD SUCCESS**。该增量证明了消息类型转换、窗口和内存存储隔离的框架可行性，但没有把数据库查询直接接入 LangChain4j：生产回填仍必须复用 `ConversationService.loadRecentMessages(sessionId, username, 20)` 的用户名归属校验，待迁移运行时具备可信的认证/租户上下文后再实现。当前 W5 的真实模型、Pgvector 持久化记忆和 MCP 接入阶段门仍未通过。

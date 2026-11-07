@@ -2,11 +2,13 @@ package com.example.opsaiagent.migration;
 
 import com.example.opsaiagent.ai.api.ChatRequest;
 import com.example.opsaiagent.ai.api.ChatStreamEvent;
+import com.example.opsaiagent.tools.HealthCheckTools;
+import com.example.opsaiagent.tools.MetricDiscoveryTools;
+import com.example.opsaiagent.tools.MetricQueryTools;
+import com.example.opsaiagent.tools.ServiceDiscoveryTools;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -22,7 +24,6 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -31,6 +32,9 @@ import java.util.concurrent.TimeUnit;
 import reactor.core.publisher.Flux;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 使用本地 OpenAI 协议夹具验证框架边界，不调用真实模型、数据库、SMTP 或业务服务。
@@ -149,23 +153,6 @@ class LangChain4jCompatibilityPocTest {
         String ask(String question);
     }
 
-    public static class ReadOnlyTools {
-        private final List<String> calls = new ArrayList<>();
-
-        @Tool("Read the health of the fixture service")
-        public String queryServiceHealth(@P("Registered service name") String serviceName) {
-            calls.add("health:" + serviceName);
-            return "{\"status\":\"DOWN\"}";
-        }
-
-        @Tool("Read a metric of the fixture service")
-        public String queryMetric(@P("Registered service name") String serviceName,
-                                  @P("Metric name") String metricName) {
-            calls.add("metric:" + serviceName + ":" + metricName);
-            return "{\"value\":0.91}";
-        }
-    }
-
     @Test
     void consecutiveToolRoundsFeedRealToolResultsBackIntoModelContext() throws Exception {
         responses.add(toolCall("health-1", "queryServiceHealth",
@@ -173,7 +160,13 @@ class LangChain4jCompatibilityPocTest {
         responses.add(toolCall("metric-1", "queryMetric",
                 "{\"serviceName\":\"fixture-service\",\"metricName\":\"system.cpu.usage\"}"));
         responses.add(completion("{\"role\":\"assistant\",\"content\":\"DOWN，CPU为0.91，根因尚未证实\"}", "stop"));
-        ReadOnlyTools tools = new ReadOnlyTools();
+        HealthCheckTools healthTools = mock(HealthCheckTools.class);
+        MetricQueryTools metricTools = mock(MetricQueryTools.class);
+        when(healthTools.queryServiceHealth("fixture-service")).thenReturn("{\"status\":\"DOWN\"}");
+        when(metricTools.queryMetric("fixture-service", "system.cpu.usage"))
+                .thenReturn("{\"value\":0.91}");
+        LangChain4jReadOnlyToolBindings tools = new LangChain4jReadOnlyToolBindings(
+                healthTools, metricTools, mock(MetricDiscoveryTools.class), mock(ServiceDiscoveryTools.class));
         OpsAssistant assistant = AiServices.builder(OpsAssistant.class).chatModel(model()).tools(tools)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
@@ -182,12 +175,46 @@ class LangChain4jCompatibilityPocTest {
         assertThat(assistant.ask("先查健康，DOWN时再查CPU，只读"))
                 .isEqualTo("DOWN，CPU为0.91，根因尚未证实");
 
-        assertThat(tools.calls).containsExactly("health:fixture-service",
-                "metric:fixture-service:system.cpu.usage");
+        verify(healthTools).queryServiceHealth("fixture-service");
+        verify(metricTools).queryMetric("fixture-service", "system.cpu.usage");
         assertThat(requests).hasSize(3);
         assertThat(toolResult(requests.get(1), "health-1")).isEqualTo("{\"status\":\"DOWN\"}");
         assertThat(toolResult(requests.get(2), "metric-1")).isEqualTo("{\"value\":0.91}");
         assertThat(responses).isEmpty();
+    }
+
+    @Test
+    void allReadOnlyBindingsDelegateToExistingProjectTools() throws Exception {
+        responses.add(toolCall("health-1", "queryServiceHealth", "{\"serviceName\":\"fixture-service\"}"));
+        responses.add(toolCall("metric-1", "queryMetric",
+                "{\"serviceName\":\"fixture-service\",\"metricName\":\"system.cpu.usage\"}"));
+        responses.add(toolCall("metrics-1", "listMetrics", "{\"serviceName\":\"fixture-service\"}"));
+        responses.add(toolCall("services-1", "listServicesByStatus", "{\"status\":\"DOWN\"}"));
+        responses.add(completion("{\"role\":\"assistant\",\"content\":\"只读工具调用完成\"}", "stop"));
+
+        HealthCheckTools healthTools = mock(HealthCheckTools.class);
+        MetricQueryTools metricTools = mock(MetricQueryTools.class);
+        MetricDiscoveryTools metricDiscoveryTools = mock(MetricDiscoveryTools.class);
+        ServiceDiscoveryTools serviceDiscoveryTools = mock(ServiceDiscoveryTools.class);
+        when(healthTools.queryServiceHealth("fixture-service")).thenReturn("health-result");
+        when(metricTools.queryMetric("fixture-service", "system.cpu.usage")).thenReturn("metric-result");
+        when(metricDiscoveryTools.listMetrics("fixture-service")).thenReturn("metrics-result");
+        when(serviceDiscoveryTools.listServicesByStatus("DOWN")).thenReturn("services-result");
+
+        LangChain4jReadOnlyToolBindings tools = new LangChain4jReadOnlyToolBindings(
+                healthTools, metricTools, metricDiscoveryTools, serviceDiscoveryTools);
+        OpsAssistant assistant = AiServices.builder(OpsAssistant.class).chatModel(model()).tools(tools)
+                .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
+                .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
+                .build();
+
+        assertThat(assistant.ask("依次调用四个只读工具" )).isEqualTo("只读工具调用完成");
+        verify(healthTools).queryServiceHealth("fixture-service");
+        verify(metricTools).queryMetric("fixture-service", "system.cpu.usage");
+        verify(metricDiscoveryTools).listMetrics("fixture-service");
+        verify(serviceDiscoveryTools).listServicesByStatus("DOWN");
+        assertThat(requests).hasSize(5);
+        assertThat(toolResult(requests.get(4), "services-1")).isEqualTo("services-result");
     }
 
     @Test
