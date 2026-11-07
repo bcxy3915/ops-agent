@@ -2,7 +2,7 @@ package com.example.opsaiagent.retrieval.rerank;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 import java.util.Map;

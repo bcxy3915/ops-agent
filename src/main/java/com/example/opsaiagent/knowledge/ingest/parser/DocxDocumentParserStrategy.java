@@ -3,7 +3,7 @@ package com.example.opsaiagent.knowledge.ingest.parser;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 

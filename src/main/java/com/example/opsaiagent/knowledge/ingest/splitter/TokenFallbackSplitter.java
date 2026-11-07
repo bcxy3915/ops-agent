@@ -1,6 +1,8 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.stereotype.Component;
 
@@ -41,8 +43,14 @@ public class TokenFallbackSplitter implements TextChunkStrategy {
         return false;
     }
 
+    /**
+     * 按原 token 兜底规则切分项目文档。
+     * @param docs 待切分文档
+     * @param options 路由切分选项，本策略沿用固定兜底参数
+     * @return 携带原元数据的文档块
+     */
     @Override
     public List<Document> split(List<Document> docs, SplitOptions options) {
-        return splitter.apply(docs);
+        return SpringAiDocumentMapper.fromSpring(splitter.apply(SpringAiDocumentMapper.toSpring(docs)));
     }
 }

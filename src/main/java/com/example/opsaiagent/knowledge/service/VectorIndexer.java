@@ -1,12 +1,14 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.ingest.splitter.SplitContext;
 import com.example.opsaiagent.knowledge.ingest.splitter.TextChunkStrategyResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -115,6 +117,8 @@ public class VectorIndexer {
 
     /**
      * 分批写入向量库，返回实际写入条数。
+     * @param docs 待写入的项目文档
+     * @return 实际写入条数
      */
     public int write(List<Document> docs) {
         int indexed = 0;
@@ -123,7 +127,7 @@ public class VectorIndexer {
             if (knowledgeVectorStore != null) {
                 knowledgeVectorStore.write(batch);
             } else {
-                vectorStore.add(batch);
+                vectorStore.add(SpringAiDocumentMapper.toSpring(batch));
             }
             indexed += batch.size();
         }

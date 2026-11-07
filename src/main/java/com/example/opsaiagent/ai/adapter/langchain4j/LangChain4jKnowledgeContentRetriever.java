@@ -7,7 +7,7 @@ import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.ContentMetadata;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.query.Query;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -69,7 +69,7 @@ public class LangChain4jKnowledgeContentRetriever implements ContentRetriever {
                 }
             });
             TextSegment segment = TextSegment.from(document.getText(), segmentMetadata);
-            Object score = metadata.get("score");
+            Object score = metadata.getOrDefault("score", document.getScore());
             Content content = score == null
                     ? Content.from(segment)
                     : Content.from(segment, Map.of(ContentMetadata.SCORE, score));
@@ -82,7 +82,7 @@ public class LangChain4jKnowledgeContentRetriever implements ContentRetriever {
      * 查询现有混合检索流水线，供引用和命中记录复用。
      *
      * @param query 检索文本
-     * @return Spring AI 文档列表
+     * @return 项目文档列表
      */
     public List<Document> retrieveDocuments(String query) {
         return query == null || query.isBlank() ? List.of() : hybridRetriever.retrieve(query, topK);

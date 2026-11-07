@@ -3,7 +3,7 @@ package com.example.opsaiagent.knowledge.ingest.splitter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 

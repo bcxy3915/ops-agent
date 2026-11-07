@@ -23,7 +23,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.ChatResponse;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 import java.util.Map;

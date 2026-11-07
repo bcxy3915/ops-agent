@@ -6,7 +6,7 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.document.MetadataMode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;

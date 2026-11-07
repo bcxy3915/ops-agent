@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 import java.util.Map;

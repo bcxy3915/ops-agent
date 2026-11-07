@@ -1,5 +1,7 @@
 package com.example.opsaiagent.retrieval;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
@@ -10,7 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 
@@ -92,7 +94,7 @@ class HybridRetrieverTest {
     void retrieve_bothPathsFusedAndReranked() {
         Document v = doc("向量文档");
         Document b = doc("BM25文档");
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(v));
+        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(SpringAiDocumentMapper.toSpring(v)));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(b));
         when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));
@@ -113,7 +115,7 @@ class HybridRetrieverTest {
         Document v = doc("向量文档");
         Document b = doc("BM25文档");
         Document kept = doc("治理后保留");
-        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(v));
+        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(SpringAiDocumentMapper.toSpring(v)));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(b));
         when(rrfFuser.fuseAndLimit(20, List.of(v), List.of(b))).thenReturn(List.of(v, b));

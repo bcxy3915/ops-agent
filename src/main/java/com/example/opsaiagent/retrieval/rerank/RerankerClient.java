@@ -1,6 +1,6 @@
 package com.example.opsaiagent.retrieval.rerank;
 
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 

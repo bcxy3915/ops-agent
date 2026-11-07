@@ -1,12 +1,14 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
 import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.example.opsaiagent.retrieval.RetrievalScope;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.document.MetadataMode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,7 +60,7 @@ public class LangChain4jPgVectorStore implements KnowledgeVectorStore {
         for (int start = 0; start < documents.size(); start += 10) {
             List<Document> batch = documents.subList(start, Math.min(start + 10, documents.size()));
             var vectors = model.embedAll(batch.stream()
-                    .map(doc -> TextSegment.from(doc.getFormattedContent(metadataMode))).toList()).content();
+                    .map(doc -> TextSegment.from(SpringAiDocumentMapper.toSpring(doc).getFormattedContent(metadataMode))).toList()).content();
             if (vectors == null || vectors.size() != batch.size()) {
                 throw new IllegalStateException("向量模型返回数量与输入文档数量不一致");
             }
@@ -112,8 +114,7 @@ public class LangChain4jPgVectorStore implements KnowledgeVectorStore {
             }
             double distance = rs.getDouble("distance");
             metadata.put("distance", distance);
-            return Document.builder().id(rs.getString("id")).text(rs.getString("content"))
-                    .metadata(metadata).score(1 - distance).build();
+            return new Document(rs.getString("id"), rs.getString("content"), metadata, 1 - distance);
         }, parameters.toArray());
     }
 

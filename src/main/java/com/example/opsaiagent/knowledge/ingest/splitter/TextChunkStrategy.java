@@ -1,6 +1,6 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 

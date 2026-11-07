@@ -1,9 +1,11 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
 import com.example.opsaiagent.knowledge.ingest.splitter.TextChunkStrategyResolver;
 import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -40,6 +42,6 @@ class VectorIndexerMigrationTest {
         VectorIndexer indexer = new VectorIndexer(original, mock(TextChunkStrategyResolver.class));
         var docs = List.of(new Document("片段"));
         assertThat(indexer.write(docs)).isEqualTo(1);
-        verify(original).add(docs);
+        verify(original).add(SpringAiDocumentMapper.toSpring(docs));
     }
 }

@@ -1,7 +1,7 @@
 package com.example.opsaiagent.retrieval.fusion;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;

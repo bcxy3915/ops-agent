@@ -2,7 +2,7 @@ package com.example.opsaiagent.knowledge.ingest.splitter;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;

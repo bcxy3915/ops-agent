@@ -1,5 +1,7 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
@@ -10,7 +12,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
@@ -214,10 +216,10 @@ class SplitEvalIT {
                         + " 的 expectedDocId=" + question.expectedDocId() + " 不在文档池中，跳过");
                 continue;
             }
-            List<Document> baseTop = vectorStore.similaritySearch(SearchRequest.builder()
-                    .query(question.query()).topK(10).filterExpression(baseFilter).build());
-            List<Document> freshTop = vectorStore.similaritySearch(SearchRequest.builder()
-                    .query(question.query()).topK(10).filterExpression(freshFilter).build());
+            List<Document> baseTop = SpringAiDocumentMapper.fromSpring(vectorStore.similaritySearch(SearchRequest.builder()
+                    .query(question.query()).topK(10).filterExpression(baseFilter).build()));
+            List<Document> freshTop = SpringAiDocumentMapper.fromSpring(vectorStore.similaritySearch(SearchRequest.builder()
+                    .query(question.query()).topK(10).filterExpression(freshFilter).build()));
             if (diversifyMode) {
                 baseTop = diversifier.diversify(baseTop, 10);
                 freshTop = diversifier.diversify(freshTop, 10);

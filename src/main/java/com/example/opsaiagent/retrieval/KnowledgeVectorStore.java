@@ -1,9 +1,9 @@
 package com.example.opsaiagent.retrieval;
 
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import java.util.List;
 
-/** 知识向量读写边界；Document 类型将在后续切片统一替换。 */
+/** 知识向量读写边界，统一使用项目文档类型。 */
 public interface KnowledgeVectorStore {
     /**
      * 写入已有文档 ID 对应的向量。

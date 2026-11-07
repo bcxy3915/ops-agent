@@ -1,6 +1,6 @@
 package com.example.opsaiagent.knowledge.ingest.parser;
 
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.core.io.Resource;
 
 import java.util.List;

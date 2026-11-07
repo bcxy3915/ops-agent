@@ -11,7 +11,7 @@ import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 

@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 import java.util.Map;
@@ -51,6 +51,22 @@ class LangChain4jKnowledgeContentRetrieverTest {
         assertThat(content.textSegment().text()).isEqualTo("故障处理步骤");
         assertThat(content.textSegment().metadata().getString("source")).isEqualTo("runbook.md");
         assertThat(content.metadata()).containsEntry(ContentMetadata.SCORE, 0.87);
+    }
+
+    /**
+     * 验证向量评分可用，并优先保留融合或重排评分。
+     * @return 无返回值
+     */
+    @Test
+    void preservesVectorScoreAndPrefersPipelineScore() {
+        LangChain4jKnowledgeContentRetriever retriever =
+                new LangChain4jKnowledgeContentRetriever(hybridRetriever, 5);
+        List<Content> contents = retriever.toContents(List.of(
+                new Document("vector", "向量结果", Map.of(), 0.8),
+                new Document("reranked", "重排结果", Map.of("score", 0.95), 0.8)));
+
+        assertThat(contents.get(0).metadata()).containsEntry(ContentMetadata.SCORE, 0.8);
+        assertThat(contents.get(1).metadata()).containsEntry(ContentMetadata.SCORE, 0.95);
     }
 
     @Test

@@ -324,3 +324,13 @@ Spring AI 向量存储、`Document` 和原生自动配置仍在；通过 `@Prima
 测试包括 JDBC 参数与结果映射、UUID/原文保留、分批写入、异常向量、权限范围、Bean 选择、生产入口绕过原存储和模型失败后的 BM25 降级；均使用 Mock，不证明真实 PostgreSQL 的 SQL 执行和事务回滚已经验收。
 
 本片全量验证：默认测试集 **1050 项通过**，含 LangChain4j 兼容测试 **1063 项通过**，均为 0 failures、0 errors、0 skipped；`git diff --check` 通过。未运行真实数据库或真实模型验收，JaCoCo 历史数据警告仍不作为覆盖率结论。
+
+### 正式迁移第九切片：业务文档类型解耦（2026-11-08）
+
+新增项目 `knowledge/model/Document`，知识解析、切分、入库、BM25、RRF、重排、检索多样性、引用、聊天与诊断统一使用该类型。保留 ID、正文、完整 metadata 与可空评分；metadata 在构造时复制并保持可变，支持现有融合与重排逻辑，不让这些算法依赖 AI 框架的数据类型。
+
+`SpringAiDocumentMapper` 仅在原 Markdown Reader、token 兜底切分器、Spring AI 回退存储和 embedding 内容格式化边界执行转换；项目文档往返保留 ID、正文、metadata 和评分。LangChain4j RAG 内容优先使用现有流水线的 metadata.score，没有该字段时使用文档向量评分。未调整权限 SQL、切分策略、向量模型、数据库表或 SSE 契约。
+
+该切片完成业务文档类型替换，尚未移除 Spring AI：`MetadataMode` 与 embedding 默认内容格式化、Markdown Reader、TokenTextSplitter、回退模型/记忆/存储与 Maven starter 仍需后续清理。早期预留的 `ai/api/VectorIndex`、`KnowledgeSearch` 本片未接入生产，实际向量边界仍为 `KnowledgeVectorStore`。
+
+新增测试验证文档往返转换、权限元数据保留、输入元数据隔离、空元数据与空评分，以及向量评分和重排评分优先级；现有切分与检索测试继续验证原契约。默认全量 **1054 项通过**，含 LangChain4j 兼容测试全量 **1067 项通过**，均为 0 failures、0 errors、0 skipped。测试使用 Mock 与本地协议夹具，未执行真实 PostgreSQL、真实模型或页面验收；未重建向量索引。JaCoCo 历史数据警告不作为覆盖率结论。

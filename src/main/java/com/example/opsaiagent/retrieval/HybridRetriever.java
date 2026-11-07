@@ -1,12 +1,14 @@
 package com.example.opsaiagent.retrieval;
 
+import com.example.opsaiagent.ai.adapter.springai.SpringAiDocumentMapper;
+
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.diversity.RetrievalDiversifier;
 import com.example.opsaiagent.retrieval.fusion.RrfFuser;
 import com.example.opsaiagent.retrieval.rerank.RerankerClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
@@ -103,14 +105,14 @@ public class HybridRetriever {
             if (knowledgeVectorStore != null) {
                 return knowledgeVectorStore.search(query, topK, scope);
             }
-            return vectorStore.similaritySearch(
+            return SpringAiDocumentMapper.fromSpring(vectorStore.similaritySearch(
                     SearchRequest.builder()
                             .query(query)
                             .topK(topK)
                             .similarityThreshold(0.5)
                             .filterExpression(scope.filterExpression())
                             .build()
-            );
+            ));
         } catch (Exception e) {
             log.error("向量检索失败", e);
             return List.of();

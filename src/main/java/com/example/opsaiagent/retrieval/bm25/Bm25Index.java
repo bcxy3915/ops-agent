@@ -1,7 +1,7 @@
 package com.example.opsaiagent.retrieval.bm25;
 
 import lombok.Getter;
-import org.springframework.ai.document.Document;
+import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.ArrayList;
 import java.util.HashMap;
