@@ -31,6 +31,26 @@ import static org.mockito.Mockito.when;
 @DisplayName("内存 BM25 检索器")
 class InMemoryBm25RetrieverTest {
 
+    /**
+     * 验证大量其他租户高分文档不会使当前租户的低分可见文档漏召回。
+     * @return 无返回值
+     */
+    @Test
+    void filtersUnauthorizedCandidatesBeforeTopK() {
+        var documents = new java.util.ArrayList<Document>();
+        for (int i = 0; i < 30; i++) {
+            documents.add(new Document("foreign-" + i, "线程积压".repeat(5), Map.of(
+                    "visibility", "TENANT", "tenantId", "other", "reviewStatus", "APPROVED")));
+        }
+        documents.add(new Document("owned", "线程积压" + "其他排障背景信息".repeat(30), Map.of(
+                "visibility", "TENANT", "tenantId", "mine", "reviewStatus", "APPROVED")));
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(documents);
+        retriever.rebuild();
+
+        assertThat(retriever.search("线程积压", 1, new RetrievalScope("mine", Set.of(), "alice")))
+                .extracting(Document::getId).containsExactly("owned");
+    }
+
     @Mock
     private JdbcTemplate jdbcTemplate;
 

@@ -94,13 +94,14 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 工具调用沿用服务注册与现有工具接口约定，避免在业务代码中硬编码服务地址。
 - 修改 Prompt、工具定义、检索范围、融合与重排序逻辑时，检查引用来源、租户隔离和失败降级行为。
 - 保持同步与流式输出在授权、错误处理和会话归属上的一致性。
-- 聊天记忆以 `ops_message` 为唯一事实来源：内存 `ChatMemory`（`MessageWindowChatMemory`，窗口 20 条）只作缓存。调用模型前若 `chatMemory.get(sessionId)` 为空（进程重启、请求落到另一实例、冷会话），必须经 `ConversationService.loadRecentMessages()` 回填，且必须在 `saveUserMessage` 之前执行，禁止把当前问题重复注入记忆。
+- 聊天记忆以 `ops_message` 为唯一事实来源：内存 `ChatMemory`（`MessageWindowChatMemory`，窗口 20 条）只作缓存。同步和流式调用均须先校验会话归属，再通过 `ConversationChatMemoryStore.getMessages()` 预加载历史，且必须在 `saveUserMessage` 之前执行，禁止把当前问题重复注入记忆。准备会话或保存用户消息失败时终止问答，不吞掉权限或持久化异常。
+- 会话与消息查询、写入必须限定可信租户；缺少租户上下文时拒绝访问。记忆标识包含租户、用户名和 sessionId，缓存命中也校验租户上下文，不能只用用户名隔离跨租户同名用户。
 - 回填历史按自增 `id` 正序排列，不按 `createdAt`：助手消息是异步落库的，时间戳可能与用户消息乱序。
 - 禁止只依赖进程内记忆实现多轮能力；多实例部署下靠 DB 回填保持一致，如需跨实例强一致再演进为共享 `ChatMemoryRepository`。
 - 不伪造模型响应、检索命中、外部指标或诊断结论；测试中的模拟数据应明确为测试夹具。
 - 默认使用 Mock 验证外部模型和通知调用，避免测试产生真实费用或向外部发送通知。
 
-流式接口契约以 `chat/service/OpsAgentService.askStreamWithCitations()` 与前端 `src/api/chat.js` 为准：当前成功流依次输出答案 token、`event: citations`（引用列表 JSON）、`data: [DONE]`。该方法旧 Javadoc 仍写着“引用先发”，不能据此修改调用方。SSE 不套普通 `ApiResponse`；调整事件顺序、结束标记、取消或失败行为时同步核对前端解析与消息持久化测试。
+流式接口契约以 `chat/service/OpsAgentService.askStreamWithCitations()` 与前端 `src/api/chat.js` 为准：当前成功流依次输出答案 token、`event: citations`（引用列表 JSON）、`data: [DONE]`。未收到 DONE 的提前断流按失败处理，不能视为成功。SSE 不套普通 `ApiResponse`；调整事件顺序、结束标记、取消或失败行为时同步核对前端解析与消息持久化测试。
 
 前端当前使用 `POST /api/ops/ask/stream`，请求体为 `{ question, sessionId }`，通过 `fetch` 携带 Bearer 请求头并解析事件。保留长问题走请求体的行为，避免中文 URL 编码膨胀导致请求头超限；不要将 JWT 放入 URL。
 

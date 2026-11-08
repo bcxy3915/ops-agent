@@ -66,7 +66,7 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     }
 
     /**
-     * 按数据范围检索：索引全量构建，查询期过滤 + 过取，避免过滤后结果不足。
+     * 按数据范围检索：索引全量构建，排序及截断前过滤不可见文档。
      *
      * @param query 查询文本
      * @param topK  topK
@@ -77,11 +77,8 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     public List<Document> search(String query, int topK, RetrievalScope scope) {
         RetrievalScope effective = scope == null ? RetrievalScope.publicOnly() : scope;
         Bm25Index snapshot = index;
-        int fetch = Math.min(snapshot.size(), Math.max(topK, topK * 4));
-        return snapshot.search(query, fetch).stream()
+        return snapshot.search(query, topK, doc -> effective.matches(doc.getMetadata())).stream()
                 .map(Bm25Index.ScoredDocument::getDocument)
-                .filter(doc -> effective.matches(doc.getMetadata()))
-                .limit(topK)
                 .toList();
     }
 

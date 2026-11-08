@@ -32,6 +32,9 @@ public class ConversationEntity {
      */
     private String username;
 
+    /** 所属租户，与会话 ID 共同确定会话。 */
+    private String tenantId;
+
     /**
      * 消息数（冗余）
      */

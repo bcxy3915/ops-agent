@@ -51,4 +51,7 @@ public class MessageEntity {
      * 创建时间
      */
     private LocalDateTime createdAt;
+
+    /** 所属租户，与会话保持一致。 */
+    private String tenantId;
 }

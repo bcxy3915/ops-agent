@@ -97,6 +97,9 @@ public class OpsAgentService {
     public AskResponse askWithCitations(String sessionId, String question) {
         log.info("问题: {}", question);
 
+        String username = SecurityUtils.getCurrentUsername();
+        prepareConversation(sessionId, question, username);
+
         List<Document> documents = hybridRetriever.retrieve(question, 5);
 
         // 打印召回的片段
@@ -105,10 +108,12 @@ public class OpsAgentService {
                 d.getMetadata().get("distance"),
                 Objects.requireNonNull(d.getText()).substring(0, Math.min(150, d.getText().length()))));
 
-        String username = SecurityUtils.getCurrentUsername();
         String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
         String answer = langChain4jOpsAssistant.ask(LangChain4jMemoryId.of(memoryUsername, sessionId),
                 question, SYSTEM_PROMPT.replace("{context}", ""));
+        if (username != null && answer != null && !answer.isEmpty()) {
+            conversationService.saveAssistantMessage(sessionId, answer);
+        }
         log.info("RAG 问答完成，召回 {} 个片段", documents.size());
 
         // 5.构建结构化引用
@@ -176,16 +181,7 @@ public class OpsAgentService {
         String username = SecurityUtils.getCurrentUsername();
 
         // 2. 确保会话存在（同步）
-        if (username != null) {
-            try {
-                // 必须在 saveUserMessage 之前回填，避免当前问题被当成历史重复注入
-                langChain4jMemoryStore.getMessages(LangChain4jMemoryId.of(username, sessionId));
-                conversationService.ensureConversation(sessionId, username, question);
-                conversationService.saveUserMessage(sessionId, question);
-            } catch (Exception e) {
-                log.error("保存会话/用户消息失败", e);
-            }
-        }
+        prepareConversation(sessionId, question, username);
 
         // 3.RAG 检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
@@ -202,6 +198,22 @@ public class OpsAgentService {
 
         return streamWithLangChain4j(sessionId, question, username, citationsJson,
                 SYSTEM_PROMPT.replace("{context}", ""));
+    }
+
+    /**
+     * 校验会话归属并回填历史，再保存当前问题；失败时终止问答，避免越权或历史丢失。
+     * @param sessionId 会话 ID
+     * @param question 当前问题
+     * @param username 当前登录用户名，匿名调用不持久化
+     * @return 无返回值
+     */
+    private void prepareConversation(String sessionId, String question, String username) {
+        if (username == null) {
+            return;
+        }
+        conversationService.ensureConversation(sessionId, username, question);
+        langChain4jMemoryStore.getMessages(LangChain4jMemoryId.of(username, sessionId));
+        conversationService.saveUserMessage(sessionId, question);
     }
 
     /**

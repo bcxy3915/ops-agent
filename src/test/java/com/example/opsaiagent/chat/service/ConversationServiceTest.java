@@ -38,6 +38,71 @@ import static org.mockito.Mockito.when;
 @DisplayName("会话服务")
 class ConversationServiceTest {
 
+    /**
+     * 注册实体映射，使回归测试能够检查实际生成的权限查询条件。
+     * @return 无返回值
+     */
+    @org.junit.jupiter.api.BeforeAll
+    static void initializeTableMappings() {
+        var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(
+                new com.baomidou.mybatisplus.core.MybatisConfiguration(), "");
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, ConversationEntity.class);
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, MessageEntity.class);
+    }
+
+    /**
+     * 验证冷启动历史查询同时限定租户、会话和用户归属，消息按 ID 排序。
+     * @return 无返回值
+     */
+    @Test
+    void historyQueriesIncludeTenantBeforeLoadingMessages() {
+        when(conversationMapper.selectOne(any(Wrapper.class))).thenReturn(conv("shared", "alice"));
+        when(messageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        conversationService.loadRecentMessages("shared", "alice", 20);
+
+        ArgumentCaptor<Wrapper<ConversationEntity>> conversations = ArgumentCaptor.forClass(Wrapper.class);
+        verify(conversationMapper).selectOne(conversations.capture());
+        assertThat(conversations.getValue().getSqlSegment()).contains("tenant_id", "session_id");
+        assertThat(((com.baomidou.mybatisplus.core.conditions.AbstractWrapper<?, ?, ?>) conversations.getValue())
+                .getParamNameValuePairs()).containsValue("tenant-test").containsValue("shared");
+        ArgumentCaptor<Wrapper<MessageEntity>> messages = ArgumentCaptor.forClass(Wrapper.class);
+        verify(messageMapper).selectList(messages.capture());
+        assertThat(messages.getValue().getSqlSegment()).contains("tenant_id", "session_id", "ORDER BY id DESC");
+        assertThat(((com.baomidou.mybatisplus.core.conditions.AbstractWrapper<?, ?, ?>) messages.getValue())
+                .getParamNameValuePairs()).containsValue("tenant-test");
+    }
+
+    /**
+     * 验证缺少租户时拒绝查询，不允许退回按用户名读取所有租户。
+     * @return 无返回值
+     */
+    @Test
+    void missingTenantCannotReadConversations() {
+        com.example.opsaiagent.rbac.context.TenantContext.clear();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> conversationService.listConversations("alice"))
+                .isInstanceOf(com.example.opsaiagent.exception.BusinessException.class);
+        org.mockito.Mockito.verifyNoInteractions(conversationMapper, messageMapper);
+    }
+
+    /**
+     * 为会话查询和写入建立可信租户上下文。
+     * @return 无返回值
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void bindTenant() {
+        com.example.opsaiagent.rbac.context.TenantContext.set("tenant-test");
+    }
+
+    /**
+     * 清除测试租户，避免污染其他测试线程。
+     * @return 无返回值
+     */
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        com.example.opsaiagent.rbac.context.TenantContext.clear();
+    }
+
     @Mock
     private ConversationMapper conversationMapper;
 
@@ -80,6 +145,21 @@ class ConversationServiceTest {
     @DisplayName("ensureConversation")
     class EnsureConversation {
 
+        /**
+         * 验证其他用户不能复用既有会话写入消息。
+         * @return 无返回值
+         */
+        @Test
+        void rejectsConversationOwnedByAnotherUser() {
+            when(conversationMapper.selectOne(any(Wrapper.class)))
+                    .thenReturn(conv("sess-1", "alice"));
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> conversationService.ensureConversation("sess-1", "bob", "你好"))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            verify(conversationMapper, never()).insert(any(ConversationEntity.class));
+            org.mockito.Mockito.verifyNoInteractions(messageMapper);
+        }
+
         @Test
         @DisplayName("会话不存在：创建新会话")
         void createNew() {
@@ -94,6 +174,7 @@ class ConversationServiceTest {
             ConversationEntity saved = captor.getValue();
             assertThat(saved.getSessionId()).isEqualTo("sess-1");
             assertThat(saved.getUsername()).isEqualTo("admin");
+            assertThat(saved.getTenantId()).isEqualTo("tenant-test");
             assertThat(saved.getTitle()).isEqualTo("你好");
             assertThat(saved.getMessageCount()).isZero();
         }
@@ -148,6 +229,7 @@ class ConversationServiceTest {
             MessageEntity saved = captor.getValue();
             assertThat(saved.getSessionId()).isEqualTo("sess-1");
             assertThat(saved.getRole()).isEqualTo("USER");
+            assertThat(saved.getTenantId()).isEqualTo("tenant-test");
             assertThat(saved.getContent()).isEqualTo("你好");
 
             verify(conversationMapper).updateById(any(ConversationEntity.class));
@@ -183,6 +265,7 @@ class ConversationServiceTest {
                     ArgumentCaptor.forClass(MessageEntity.class);
             verify(messageMapper).insert(captor.capture());
             assertThat(captor.getValue().getRole()).isEqualTo("ASSISTANT");
+            assertThat(captor.getValue().getTenantId()).isEqualTo("tenant-test");
             assertThat(captor.getValue().getContent()).isEqualTo("回答");
             assertThat(captor.getValue().getToolCalls()).isNull();
         }

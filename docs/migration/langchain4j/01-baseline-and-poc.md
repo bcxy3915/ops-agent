@@ -380,3 +380,9 @@ LangChain4jConfig 不再受 provider 条件或可选 Bean 条件控制；同步/
 配置测试增加同步/流式模型参数一致性与旧本地配置兼容验证，并将 OpsAgentService 纳入装配检查。内置服务清单、故障处理手册、部署手册与建表说明更新为当前 LangChain4j 实现。数据库历史索引名 spring_ai_vector_index 保留，仅修订 SQL 注释，没有执行脚本或改变结构。
 
 定向配置测试 **5 项通过**；包含 langchain4j-poc 的全量回归 **1062 项通过**，0 failures、0 errors、0 skipped。再次核对主源码、测试源码、PoC 与 pom.xml，无 org.springframework.ai 引用；完整依赖树的 org.springframework.ai 过滤结果为空。git diff --check 通过。本轮未重新打包，未调用真实模型或 PostgreSQL，也未执行页面验收、重索引和数据库脚本；forkCount=0 未生成新的覆盖率数据。内置手册变更可能在后续启动时触发知识加载器的增量更新，真实环境待验收项继续见 02-remaining-migration-checklist.md。
+
+### 核心链路查漏补缺（2026-11-08）
+
+补齐聊天数据库租户隔离和会话归属校验，记忆键改为租户＋用户名＋sessionId，并校验缓存访问上下文；同步问答增加消息持久化，与流式统一执行历史预加载。准备会话失败时终止问答，页面历史改按 ID 排序。修复 BM25 对明确未审核公开文档的过滤和先截断后过滤权限导致的漏召回。诊断保存前校验有效业务字段，结构化网关拒绝 null 和尾随 JSON；前端未收到 DONE 的提前断流不再视为成功。
+
+启用 langchain4j-poc 的全量回归 **1075 项通过**；流式工具链改为使用生产配置工厂后补跑协议测试 **10 项通过**。前端完整回归 **46 项通过**，构建成功。验证使用 Mock 和本地协议夹具，没有运行真实模型、PG、浏览器交互或实际重启；未执行数据库脚本或迁移历史聊天数据。完整发现和验收步骤见 03-core-chains-audit.md。

@@ -317,15 +317,17 @@ class LangChain4jCompatibilityPocTest {
         });
         var model = OpenAiStreamingChatModel.builder().baseUrl(baseUrl).apiKey("test-key")
                 .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
-        var assistant = AiServices.builder(
-                        com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant.class)
-                .streamingChatModel(new com.example.opsaiagent.ai.adapter.langchain4j.ContextAwareStreamingChatModel(model))
-                .chatMemoryProvider(id -> MessageWindowChatMemory.builder().id(id).maxMessages(20).build())
-                .tools(new LangChain4jReadOnlyToolBindings(health, metric,
-                        mock(MetricDiscoveryTools.class), mock(ServiceDiscoveryTools.class)))
-                .contentRetriever(query -> List.of(dev.langchain4j.rag.content.Content.from("测试运维知识")))
-                .maxToolCallingRoundTrips(8)
-                .build();
+        var retriever = mock(com.example.opsaiagent.retrieval.HybridRetriever.class);
+        when(retriever.retrieve("检查测试服务", 5)).thenReturn(List.of(
+                new com.example.opsaiagent.knowledge.model.Document("测试运维知识")));
+        var assistant = new com.example.opsaiagent.chat.config.LangChain4jConfig()
+                .langChain4jOpsStreamingAssistant(model,
+                        new com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore(
+                                mock(com.example.opsaiagent.chat.service.ConversationService.class), 20),
+                        new LangChain4jReadOnlyToolBindings(health, metric,
+                                mock(MetricDiscoveryTools.class), mock(ServiceDiscoveryTools.class)),
+                        new com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever(
+                                retriever, 5));
         CompletableFuture<String> result = new CompletableFuture<>();
         var tokens = new StringBuilder();
         com.example.opsaiagent.rbac.context.TenantContext.set("fixture-tenant");

@@ -17,6 +17,51 @@ import static org.mockito.Mockito.when;
 
 class ConversationChatMemoryStoreTest {
 
+    /**
+     * 验证同名用户和同会话 ID 在两个租户下拥有独立缓存，错误上下文不能读缓存。
+     * @return 无返回值
+     */
+    @Test
+    void isolatesSameUserAndSessionAcrossTenantsIncludingCacheHits() {
+        var store = new ConversationChatMemoryStore(mock(ConversationService.class), 20);
+        try {
+            com.example.opsaiagent.rbac.context.TenantContext.set("tenant-a");
+            String tenantAId = LangChain4jMemoryId.of("alice", "same-session");
+            store.updateMessages(tenantAId, List.of(new UserMessage("租户甲历史")));
+            com.example.opsaiagent.rbac.context.TenantContext.set("tenant-b");
+            String tenantBId = LangChain4jMemoryId.of("alice", "same-session");
+            store.updateMessages(tenantBId, List.of(new UserMessage("租户乙历史")));
+
+            assertThat(tenantBId).isNotEqualTo(tenantAId);
+            assertThat(store.getMessages(tenantBId)).containsExactly(new UserMessage("租户乙历史"));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.getMessages(tenantAId))
+                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+            com.example.opsaiagent.rbac.context.TenantContext.set("tenant-a");
+            assertThat(store.getMessages(tenantAId)).containsExactly(new UserMessage("租户甲历史"));
+        } finally {
+            com.example.opsaiagent.rbac.context.TenantContext.clear();
+        }
+    }
+
+    /**
+     * 验证新建仓库模拟进程重启时从持久层恢复，而非依赖旧仓库缓存。
+     * @return 无返回值
+     */
+    @Test
+    void newStoreAfterRestartRestoresPersistedUserAndAssistantMessages() {
+        ConversationService conversationService = mock(ConversationService.class);
+        String id = LangChain4jMemoryId.of("alice", "session-1");
+        when(conversationService.loadRecentMessages("session-1", "alice", 20))
+                .thenReturn(List.of(message("USER", "检查订单服务"), message("ASSISTANT", "服务健康")));
+        var beforeRestart = new ConversationChatMemoryStore(conversationService, 20);
+        beforeRestart.updateMessages(id, List.of(new UserMessage("仅在旧缓存中的内容")));
+
+        var afterRestart = new ConversationChatMemoryStore(conversationService, 20);
+        assertThat(afterRestart.getMessages(id)).containsExactly(new UserMessage("检查订单服务"),
+                dev.langchain4j.data.message.AiMessage.from("服务健康"));
+        verify(conversationService).loadRecentMessages("session-1", "alice", 20);
+    }
+
     @Test
     void coldStartLoadsOwnedHistoryAndLimitsWindowToTwentyMessages() {
         ConversationService conversationService = mock(ConversationService.class);

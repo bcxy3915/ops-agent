@@ -130,6 +130,9 @@ public class DiagnosisService {
         try {
             String snapshotJson = snapshot == null ? null : snapshot.getSnapshotJson();
             String answer = callFollowUpLlm(snapshotJson, base, question);
+            if (!StringUtils.hasText(answer)) {
+                throw new IllegalStateException("模型未返回诊断追问答案");
+            }
             record.setAnswer(answer);
         } catch (Exception e) {
             log.warn("LLM 追问失败 recordId={}: {}", recordId, e.getMessage());
@@ -173,7 +176,10 @@ public class DiagnosisService {
     // ==================== LLM 调用（可测试点） ====================
 
     /**
-     * 结构化诊断调用：系统提示词 + 快照 JSON + 知识库上下文，约束 JSON Schema 输出 DiagnosisResult
+     * 结构化诊断调用：提示词约定 JSON 字段，由网关严格解析，保存前校验业务字段。
+     * @param snapshotJson 故障快照 JSON
+     * @param context 已提供的知识上下文；为空时执行检索
+     * @return 模型结构化结果，业务有效性由保存入口校验
      */
     protected DiagnosisResult callLlm(String snapshotJson, String context) {
         return callLlm(snapshotJson, context, null);
@@ -181,6 +187,10 @@ public class DiagnosisService {
 
     /**
      * 带检索范围的结构化诊断调用。
+     * @param snapshotJson 故障快照 JSON
+     * @param context 已提供的知识上下文；为空时执行检索
+     * @param scope 服务端可信检索范围
+     * @return 模型结构化结果，业务有效性由保存入口校验
      */
     protected DiagnosisResult callLlm(String snapshotJson, String context, RetrievalScope scope) {
         String userMessage = promptTemplate.renderUserMessage(snapshotJson);
@@ -458,7 +468,22 @@ public class DiagnosisService {
                 Map.of())).answer();
     }
 
+    /**
+     * 校验诊断必填字段后写入记录，避免空对象或越界置信度被标记为成功。
+     * @param record 待保存的诊断记录
+     * @param result 模型返回的结构化诊断
+     * @return 无返回值
+     * @throws JsonProcessingException 列表序列化失败
+     */
     private void applyResult(DiagnosisRecordEntity record, DiagnosisResult result) throws JsonProcessingException {
+        if (result == null || !StringUtils.hasText(result.getRootCause())
+                || result.getConfidence() == null || result.getConfidence() < 0 || result.getConfidence() > 100
+                || result.getEvidence() == null || result.getEvidence().isEmpty()
+                || result.getEvidence().stream().anyMatch(item -> !StringUtils.hasText(item))
+                || result.getSuggestions() == null || result.getSuggestions().isEmpty()
+                || result.getSuggestions().stream().anyMatch(item -> !StringUtils.hasText(item))) {
+            throw new IllegalStateException("模型诊断结果缺少有效根因、证据、建议或置信度（0-100）");
+        }
         record.setRootCause(result.getRootCause());
         record.setEvidence(objectMapper.writeValueAsString(result.getEvidence()));
         record.setConfidence(result.getConfidence());

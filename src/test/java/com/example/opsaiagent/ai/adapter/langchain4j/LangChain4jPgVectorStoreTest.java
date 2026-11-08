@@ -29,6 +29,42 @@ class LangChain4jPgVectorStoreTest {
     private final LangChain4jPgVectorStore store = new LangChain4jPgVectorStore(
             jdbc, model, new ObjectMapper(), 3, EmbeddingMetadataMode.EMBED);
 
+    /** 使测试通过 Spring 事务代理调用生产存储，而非直接调用目标对象。 */
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    @org.springframework.transaction.annotation.EnableTransactionManagement
+    static class TransactionConfiguration {
+    }
+
+    /**
+     * 验证第二批数据库写入失败时整次调用回滚，避免第一批提前提交。
+     * @return 无返回值
+     */
+    @Test
+    void secondBatchFailureRollsBackTheWholeProxiedWrite() {
+        var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        var status = new org.springframework.transaction.support.SimpleTransactionStatus();
+        when(manager.getTransaction(any())).thenReturn(status);
+        List<Document> documents = IntStream.range(0, 11)
+                .mapToObj(i -> new Document("事务测试" + i)).toList();
+        when(model.embedAll(anyList())).thenAnswer(call -> Response.from(
+                ((List<?>) call.getArgument(0)).stream().map(x -> Embedding.from(new float[]{1, 0, 0})).toList()));
+        when(jdbc.batchUpdate(anyString(), anyList())).thenReturn(new int[10])
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("第二批写入失败"));
+
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withUserConfiguration(TransactionConfiguration.class)
+                .withBean(org.springframework.transaction.PlatformTransactionManager.class, () -> manager)
+                .withBean(com.example.opsaiagent.retrieval.KnowledgeVectorStore.class, () -> store)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var proxy = context.getBean(com.example.opsaiagent.retrieval.KnowledgeVectorStore.class);
+                    assertThatThrownBy(() -> proxy.write(documents)).hasMessageContaining("第二批写入失败");
+                    verify(jdbc, times(2)).batchUpdate(anyString(), anyList());
+                    verify(manager).rollback(status);
+                    verify(manager, never()).commit(any());
+                });
+    }
+
     /**
      * 设置查询向量及空结果夹具。
      * @return 无返回值

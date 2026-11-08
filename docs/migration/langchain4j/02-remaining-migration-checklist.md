@@ -7,7 +7,7 @@
 | 能力 | 当前实现 |
 | --- | --- |
 | 同步与流式运维 Agent | LangChain4j AiServices、OpsAssistant、OpsStreamingAssistant，最多 8 轮工具调用 |
-| 会话记忆 | ConversationChatMemoryStore + 20 条窗口，按用户名和 sessionId 隔离，从 ops_message 冷启动回填 |
+| 会话记忆 | ConversationChatMemoryStore + 20 条窗口，按租户、用户名和 sessionId 隔离，从 ops_message 冷启动回填 |
 | 诊断结构化输出与追问 | LangChain4j StructuredOutputGateway / ChatGateway |
 | 只读工具 | LangChain4jReadOnlyToolBindings 调用原领域服务，保留服务查询权限与外部 HTTP 容错 |
 | 知识解析与切分 | CommonMark、PDFBox、POI、JTokkit 与项目结构化/递归策略 |
@@ -38,6 +38,8 @@
 6. 需要时在专用测试库显式运行 SplitEvalIT；常规 test/package 不执行真实模型评测。
 
 上述项目本轮没有执行，不应以 Mock 或本地协议夹具替代。
+
+核心链路实现审计已修复会话租户与归属隔离、同步消息持久化、BM25 审核和候选过滤、诊断结果校验及前端提前断流误判。实际环境测试仍未执行；详细修复、自动化验证结果和操作步骤见 [03-core-chains-audit.md](03-core-chains-audit.md)。
 
 ## 4. 后续能力与优化
 

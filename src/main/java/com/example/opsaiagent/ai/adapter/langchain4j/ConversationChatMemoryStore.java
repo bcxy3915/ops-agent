@@ -36,6 +36,7 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      */
     @Override
     public List<ChatMessage> getMessages(Object memoryId) {
+        checkTenant(memoryId);
         if (clearedMemoryIds.contains(memoryId)) {
             return List.of();
         }
@@ -50,6 +51,7 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      */
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
+        checkTenant(memoryId);
         clearedMemoryIds.remove(memoryId);
         messagesByMemoryId.put(memoryId, List.copyOf(messages));
     }
@@ -61,10 +63,29 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      */
     @Override
     public void deleteMessages(Object memoryId) {
+        checkTenant(memoryId);
         messagesByMemoryId.remove(memoryId);
         clearedMemoryIds.add(memoryId);
     }
 
+    /**
+     * 校验记忆标识所属租户与当前执行上下文一致，缓存命中也不能绕过校验。
+     * @param memoryId 含租户、用户名及会话的标识
+     * @return 无返回值
+     */
+    private void checkTenant(Object memoryId) {
+        var identity = LangChain4jMemoryId.parse(memoryId);
+        if (!java.util.Objects.equals(identity.tenantId(),
+                com.example.opsaiagent.rbac.context.TenantContext.get())) {
+            throw new org.springframework.security.access.AccessDeniedException("会话记忆租户与当前上下文不一致");
+        }
+    }
+
+    /**
+     * 按当前租户及用户归属从数据库恢复历史。
+     * @param memoryId 含租户、用户名及会话的标识
+     * @return 按持久化顺序排列的历史消息
+     */
     private List<ChatMessage> loadHistory(Object memoryId) {
         LangChain4jMemoryId.Identity identity = LangChain4jMemoryId.parse(memoryId);
         return LangChain4jMemoryHistoryMapper.toChatMessages(

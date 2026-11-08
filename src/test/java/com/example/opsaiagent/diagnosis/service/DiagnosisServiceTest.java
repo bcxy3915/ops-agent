@@ -105,6 +105,32 @@ class DiagnosisServiceTest {
                 .build();
     }
 
+    /**
+     * 验证可解析但业务字段无效的模型结果不能作为成功诊断。
+     * @return 无返回值
+     */
+    @Test
+    void incompleteOrOutOfRangeResultsAreFailed() {
+        DiagnosisResult negativeConfidence = sampleResult();
+        negativeConfidence.setConfidence(-1);
+        DiagnosisResult excessiveConfidence = sampleResult();
+        excessiveConfidence.setConfidence(101);
+        DiagnosisResult blankEvidence = sampleResult();
+        blankEvidence.setEvidence(List.of(" "));
+        DiagnosisResult emptySuggestions = sampleResult();
+        emptySuggestions.setSuggestions(List.of());
+        for (DiagnosisResult result : List.of(new DiagnosisResult(), negativeConfidence,
+                excessiveConfidence, blankEvidence, emptySuggestions)) {
+            when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
+                    .thenReturn(result);
+            DiagnosisRecordEntity record = service.diagnose(snapshot);
+            assertThat(record.getStatus()).isEqualTo("FAILED");
+            assertThat(record.getErrorMessage()).contains("模型诊断结果");
+            assertThat(record.getRootCause()).isNull();
+            verify(diagnosisMapper).insert(record);
+        }
+    }
+
     @Test
     @DisplayName("基于快照诊断成功：调用 LLM 结构化输出并落库 SUCCESS")
     void diagnose_success() {
@@ -258,6 +284,28 @@ class DiagnosisServiceTest {
 
         assertThat(record.getStatus()).isEqualTo("FAILED");
         assertThat(record.getErrorMessage()).contains("LLM timeout");
+    }
+
+    /**
+     * 验证模型返回空白追问答案时记录失败，并保留原诊断关联。
+     * @return 无返回值
+     */
+    @Test
+    void followUpBlankAnswerIsFailed() {
+        DiagnosisRecordEntity base = new DiagnosisRecordEntity();
+        base.setId(1L);
+        base.setAlertEventId(200L);
+        when(diagnosisMapper.selectById(1L)).thenReturn(base);
+        when(chatGateway.chat(any(ChatRequest.class)))
+                .thenReturn(new ChatResponse("  ", Map.of(), "test"));
+
+        DiagnosisRecordEntity record = service.followUp(1L, "怎么办？");
+
+        assertThat(record.getStatus()).isEqualTo("FAILED");
+        assertThat(record.getErrorMessage()).contains("未返回诊断追问答案");
+        assertThat(record.getAlertEventId()).isEqualTo(200L);
+        assertThat(record.getAnswer()).isNull();
+        verify(diagnosisMapper).insert(record);
     }
 
     @Test

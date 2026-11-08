@@ -143,6 +143,48 @@ class OpsAgentServiceTest {
 
     // ==================== ask ====================
 
+    /**
+     * 验证同步入口在当前问题落库前回填历史，并保存本轮答案。
+     * @return 无返回值
+     */
+    @Test
+    void synchronousChatPersistsMessagesAfterLoadingHistory() {
+        mockAuthenticated();
+        when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
+        when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
+        mockAskChain("同步回答");
+
+        service.askWithCitations("sess-1", "问题");
+
+        var order = org.mockito.Mockito.inOrder(conversationService, memoryStore, assistant);
+        order.verify(conversationService).ensureConversation("sess-1", "admin", "问题");
+        order.verify(memoryStore).getMessages(
+                com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of("admin", "sess-1"));
+        order.verify(conversationService).saveUserMessage("sess-1", "问题");
+        order.verify(assistant).ask(anyString(), eq("问题"), anyString());
+        order.verify(conversationService).saveAssistantMessage("sess-1", "同步回答");
+    }
+
+    /**
+     * 验证同步和流式入口均在检索、记忆及模型调用前拒绝越权会话。
+     * @return 无返回值
+     */
+    @Test
+    void rejectsForeignSessionBeforeRetrievalOrModelInvocation() {
+        mockAuthenticated();
+        org.mockito.Mockito.doThrow(new org.springframework.security.access.AccessDeniedException("无权访问会话"))
+                .when(conversationService).ensureConversation("foreign", "admin", "问题");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.ask("foreign", "问题"))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        StepVerifier.create(service.askStreamWithCitations("foreign", "问题"))
+                .expectError(org.springframework.security.access.AccessDeniedException.class).verify();
+
+        org.mockito.Mockito.verifyNoInteractions(assistant, streamingAssistant, memoryStore, hybridRetriever);
+        verify(conversationService, never()).saveUserMessage(anyString(), anyString());
+        verify(conversationService, never()).saveAssistantMessage(anyString(), anyString());
+    }
+
     @Test
     @DisplayName("ask：检索到文档，返回 LLM 回答")
     void ask_withDocuments() {
@@ -249,21 +291,18 @@ class OpsAgentServiceTest {
     }
 
     @Test
-    @DisplayName("askStream：保存会话失败不中断主流程")
+    @DisplayName("askStream：保存会话失败时终止，不调用模型或写入消息")
     void askStream_saveConversationFails() {
         mockAuthenticated();
         org.mockito.Mockito.doThrow(new RuntimeException("DB error"))
                 .when(conversationService).ensureConversation(anyString(), anyString(), anyString());
-        when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
-        when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
-        mockStreamChain(Flux.just("A"));
-
         Flux<String> flux = service.askStream("sess-1", "问题");
 
         StepVerifier.create(flux)
-                .expectNext("A")
-                .expectNext("[]", "[DONE]")
-                .verifyComplete();
+                .expectErrorMessage("DB error")
+                .verify();
+        org.mockito.Mockito.verifyNoInteractions(streamingAssistant, hybridRetriever, memoryStore);
+        verify(conversationService, never()).saveUserMessage(anyString(), anyString());
     }
 
     @Test

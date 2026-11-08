@@ -73,6 +73,20 @@ public class Bm25Index {
      * @return 检索结果列表
      */
     public List<ScoredDocument> search(String query, int topK) {
+        return search(query, topK, document -> true);
+    }
+
+    /**
+     * 在排序和截断前过滤不可见候选，避免其他租户的高分文档挤占召回名额。
+     * @param query 查询文本
+     * @param topK 返回条数
+     * @param visible 服务端可见性判断
+     * @return 仅包含可见文档的检索结果
+     */
+    public List<ScoredDocument> search(String query, int topK, java.util.function.Predicate<Document> visible) {
+        if (topK <= 0) {
+            return List.of();
+        }
         List<String> queryTokens = tokenizer.tokenize(query);
         if (queryTokens.isEmpty() || documents.isEmpty()) {
             return List.of();
@@ -100,6 +114,7 @@ public class Bm25Index {
         }
 
         return scores.entrySet().stream()
+                .filter(entry -> visible.test(documents.get(entry.getKey())))
                 .sorted(Map.Entry.<Integer, Double>comparingByValue().reversed())
                 .limit(topK)
                 .map(e -> new ScoredDocument(documents.get(e.getKey()), e.getValue()))

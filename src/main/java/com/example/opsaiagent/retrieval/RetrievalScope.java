@@ -88,11 +88,11 @@ public record RetrievalScope(String tenantId, Set<Long> deptIds, String userId) 
             boolean builtin = "BUILTIN".equalsIgnoreCase(layer)
                     || (StringUtils.hasText(source)
                     && !source.startsWith("upload:") && !source.startsWith("case:"));
-            return builtin;
+            return builtin && isApproved(md);
         }
 
         if (VISIBILITY_PUBLIC.equalsIgnoreCase(visibility)) {
-            return true;
+            return isApproved(md);
         }
         if (!StringUtils.hasText(tenantId)
                 || !tenantId.equals(str(md.get("tenantId")))

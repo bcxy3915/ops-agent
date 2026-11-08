@@ -20,6 +20,22 @@ import static org.mockito.Mockito.when;
 @DisplayName("检索数据范围")
 class RetrievalScopeTest {
 
+    /**
+     * 验证公开或历史内置标记不能绕过明确的未审核状态。
+     * @return 无返回值
+     */
+    @Test
+    void publicAndLegacyBuiltinDocumentsStillRespectExplicitReviewState() {
+        for (String state : new String[]{"DRAFT", "PENDING_DEPT", "REJECTED"}) {
+            assertThat(RetrievalScope.publicOnly().matches(Map.of(
+                    "visibility", "PUBLIC", "reviewStatus", state))).isFalse();
+            assertThat(RetrievalScope.publicOnly().matches(Map.of(
+                    "source", "manual.md", "reviewStatus", state))).isFalse();
+        }
+        assertThat(RetrievalScope.publicOnly().matches(Map.of(
+                "visibility", "PUBLIC", "reviewStatus", "APPROVED"))).isTrue();
+    }
+
     @Test
     @DisplayName("current：无部门普通用户不可见部门知识")
     void current_noDeptOrdinaryUser() {

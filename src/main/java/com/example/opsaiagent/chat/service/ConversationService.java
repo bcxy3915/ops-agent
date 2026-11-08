@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -38,11 +39,15 @@ public class ConversationService {
      * @param sessionId 会话 ID
      * @param username 用户名
      * @param firstQuestion 首次提问内容
+     * @return 无返回值
      */
     @Transactional
     public void ensureConversation(String sessionId, String username, String firstQuestion) {
         ConversationEntity existing = findBySessionId(sessionId);
         if (existing != null) {
+            if (!java.util.Objects.equals(existing.getUsername(), username)) {
+                throw new AccessDeniedException("无权向该会话发送消息");
+            }
             return;
         }
 
@@ -55,6 +60,7 @@ public class ConversationService {
         ConversationEntity conv = new ConversationEntity();
         conv.setSessionId(sessionId);
         conv.setUsername(username);
+        conv.setTenantId(currentTenant());
         conv.setTitle(title);
         conv.setMessageCount(0);
         conv.setLastActiveAt(now);
@@ -67,11 +73,13 @@ public class ConversationService {
      * 保存用户消息（同步，主流程调用）
      * @param sessionId 会话 ID
      * @param content 消息内容
+     * @return 无返回值
      */
     @Transactional
     public void saveUserMessage(String sessionId, String content) {
         MessageEntity msg = new MessageEntity();
         msg.setSessionId(sessionId);
+        msg.setTenantId(currentTenant());
         msg.setRole("USER");
         msg.setContent(content);
         msg.setCreatedAt(LocalDateTime.now());
@@ -85,6 +93,7 @@ public class ConversationService {
      * 保存 AI 回答（异步，SSE 流结束时调用）
      * @param sessionId 会话 ID
      * @param content 消息内容
+     * @return 无返回值
      */
     @Async("conversationExecutor")
     @Transactional
@@ -98,6 +107,7 @@ public class ConversationService {
      * @param content 消息内容
      * @param reasoning 原因
      * @param toolCalls 工具调用
+     * @return 无返回值
      */
     @Async("conversationExecutor")
     @Transactional
@@ -106,6 +116,7 @@ public class ConversationService {
         try {
             MessageEntity msg = new MessageEntity();
             msg.setSessionId(sessionId);
+            msg.setTenantId(currentTenant());
             msg.setRole("ASSISTANT");
             msg.setContent(content);
             msg.setReasoning(reasoning);
@@ -149,6 +160,7 @@ public class ConversationService {
         // 1. 查询用户的会话列表（已按 lastActiveAt 倒序）
         List<ConversationEntity> list = conversationMapper.selectList(
                 new LambdaQueryWrapper<ConversationEntity>()
+                        .eq(ConversationEntity::getTenantId, currentTenant())
                         .eq(ConversationEntity::getUsername, username)
                         .orderByDesc(ConversationEntity::getLastActiveAt)
         );
@@ -166,6 +178,7 @@ public class ConversationService {
         // 利用 id 自增特性，分组取 max(id)
         QueryWrapper<MessageEntity> queryWrapper = new QueryWrapper<>();
         queryWrapper.select("session_id", "max(id) as id")
+                .eq("tenant_id", currentTenant())
                 .in("session_id", sessionIds)
                 .groupBy("session_id");
 
@@ -227,8 +240,9 @@ public class ConversationService {
 
         List<MessageEntity> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<MessageEntity>()
+                        .eq(MessageEntity::getTenantId, currentTenant())
                         .eq(MessageEntity::getSessionId, sessionId)
-                        .orderByAsc(MessageEntity::getCreatedAt)
+                        .orderByAsc(MessageEntity::getId)
         );
 
         return messages.stream()
@@ -245,7 +259,7 @@ public class ConversationService {
      * @param sessionId 会话 ID
      * @param username 用户名，用于校验会话归属
      * @param limit 最多读取条数
-     * @return 按时间正序排列的消息；会话不存在或不属于该用户时返回空列表
+     * @return 按 ID 正序排列的消息；会话不存在或不属于该用户时返回空列表
      */
     public List<MessageEntity> loadRecentMessages(String sessionId, String username, int limit) {
         ConversationEntity conv = findBySessionId(sessionId);
@@ -255,6 +269,7 @@ public class ConversationService {
 
         List<MessageEntity> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<MessageEntity>()
+                        .eq(MessageEntity::getTenantId, currentTenant())
                         .eq(MessageEntity::getSessionId, sessionId)
                         .orderByDesc(MessageEntity::getId)
                         .last("LIMIT " + limit)
@@ -280,6 +295,7 @@ public class ConversationService {
 
         conversationMapper.deleteById(conv.getId());
         messageMapper.delete(new LambdaQueryWrapper<MessageEntity>()
+                .eq(MessageEntity::getTenantId, currentTenant())
                 .eq(MessageEntity::getSessionId, sessionId));
         log.info("删除会话: sessionId={}, username={}", sessionId, username);
         return true;
@@ -311,9 +327,23 @@ public class ConversationService {
     private ConversationEntity findBySessionId(String sessionId) {
         return conversationMapper.selectOne(
                 new LambdaQueryWrapper<ConversationEntity>()
+                        .eq(ConversationEntity::getTenantId, currentTenant())
                         .eq(ConversationEntity::getSessionId, sessionId)
                         .last("LIMIT 1")
         );
+    }
+
+    /**
+     * 获取服务端可信租户；缺少上下文时拒绝查询或写入，避免退回全量范围。
+     * @return 当前租户 ID
+     */
+    private String currentTenant() {
+        String tenantId = com.example.opsaiagent.rbac.context.TenantContext.get();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new com.example.opsaiagent.exception.BusinessException(
+                    com.example.opsaiagent.common.error.ErrorCode.TENANT_REQUIRED, "缺少会话租户上下文");
+        }
+        return tenantId;
     }
 
     /**

@@ -37,7 +37,13 @@ public class LangChain4jStructuredOutputGateway implements StructuredOutputGatew
             throw new IllegalStateException("模型未返回结构化结果");
         }
         try {
-            return objectMapper.readValue(content, outputType);
+            T result = objectMapper.readerFor(outputType)
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .readValue(content);
+            if (result == null) {
+                throw new IllegalStateException("模型返回空结构化结果");
+            }
+            return result;
         } catch (Exception e) {
             throw new IllegalStateException("模型返回的结构化结果格式非法", e);
         }
