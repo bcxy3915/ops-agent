@@ -52,8 +52,32 @@ public class KnowledgeDocumentIndexer {
      *
      * @param entity       文档实体（含 rawContent）
      * @param vectorSource 向量 source 标识，同时用于清理旧向量
+     * @return 无返回值
      */
     public void reindex(KnowledgeDocumentEntity entity, String vectorSource) {
+        reindex(entity, vectorSource, Map.of(), true);
+    }
+
+    /**
+     * 重建内置知识索引，复用分块落库流程并保留文件指纹和原有向量正文口径。
+     * @param entity 平台内置文档实体，正文为完整源码
+     * @param contentHash 文件内容指纹
+     * @return 无返回值
+     */
+    public void reindexBuiltin(KnowledgeDocumentEntity entity, String contentHash) {
+        reindex(entity, entity.getSource(), Map.of("contentHash", contentHash), false);
+    }
+
+    /**
+     * 在调用方事务中替换文档分块和向量。
+     * @param entity 文档实体
+     * @param vectorSource 向量来源标识
+     * @param extraMetadata 需附加到向量的元数据
+     * @param addContextHeader 是否为向量正文添加上下文头
+     * @return 无返回值
+     */
+    private void reindex(KnowledgeDocumentEntity entity, String vectorSource,
+                         Map<String, Object> extraMetadata, boolean addContextHeader) {
         Long docId = entity.getId();
         // 幂等：先清空该文档已有的分块与向量，重复执行不会产生重复数据
         chunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunkEntity>()
@@ -75,7 +99,9 @@ public class KnowledgeDocumentIndexer {
                     chunkEntities.subList(i, Math.min(i + CHUNK_INSERT_BATCH_SIZE, chunkEntities.size())));
         }
 
-        vectorIndexer.write(buildVectorDocs(entity, chunks, chunkEntities, vectorSource));
+        List<Document> vectorDocs = buildVectorDocs(entity, chunks, chunkEntities, vectorSource, addContextHeader);
+        vectorDocs.forEach(doc -> doc.getMetadata().putAll(extraMetadata));
+        vectorIndexer.write(vectorDocs);
         entity.setChunkCount(chunkEntities.size());
         documentMapper.updateById(entity);
         log.info("文档索引完成: docId={}, source={}, chunks={}", docId, vectorSource, chunkEntities.size());
@@ -118,8 +144,18 @@ public class KnowledgeDocumentIndexer {
         return extractSection(chunk.getText(), docType);
     }
 
+    /**
+     * 将展示分块转换为携带权限及溯源元数据的向量文档。
+     * @param entity 原始文档实体
+     * @param chunks 已切分的正文
+     * @param chunkEntities 已保存的展示分块
+     * @param vectorSource 向量来源标识
+     * @param addContextHeader 是否允许附加检索上下文头
+     * @return 待写入的向量文档
+     */
     private List<Document> buildVectorDocs(KnowledgeDocumentEntity entity, List<Document> chunks,
-                                           List<KnowledgeChunkEntity> chunkEntities, String vectorSource) {
+                                           List<KnowledgeChunkEntity> chunkEntities, String vectorSource,
+                                           boolean addContextHeader) {
         String tenantId = entity.getTenantId() == null ? "" : entity.getTenantId();
         String deptId = entity.getDeptId() == null ? "" : String.valueOf(entity.getDeptId());
         String visibility = entity.getVisibility();
@@ -134,7 +170,7 @@ public class KnowledgeDocumentIndexer {
         String layer = entity.getLayer() == null ? "" : entity.getLayer();
 
         List<Document> vectorDocs = new ArrayList<>(chunks.size());
-        boolean keepHeader = splitProperties.isKeepHeadingPath();
+        boolean keepHeader = addContextHeader && splitProperties.isKeepHeadingPath();
         for (int i = 0; i < chunks.size(); i++) {
             Document chunk = chunks.get(i);
             KnowledgeChunkEntity chunkEntity = chunkEntities.get(i);

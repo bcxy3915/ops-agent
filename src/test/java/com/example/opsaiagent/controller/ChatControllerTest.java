@@ -32,6 +32,44 @@ import static org.mockito.Mockito.when;
 class ChatControllerTest {
 
     /**
+     * 验证实际 MVC SSE 编码与标准解析后仍逐字保留 Markdown 的空格、缩进和换行。
+     * @return 无返回值
+     * @throws Exception 模拟请求或异步响应读取异常
+     */
+    @Test
+    void streamingHttpPreservesMarkdownWhitespace() throws Exception {
+        List<String> tokens = List.of("**故障告警**\n", "-", " ", "集群异常\n", "  ", "- 子项\n",
+                "\n```sh\n", "  echo hello\n", "```\n", "行内 `GET", " ", "/_health`", "\n\n");
+        var events = new java.util.ArrayList<ServerSentEvent<String>>();
+        tokens.forEach(token -> events.add(ServerSentEvent.builder(token).build()));
+        events.add(ServerSentEvent.builder("[]").event("citations").build());
+        events.add(ServerSentEvent.builder("[DONE]").build());
+        when(opsAgentService.askStreamWithCitations("s", "问题")).thenReturn(Flux.fromIterable(events));
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new org.springframework.http.converter.StringHttpMessageConverter(java.nio.charset.StandardCharsets.UTF_8),
+                        new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter()).build();
+        var result = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ops/ask/stream")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"sessionId\":\"s\",\"question\":\"问题\"}")).andReturn();
+        result.getAsyncResult(5000);
+        String wire = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        var answer = new StringBuilder();
+        for (String event : wire.split("\\r?\\n\\r?\\n")) {
+            if (event.contains("event:citations")) { continue; }
+            List<String> data = new java.util.ArrayList<>();
+            for (String line : event.split("\\r?\\n")) {
+                if (line.startsWith("data:")) {
+                    String value = line.substring(5);
+                    data.add(value.startsWith(" ") ? value.substring(1) : value);
+                }
+            }
+            String text = String.join("\n", data);
+            if (!"[DONE]".equals(text)) { answer.append(text); }
+        }
+        assertThat(answer.toString()).isEqualTo(String.join("", tokens));
+    }
+
+    /**
      * 验证 HTTP 层在建立 SSE 响应前拒绝空问题和超长会话 ID。
      * @return 无返回值
      * @throws Exception 模拟请求异常
@@ -152,10 +190,10 @@ class ChatControllerTest {
         Flux<ServerSentEvent<String>> flux = controller.askStream(request);
 
         StepVerifier.create(flux)
-                .expectNextMatches(ev -> "citations".equals(ev.event()) && "[]".equals(ev.data()))
-                .expectNextMatches(ev -> "你".equals(ev.data()))
-                .expectNextMatches(ev -> "好".equals(ev.data()))
-                .expectNextMatches(ev -> "[DONE]".equals(ev.data()))
+                .expectNextMatches(ev -> "citations".equals(ev.event()) && " []".equals(ev.data()))
+                .expectNextMatches(ev -> " 你".equals(ev.data()))
+                .expectNextMatches(ev -> " 好".equals(ev.data()))
+                .expectNextMatches(ev -> " [DONE]".equals(ev.data()))
                 .verifyComplete();
     }
 }

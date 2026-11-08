@@ -244,6 +244,38 @@ class KnowledgeDocumentServiceTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.KNOWLEDGE_DOCUMENT_NOT_FOUND);
     }
 
+    /**
+     * 验证前端详情契约返回平台内置文档的完整源码与真实分块；无入参。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("getById：平台内置文档返回 Markdown 源码和分块")
+    void getById_builtinMarkdownWithChunks() {
+        String markdown = "# 运维手册\n\n## 指标\n\n| 指标 |\n| --- |\n| CPU |\n";
+        KnowledgeDocumentEntity builtin = doc(1L, "运维手册", "VERIFIED", "BUILTIN", markdown);
+        builtin.setTenantId("0");
+        builtin.setDeptId(null);
+        builtin.setVisibility("PUBLIC");
+        builtin.setChunkCount(1);
+        KnowledgeChunkEntity chunk = new KnowledgeChunkEntity();
+        chunk.setId(10L);
+        chunk.setDocId(1L);
+        chunk.setTenantId("0");
+        chunk.setOrdinal(1);
+        chunk.setSection("运维手册 > 指标");
+        chunk.setContent(markdown);
+        when(documentMapper.selectById(1L)).thenReturn(builtin);
+        when(chunkMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(chunk));
+
+        KnowledgeDocumentResponse response = service.getById(1L);
+
+        assertThat(response.getDocType()).isEqualTo("MARKDOWN");
+        assertThat(response.getRawContent()).isEqualTo(markdown);
+        assertThat(response.getChunkCount()).isEqualTo(1);
+        assertThat(response.getChunks()).hasSize(1);
+        assertThat(response.getChunks().getFirst().getContent()).isEqualTo(markdown);
+    }
+
     @Test
     @DisplayName("getById：跨租户文档不可见（越权读取拦截）")
     void getById_crossTenantForbidden() {
@@ -845,13 +877,26 @@ class KnowledgeDocumentServiceTest {
         MultipartFile md = mdFile("a.md", "# 标题\n\n正文内容");
         KnowledgeDocumentService.ParsedDocument pm = service.parse(md);
         assertThat(pm.docType()).isEqualTo("MARKDOWN");
-        assertThat(pm.rawContent()).contains("正文内容");
+        assertThat(pm.rawContent()).isEqualTo("# 标题\n\n正文内容");
         assertThat(pm.fileName()).isEqualTo("a.md");
 
         MultipartFile txt = new MockMultipartFile("file", "b.txt", "text/plain", "文本".getBytes(StandardCharsets.UTF_8));
         KnowledgeDocumentService.ParsedDocument pt = service.parse(txt);
         assertThat(pt.docType()).isEqualTo("TXT");
         assertThat(pt.rawContent()).isEqualTo("文本");
+    }
+
+    /**
+     * 验证上传源码保留 Markdown 结构，避免详情中的表格与代码失去格式；无入参。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("parse：Markdown 保留标题、表格、列表、代码围栏与原始换行")
+    void parse_markdownPreservesSource() {
+        String content = "# 运维手册\r\n\r\n## 健康检查\r\n\r\n"
+                + "| 服务 | 状态 |\r\n| --- | --- |\r\n| todo | 正常 |\r\n\r\n"
+                + "- 检查指标\r\n\r\n```shell\r\n  curl /health\r\n```\r\n";
+        assertThat(service.parse(mdFile("手册.md", content)).rawContent()).isEqualTo(content);
     }
 
     @Test

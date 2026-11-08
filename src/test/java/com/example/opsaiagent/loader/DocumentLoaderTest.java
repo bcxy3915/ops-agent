@@ -7,6 +7,12 @@ import com.example.opsaiagent.knowledge.ingest.splitter.SplitterTestFixture;
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.knowledge.service.VectorIndexer;
+import com.example.opsaiagent.knowledge.service.KnowledgeDocumentIndexer;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
+import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
+import com.example.opsaiagent.knowledge.ingest.splitter.SplitProperties;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +64,11 @@ class DocumentLoaderTest {
     @Mock
     private KnowledgeDocumentMapper documentMapper;
 
+    @Mock
+    private KnowledgeChunkMapper chunkMapper;
+    @Mock
+    private PlatformTransactionManager transactionManager;
+
     private VectorIndexer vectorIndexer;
 
     private DocumentLoader loader;
@@ -74,7 +85,19 @@ class DocumentLoaderTest {
     @BeforeEach
     void setUp() throws IOException {
         vectorIndexer = SplitterTestFixture.vectorIndexer(vectorStore);
-        loader = new DocumentLoader(vectorIndexer, new DocumentParserStrategyFactory(
+        lenient().when(transactionManager.getTransaction(any())).thenAnswer(inv -> org.mockito.Mockito.mock(TransactionStatus.class));
+        lenient().when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenAnswer(inv -> {
+            inv.getArgument(0, KnowledgeDocumentEntity.class).setId(10L);
+            return 1;
+        });
+        lenient().when(chunkMapper.insertBatch(any())).thenAnswer(inv -> {
+            List<KnowledgeChunkEntity> chunks = inv.getArgument(0);
+            for (int i = 0; i < chunks.size(); i++) chunks.get(i).setId(100L + i);
+            return chunks.size();
+        });
+        KnowledgeDocumentIndexer indexer = new KnowledgeDocumentIndexer(documentMapper, chunkMapper,
+                vectorIndexer, jdbcTemplate, new SplitProperties());
+        loader = new DocumentLoader(indexer, chunkMapper, transactionManager, new DocumentParserStrategyFactory(
                 java.util.List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, jdbcTemplate,
                 documentMapper);
         lenient().when(mockMdResource.getFilename()).thenReturn("test.md");
@@ -135,6 +158,13 @@ class DocumentLoaderTest {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
         when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", mdHash())));
 
+        KnowledgeDocumentEntity complete = new KnowledgeDocumentEntity();
+        complete.setId(1L);
+        complete.setSource("test.md");
+        complete.setRawContent(MD_CONTENT);
+        complete.setChunkCount(1);
+        when(documentMapper.selectList(any())).thenReturn(List.of(complete));
+        when(chunkMapper.selectCount(any())).thenReturn(1L);
         Map<String, Object> result = loader.reload();
 
         assertThat(result).containsEntry("status", "success");
@@ -267,7 +297,9 @@ class DocumentLoaderTest {
         assertThat(entity.getSource()).isEqualTo("test.md");
         assertThat(entity.getFilePath()).isEqualTo(DocumentLoader.CLASSPATH_KNOWLEDGE_PREFIX + "test.md");
         assertThat(entity.getRawContent()).isNotBlank();
-        assertThat(entity.getChunkCount()).isEqualTo(3);
+        ArgumentCaptor<List<KnowledgeChunkEntity>> chunksCaptor = ArgumentCaptor.forClass(List.class);
+        verify(chunkMapper, atLeastOnce()).insertBatch(chunksCaptor.capture());
+        assertThat(entity.getChunkCount()).isEqualTo(chunksCaptor.getValue().size());
     }
 
     @Test
@@ -370,6 +402,112 @@ class DocumentLoaderTest {
     }
 
     // ==================== deleteBySources ====================
+
+    /**
+     * 验证原文、展示分块与向量正文使用相同的 Markdown 结构；无入参。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("loadAndIndex：完整保存 Markdown 源码、分块及可追溯的向量元数据")
+    void loadAndIndex_preservesMarkdownAndPersistsChunks() throws IOException {
+        String markdown = "# 运维手册\r\n\r\n**负责人**：运维\r\n\r\n"
+                + "## 健康检查\r\n\r\n- 检查 CPU\r\n\r\n"
+                + "| 指标 | 状态 |\r\n| --- | --- |\r\n| CPU | 正常 |\r\n\r\n"
+                + "```shell\r\n  curl /health\r\n```\r\n";
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(mockMdResource.getContentAsString(StandardCharsets.UTF_8)).thenReturn(markdown);
+
+        int count = loader.loadAndIndex(Map.of("test.md", "source-hash"));
+
+        ArgumentCaptor<KnowledgeDocumentEntity> document = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
+        verify(documentMapper).insert(document.capture());
+        assertThat(document.getValue().getRawContent()).isEqualTo(markdown);
+        ArgumentCaptor<List<KnowledgeChunkEntity>> chunks = ArgumentCaptor.forClass(List.class);
+        verify(chunkMapper).insertBatch(chunks.capture());
+        assertThat(count).isEqualTo(chunks.getValue().size());
+        assertThat(chunks.getValue()).allSatisfy(chunk -> {
+            assertThat(chunk.getDocId()).isEqualTo(10L);
+            assertThat(chunk.getTenantId()).isEqualTo("0");
+            assertThat(chunk.getSection()).isNotBlank();
+            assertThat(markdown).contains(chunk.getContent());
+        });
+        assertThat(chunks.getValue().stream().map(KnowledgeChunkEntity::getContent).collect(java.util.stream.Collectors.joining()))
+                .isEqualTo(markdown);
+        ArgumentCaptor<List<com.example.opsaiagent.knowledge.model.Document>> vectors = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).write(vectors.capture());
+        for (int i = 0; i < vectors.getValue().size(); i++) {
+            var vector = vectors.getValue().get(i);
+            var chunk = chunks.getValue().get(i);
+            assertThat(vector.getText()).isEqualTo(chunk.getContent());
+            assertThat(vector.getMetadata()).containsEntry("docId", "10")
+                    .containsEntry("chunkId", String.valueOf(chunk.getId()))
+                    .containsEntry("ordinal", String.valueOf(i + 1))
+                    .containsEntry("contentHash", "source-hash")
+                    .containsEntry("visibility", "PUBLIC");
+        }
+    }
+
+    /**
+     * 验证指纹未变化时仍自动修复旧版纯文本记录；无入参。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("reload：文件指纹相同但保存正文不一致时自动修复")
+    void reload_repairsLegacyPlainTextWithUnchangedHash() throws IOException {
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", mdHash())));
+        KnowledgeDocumentEntity legacy = new KnowledgeDocumentEntity();
+        legacy.setId(1L);
+        legacy.setSource("test.md");
+        legacy.setRawContent("旧版抽取后的正文");
+        legacy.setVersion(2);
+        when(documentMapper.selectList(any())).thenReturn(List.of(legacy));
+
+        assertThat(loader.reload()).containsEntry("status", "success").containsEntry("targets", 1);
+        assertThat(legacy.getRawContent()).isEqualTo(MD_CONTENT);
+        assertThat(legacy.getVersion()).isEqualTo(3);
+        verify(chunkMapper).insertBatch(any());
+    }
+
+    /**
+     * 验证已有正确原文但缺少分块时可增量补齐，且不虚增版本；无入参。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("reload：原文正确但分块缺失时修复，文档版本保持不变")
+    void reload_repairsMissingChunksWithoutChangingVersion() throws IOException {
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", mdHash())));
+        KnowledgeDocumentEntity legacy = new KnowledgeDocumentEntity();
+        legacy.setId(1L);
+        legacy.setSource("test.md");
+        legacy.setRawContent(MD_CONTENT);
+        legacy.setChunkCount(3);
+        legacy.setVersion(2);
+        when(documentMapper.selectList(any())).thenReturn(List.of(legacy));
+        when(chunkMapper.selectCount(any())).thenReturn(0L);
+
+        assertThat(loader.reload()).containsEntry("targets", 1);
+        assertThat(legacy.getVersion()).isEqualTo(2);
+        verify(chunkMapper).insertBatch(any());
+    }
+
+    /**
+     * 验证向量失败时回滚同一文件的数据库事务，且不误报成功或再次全量尝试；无入参。
+     * @return 无返回值
+     */
+    @Test
+    @DisplayName("reload：向量写入失败回滚，不误报成功")
+    void reload_rollsBackWhenVectorWriteFails() throws IOException {
+        stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
+        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
+        org.mockito.Mockito.doThrow(new IllegalStateException("embedding 暂不可用")).when(vectorStore).write(any());
+
+        assertThat(loader.reload()).containsEntry("status", "failed");
+        verify(transactionManager).rollback(any());
+        verify(vectorStore, times(1)).write(any());
+        verify(transactionManager, never()).commit(any());
+    }
 
     @Test
     @DisplayName("deleteBySources：空集合直接返回 0")

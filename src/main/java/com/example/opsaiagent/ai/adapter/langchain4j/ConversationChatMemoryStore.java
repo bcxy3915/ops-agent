@@ -2,13 +2,16 @@ package com.example.opsaiagent.ai.adapter.langchain4j;
 
 import com.example.opsaiagent.chat.service.ConversationService;
 import com.example.opsaiagent.knowledge.model.Document;
+import com.example.opsaiagent.rbac.context.TenantContext;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.LongSupplier;
 
 /** 有界的轮次记忆：每轮从数据库刷新，活动轮次不被容量淘汰，结束立即清理。 */
@@ -186,9 +189,8 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      * @return 无返回值
      */
     private void checkTenant(Object id) {
-        if (!java.util.Objects.equals(LangChain4jMemoryId.parse(id).tenantId(),
-                com.example.opsaiagent.rbac.context.TenantContext.get())) {
-            throw new org.springframework.security.access.AccessDeniedException("会话记忆租户与当前上下文不一致");
+        if (!Objects.equals(LangChain4jMemoryId.parse(id).tenantId(), TenantContext.get())) {
+            throw new AccessDeniedException("会话记忆租户与当前上下文不一致");
         }
     }
 
@@ -197,7 +199,9 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      * @param id 记忆标识
      * @return 是否包含请求令牌
      */
-    private boolean isTurn(Object id) { return id.toString().split("\\.", -1).length == 4; }
+    private boolean isTurn(Object id) {
+        return id.toString().split("\\.", -1).length == 4;
+    }
 
     /**
      * 清理过期项；活动项采用创建时间，普通缓存采用最近访问时间。
@@ -215,7 +219,8 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      */
     private void makeRoom(Object id) {
         purge();
-        if (entries.containsKey(id)) { return; }
+        if (entries.containsKey(id)) return;
+
         if (entries.size() >= capacity) {
             var victim = entries.entrySet().stream().filter(e -> e.getValue().activeCheck == null).findFirst();
             if (victim.isEmpty()) { throw new IllegalStateException("问答并发容量已满，请稍后重试"); }

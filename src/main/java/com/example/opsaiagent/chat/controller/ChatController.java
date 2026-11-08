@@ -104,7 +104,26 @@ public class ChatController {
         String sessionId = (request.getSessionId() == null || request.getSessionId().isBlank())
                 ? "default"
                 : request.getSessionId();
-        return opsAgentService.askStreamWithCitations(sessionId, request.getQuestion());
+        return opsAgentService.askStreamWithCitations(sessionId, request.getQuestion())
+                .map(this::withSseDataSeparator);
+    }
+
+    /**
+     * 为每行 SSE 数据补齐协议分隔空格，防止标准解析器误删模型正文开头的空格。
+     * Spring 的事件编码器直接输出 data:，客户端会按 SSE 规范移除字段值的首个空格。
+     * 仅在 HTTP 输出边界处理，数据库答案和业务层 token 保持原样。
+     * @param event 原始业务事件
+     * @return 每行数据带一个协议分隔空格的传输事件
+     */
+    private ServerSentEvent<String> withSseDataSeparator(ServerSentEvent<String> event) {
+        if (event.data() == null) { return event; }
+        String data = " " + event.data().replace("\n", "\n ");
+        var builder = ServerSentEvent.builder(data);
+        if (event.id() != null) { builder.id(event.id()); }
+        if (event.event() != null) { builder.event(event.event()); }
+        if (event.retry() != null) { builder.retry(event.retry()); }
+        if (event.comment() != null) { builder.comment(event.comment()); }
+        return builder.build();
     }
 
     /** 流式问答请求体（长文本走 body，不走 URL query） */

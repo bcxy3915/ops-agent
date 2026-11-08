@@ -9,6 +9,5 @@ package com.example.opsaiagent.chat.service;
  * @param conversationId 会话实体 ID，删除后重建会变化
  * @param memoryId 本轮隔离的模型记忆标识
  */
-public record ChatTurn(String tenantId, String sessionId, String username, String requestId,
-                       String conversationId, String memoryId) {
+public record ChatTurn(String tenantId, String sessionId, String username, String requestId, String conversationId, String memoryId) {
 }

@@ -109,13 +109,15 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 
 前端当前使用 `POST /api/ops/ask/stream`，请求体为 `{ question, sessionId }`，通过 `fetch` 携带 Bearer 请求头并解析事件。保留长问题走请求体的行为，避免中文 URL 编码膨胀导致请求头超限；不要将 JWT 放入 URL。
 
+SSE 空格保护：Spring MVC 编码器直接输出 `data:`，标准客户端会移除字段值开头的一个空格。`ChatController` 在 HTTP 输出边界为每行数据补一个协议分隔空格，保留模型 token 中的列表空格、代码缩进和命令空格；不得将该补位应用到业务答案或数据库。修改时运行 `ChatControllerTest.streamingHttpPreservesMarkdownWhitespace`，不能仅检查 Java 事件对象，必须验证实际 HTTP 编码后的逐字还原。
+
 ### 6.1 知识入库（ingest）链路约定
 
 适用于「上传 / 在线沉淀 / 内置加载 → 解析 → 切分 → 向量入库」全链路，核心组件位于 `knowledge/ingest/`、`knowledge/service/VectorIndexer`、`knowledge/loader/DocumentLoader`：
 
 - 单文件上限的配置源是 `ops-agent.knowledge.upload.max-size-mb`（默认 50），multipart 的 `max-file-size` 引用它；请求总大小由 `ops-agent.knowledge.upload.max-request-mb`（默认 55）控制，multipart 的 `max-request-size` 引用后者，须留出表单字段开销。调整时同步核对两项，不允许在 multipart 配置中单独写死。
 - 文件扩展名 → docType 的唯一映射源是 `DocumentParserStrategyFactory.resolveDocType()`；新增文件类型时在映射表和对应解析策略中同步登记。
-- 所有入口（用户上传、案例沉淀、内置知识库加载）统一走 `DocumentParserStrategyFactory` 的解析策略做文本抽取，不单独引入其他 Reader。其中内置加载的 Markdown 直接读原文（保留标题结构交给切分策略），上传的 Markdown 由 `MarkdownDocumentParserStrategy` 抽取纯文本后存入 `raw_content`。
+- Markdown 上传与内置加载均直接读取 UTF-8 源码存入 `raw_content`，保留标题、表格换行和代码围栏，供详情渲染及结构化切分使用；其余上传格式沿用 `DocumentParserStrategyFactory` 抽取正文。`MarkdownDocumentParserStrategy` 保留用于已有抽取调用及迁移兼容测试，不用于覆盖上传源码。旧上传记录已丢失的格式不能自动恢复，需重新上传原文件或由用户补充正文。
 - 切分由 `VectorIndexer` 统一收口；解析后文本受 `ops-agent.knowledge.ingest.max-chars`（默认 1000 万字符）限制，超长必须显式拒绝，禁止用 `maxNumChunks` 之类参数静默截断。
 - 切分策略位于 `knowledge/ingest/splitter`（策略模式，设计文档 `docs/design/text-split/`）：`TextChunkStrategy` 接口（name / order / supports / split）+ `TextChunkStrategyResolver` 四级路由——`strategyOverride` 显式指定 → docType 覆盖配置 → `supports` 自然匹配 → `default-strategy`；未知名与策略异常一律降级 `token` 兜底，切分永不失败。新增策略须登记唯一 name 并保持 order 语义（小者优先）。
 - 路由现状：MARKDOWN → `markdown-structural`（自研 ATX 标题行扫描，不依赖 `MarkdownDocumentReader` 行为；headingPath 复用 `metadata.section`，零 DDL）；TXT / PDF / DOCX → `recursive`（段落→行→句终分隔符阶梯，冒号不切；围栏代码块与表格行是原子单元；相邻块携带整句 overlap；尾块不足 minChunkChars 并入前块）；`token` 仅作兜底（直接使用 JTokkit，保留旧固定窗口、trim、短块过滤与分块元数据口径，达到块数上限显式失败）。
@@ -130,7 +132,7 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 索引对同一 `vector_source` 幂等：每次执行先清空该文档旧分块与旧向量再重建；失败自动重试，默认 3 次后标记 FAILED，可通过任务表 `error_msg` 排查。
 - 索引调度配置位于 `ops-agent.knowledge.index.poll-interval-ms`（默认 5000）与 `max-per-round`（默认 3）。
 - 向量 source 口径：上传文档为 `upload:<docId>`，案例文档为 `case:<docId>`，内置文档为文件名；`DocumentLoader` 只清理内置文档，不得触碰 `upload:` / `case:` 前缀。
-- 内置知识必须同时落两层：向量（`vector_store`）+ 元数据（`knowledge_document`，`layer=BUILTIN`、`tenant_id=0`、`visibility=PUBLIC`、`review_status=APPROVED`、`publish_status=PUBLISHED`、`trust_status=VERIFIED`、`owner=system`、`source=文件名`、`file_path=classpath:knowledge/<文件名>`）。`DocumentLoader.syncBuiltinDocuments()` 在每次 reload 时增量新增/刷新/清理这些行；只写向量不写元数据会导致总览、文档列表、层级计数全部为 0。
+- 内置知识必须同时保存源码、展示分块（`knowledge_chunk`）和向量（`vector_store`）；文档元数据位于 `knowledge_document`（`layer=BUILTIN`、`tenant_id=0`、`visibility=PUBLIC`、`review_status=APPROVED`、`publish_status=PUBLISHED`、`trust_status=VERIFIED`、`owner=system`、`source=文件名`、`file_path=classpath:knowledge/<文件名>`）。`DocumentLoader.loadAndIndex()` 按文件开启事务，委托 `KnowledgeDocumentIndexer.reindexBuiltin()` 统一保存分块和向量，向量保留文件名 source/contentHash 并带 docId/chunkId/ordinal。每次 reload 除比对文件指纹，还检查源码一致性及真实分块数量，自动修复旧内置记录；正文不变时不增加版本。失败回滚并返回 failed，不能只写向量或伪造分块数量。该启动同步入口不改变用户文档的异步索引流程。
 - 审核结论与索引可用性分离：`review_status` 只记录审核结论（DRAFT/PENDING_DEPT/PENDING_TENANT/APPROVED/REJECTED），`publish_status` 记录索引是否生效（UNPUBLISHED/BUILDING/FAILED/PUBLISHED）。审核通过仅置 `APPROVED + BUILDING` 并立即返回，worker 成功回写 `PUBLISHED + published_at`，重试耗尽置 `FAILED + publish_error`；索引失败不得回退 `review_status`。
 - 审核通过 / 驳回事务内不再预删旧分块与旧向量；索引替换由 worker 的 `reindex` 整体幂等"先删后建"完成，避免失败后不可恢复。
 - 检索过滤必须同时带 `reviewStatus == 'APPROVED'`（由 `RetrievalScope.filterExpression()` 统一追加），未通过 / 驳回文档即使存在残留向量也不可被命中。

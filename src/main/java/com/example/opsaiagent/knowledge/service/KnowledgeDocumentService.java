@@ -42,6 +42,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -925,9 +926,9 @@ public class KnowledgeDocumentService {
     }
 
     /**
-     * 解析上传文件为纯文本
+     * 解析上传文件：Markdown 保留源码，其余格式抽取正文。
      * @param file 上传文件
-     * @return 解析结果（类型 / 文本 / 文件名）
+     * @return 解析结果（类型 / Markdown 源码或抽取正文 / 文件名）
      */
     public ParsedDocument parse(MultipartFile file) {
         String fileName = file.getOriginalFilename();
@@ -940,6 +941,14 @@ public class KnowledgeDocumentService {
                     "不支持的文件类型，仅支持 md/pdf/txt/docx: " + fileName);
         }
         try {
+            if ("MARKDOWN".equals(docType)) {
+                // 保留标题、表格换行与代码围栏，供详情渲染及结构化切分使用。
+                try (var input = file.getInputStream()) {
+                    String markdown = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                    vectorIndexer.checkTextLength(markdown);
+                    return new ParsedDocument(docType, markdown, fileName);
+                }
+            }
             DocumentParserStrategy strategy = parserStrategyFactory.getStrategy(docType);
             List<Document> docs = strategy.parse(new InputStreamResource(file.getInputStream()));
             String text = docs.stream()

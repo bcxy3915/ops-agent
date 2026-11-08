@@ -3,9 +3,12 @@ package com.example.opsaiagent.knowledge.loader;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
-import com.example.opsaiagent.knowledge.ingest.splitter.SplitContext;
+import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
+import com.example.opsaiagent.knowledge.mapper.KnowledgeChunkMapper;
+import com.example.opsaiagent.knowledge.service.KnowledgeDocumentIndexer;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
-import com.example.opsaiagent.knowledge.service.VectorIndexer;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,8 +60,10 @@ public class DocumentLoader {
     /** 内置知识文件路径前缀 */
     public static final String CLASSPATH_KNOWLEDGE_PREFIX = "classpath:knowledge/";
 
-    // 向量入库公共组件（切分 + 分批写入）
-    private final VectorIndexer vectorIndexer;
+    // 复用索引器，在同一事务中保存文档、分块与向量。
+    private final KnowledgeDocumentIndexer indexer;
+    private final KnowledgeChunkMapper chunkMapper;
+    private final PlatformTransactionManager transactionManager;
 
     // 文档解析策略工厂（与用户上传共用同一套解析配置）
     private final DocumentParserStrategyFactory parserStrategyFactory;
@@ -80,71 +85,56 @@ public class DocumentLoader {
     /**
      * 重新加载内置知识库文档（增量）
      * 供启动时 @PostConstruct 与 /api/ops/knowledge/reload 接口共同调用。
-     * @return 加载统计：status / loaded / targets / message
+     * @return 无入参，返回加载统计：status / loaded / targets / message
      */
-    public Map<String, Object> reload() {
+    public synchronized Map<String, Object> reload() {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
-            // 1. 列出知识库目录下所有文档及其内容指纹
             Map<String, String> expected = listKnowledgeFiles();
             if (expected.isEmpty()) {
-                log.warn("知识库目录为空，无需加载");
                 result.put("status", "skipped");
                 result.put("message", "知识库目录为空");
                 return result;
             }
-
-            // 2. 查询向量库已有 source 及其指纹
-            Map<String, String> existing = listExistingSourceHashes();
-            log.info("向量库已包含 {} 个文档", existing.size());
-
-            // 3. 计算增量加载目标（缺失 / 同名内容变更 / 旧数据无指纹）
-            Set<String> loadTargets = computeLoadTargets(expected, existing);
-            // 4. 计算残留内置文档（文件已从目录移除，仅限内置，不动 upload:/case:）
-            Set<String> staleSources = computeStaleSources(existing.keySet(), expected.keySet());
-            log.info("待加载 {} 个文档：{}；待清理残留 {} 个：{}",
-                    loadTargets.size(), loadTargets, staleSources.size(), staleSources);
-
-            // 5. 先清理残留，再删除变更文档的旧向量（防止残留），最后增量加载
-            if (!staleSources.isEmpty()) {
-                int deleted = deleteBySources(staleSources);
-                log.info("清理 {} 个已移除文档的残留向量 {} 条", staleSources.size(), deleted);
+            Map<String, String> existing;
+            try {
+                existing = listExistingSourceHashes();
+            } catch (Exception e) {
+                log.warn("读取内置向量状态失败，尝试完整加载: {}", e.getMessage());
+                return fullLoadFallback(result);
             }
-            if (!loadTargets.isEmpty()) {
-                deleteBySources(loadTargets);
-            }
+            Set<String> targets = computeLoadTargets(expected, existing);
+            targets.addAll(findIncompleteBuiltinSources(expected));
             Map<String, String> loadMap = new LinkedHashMap<>();
-            for (String s : loadTargets) {
-                if (expected.containsKey(s)) {
-                    loadMap.put(s, expected.get(s));
-                }
-            }
+            expected.forEach((source, hash) -> {
+                if (targets.contains(source)) loadMap.put(source, hash);
+            });
             int loaded = loadAndIndex(loadMap);
-            // 同步 knowledge_document 元数据：官方知识包必须在文档表中有记录，
-            // 否则总览/文档列表/溯源查询只看到用户上传的私有文档
-            syncBuiltinDocuments(expected, loadTargets);
-
+            Set<String> staleSources = computeStaleSources(existing.keySet(), expected.keySet());
+            if (!staleSources.isEmpty()) deleteBySources(staleSources);
+            removeObsoleteBuiltinDocuments(expected.keySet());
             result.put("status", "success");
             result.put("loaded", loaded);
-            result.put("targets", loadTargets.size());
-            result.put("message", loaded > 0 ? "文档加载完成" : "知识库已是最新，无需加载");
-            return result;
+            result.put("targets", targets.size());
+            result.put("message", targets.isEmpty() ? "知识库已是最新，无需加载" : "文档、分块与向量加载完成");
         } catch (Exception e) {
-            // vector_store 表不存在或查询失败：视为首次启动，全量加载
-            log.info("向量库状态检查失败（可能是首次启动），准备全量加载文档：{}", e.getMessage());
-            return fullLoadFallback(result);
+            log.error("内置知识库加载失败", e);
+            result.put("status", "failed");
+            result.put("message", "文档加载失败: " + e.getMessage());
         }
+        return result;
     }
 
     /**
      * 首次启动兜底：不依赖向量库状态，直接全量加载目录下所有文档
+     * @param result 待填充的加载结果
+     * @return 全量加载结果
      */
     private Map<String, Object> fullLoadFallback(Map<String, Object> result) {
         try {
             Map<String, String> expected = listKnowledgeFiles();
             int loaded = loadAndIndex(expected);
-            // 兜底全量加载时同样补齐内置文档元数据
-            syncBuiltinDocuments(expected, expected.keySet());
+            removeObsoleteBuiltinDocuments(expected.keySet());
             result.put("status", "success");
             result.put("loaded", loaded);
             result.put("targets", expected.size());
@@ -220,7 +210,9 @@ public class DocumentLoader {
             if (fileName == null || DocumentParserStrategyFactory.resolveDocType(fileName) == null) {
                 continue; // 仅统计可解析类型，与 loadAndIndex 保持一致
             }
-            sources.put(fileName, sha256Hex(r.getInputStream()));
+            try (InputStream input = r.getInputStream()) {
+                sources.put(fileName, sha256Hex(input));
+            }
         }
         return sources;
     }
@@ -250,142 +242,99 @@ public class DocumentLoader {
      * @return 实际写入向量库的 chunk 数量
      */
     public int loadAndIndex(Map<String, String> targetFiles) {
-        if (targetFiles == null || targetFiles.isEmpty()) {
-            return 0;
-        }
-        List<Document> allChunks = new ArrayList<>();
-        int indexed = 0;
-
+        if (targetFiles == null || targetFiles.isEmpty()) return 0;
         try {
-            // 1. 通过解析策略统一加载目录下各类型文档（与用户上传共用同一套解析配置）
-            Resource[] resources = resourcePatternResolver.getResources("classpath*:knowledge/*");
-            for (Resource res : resources) {
-                String fileName = res.getFilename();
-                if (fileName == null || !targetFiles.containsKey(fileName)) {
-                    continue;
-                }
-                String docType = DocumentParserStrategyFactory.resolveDocType(fileName);
-                if (docType == null) {
-                    log.warn("跳过不支持的文件类型: {}", fileName);
-                    continue;
-                }
-                String hash = targetFiles.get(fileName);
-                // MARKDOWN 直接读原文，交给 markdown-structural 策略做标题结构化切分
-                List<Document> docs = "MARKDOWN".equals(docType)
-                        ? List.of(new Document(res.getContentAsString(StandardCharsets.UTF_8)))
-                        : parserStrategyFactory.getStrategy(docType).parse(res);
-                for (Document d : docs) {
-                    // 内置文档统一写入 source 与内容指纹，用于增量比对与残留清理
-                    d.getMetadata().put("source", fileName);
-                    d.getMetadata().put(HASH_METADATA_KEY, hash);
-                }
-
-                // 2. 按文件类型路由切分策略后切分（目录混放 md/txt/pdf 时各走各的策略）
-                SplitContext context = new SplitContext(docType, fileName,
-                        stripExtension(fileName), LAYER_BUILTIN, "0", null);
-                List<Document> chunks = vectorIndexer.split(docs, context);
-                log.info("加载 {}: {} -> {} 块", docType, fileName, chunks.size());
-                allChunks.addAll(chunks);
+            Map<String, Resource> resources = listKnowledgeResources();
+            int indexed = 0;
+            for (Map.Entry<String, String> target : targetFiles.entrySet()) {
+                String source = target.getKey();
+                Resource resource = resources.get(source);
+                if (resource == null || DocumentParserStrategyFactory.resolveDocType(source) == null) continue;
+                String rawContent = parseRawText(resource, source);
+                Integer count = new TransactionTemplate(transactionManager).execute(status -> {
+                    List<KnowledgeDocumentEntity> rows = documentMapper.selectList(
+                            new LambdaQueryWrapper<KnowledgeDocumentEntity>()
+                                    .eq(KnowledgeDocumentEntity::getLayer, LAYER_BUILTIN)
+                                    .eq(KnowledgeDocumentEntity::getTenantId, "0")
+                                    .eq(KnowledgeDocumentEntity::getSource, source));
+                    KnowledgeDocumentEntity entity = rows.stream()
+                            .filter(row -> source.equals(row.getSource())).findFirst().orElse(null);
+                    boolean created = entity == null;
+                    if (created) {
+                        entity = new KnowledgeDocumentEntity();
+                        entity.setVersion(1);
+                        entity.setHitCount(0L);
+                    } else if (!Objects.equals(entity.getRawContent(), rawContent)) {
+                        entity.setVersion(entity.getVersion() == null ? 1 : entity.getVersion() + 1);
+                    }
+                    fillBuiltinEntity(entity, source, rawContent, LocalDateTime.now());
+                    if (created) documentMapper.insert(entity);
+                    indexer.reindexBuiltin(entity, target.getValue());
+                    return entity.getChunkCount();
+                });
+                indexed += count == null ? 0 : count;
             }
-
-            // 3. 填充内置知识元数据后分批写入向量库
-            for (Document doc : allChunks) {
-                // 内置知识统一归属平台公共知识，供检索范围过滤使用
-                doc.getMetadata().putIfAbsent("tenantId", "0");
-                doc.getMetadata().putIfAbsent("deptId", "");
-                doc.getMetadata().putIfAbsent("visibility", "PUBLIC");
-                doc.getMetadata().putIfAbsent("reviewStatus", "APPROVED");
-                doc.getMetadata().putIfAbsent("owner", "system");
-                doc.getMetadata().putIfAbsent("layer", "BUILTIN");
-            }
-            indexed = vectorIndexer.write(allChunks);
-            log.info("向量入库完成，共 {} 条", indexed);
-        } catch (Exception e) {
-            log.error("文档加载失败", e);
+            return indexed;
+        } catch (IOException e) {
+            throw new IllegalStateException("内置知识资源读取失败", e);
         }
-        return indexed;
-    }
-
-    /** 去掉文件扩展名作为切分上下文标题 */
-    private static String stripExtension(String fileName) {
-        int dot = fileName.lastIndexOf('.');
-        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     /**
-     * 同步内置知识文档元数据到 knowledge_document。
-     * 内置文档此前只写入向量库，统计/列表/溯源查不到记录，前端显示 0 篇。
-     * 规则：
-     * - 目录中每个文件都必须有一条 layer=BUILTIN 的记录；
-     * - 新增文件插入记录，内容变化/向量重载/缺少全文时刷新记录；
-     * - 目录中已删除的文件，对应记录一并清理。
-     * @param expected 目录中文件名 -> 内容指纹
-     * @param loadedSources 本次实际（重新）加载向量的文件名集合
+     * 检查旧内置数据是否缺正文、缺分块或源码被纯文本抽取破坏。
+     * @param expected 当前目录文件及其指纹
+     * @return 需要修复的内置文件集合
      */
-    void syncBuiltinDocuments(Map<String, String> expected, Set<String> loadedSources) {
-        try {
+    private Set<String> findIncompleteBuiltinSources(Map<String, String> expected) throws IOException {
+        List<KnowledgeDocumentEntity> rows = documentMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeDocumentEntity>().eq(KnowledgeDocumentEntity::getLayer, LAYER_BUILTIN)
+                        .eq(KnowledgeDocumentEntity::getTenantId, "0"));
+        Map<String, KnowledgeDocumentEntity> bySource = new HashMap<>();
+        rows.forEach(row -> bySource.put(row.getSource(), row));
+        Map<String, Resource> resources = listKnowledgeResources();
+        Set<String> repair = new HashSet<>();
+        for (String source : expected.keySet()) {
+            KnowledgeDocumentEntity row = bySource.get(source);
+            if (row == null || !Objects.equals(row.getRawContent(), parseRawText(resources.get(source), source))) {
+                repair.add(source);
+                continue;
+            }
+            Long count = chunkMapper.selectCount(new LambdaQueryWrapper<KnowledgeChunkEntity>()
+                    .eq(KnowledgeChunkEntity::getDocId, row.getId()));
+            if (row.getChunkCount() == null || count == null || row.getChunkCount().longValue() != count
+                    || (count == 0 && StringUtils.hasText(row.getRawContent()))) repair.add(source);
+        }
+        return repair;
+    }
+
+    /**
+     * 删除目录中已不存在的内置文档和分块，不涉及上传及案例文档。
+     * @param expectedSources 目录中仍存在的文件名集合
+     * @return 无返回值
+     */
+    private void removeObsoleteBuiltinDocuments(Set<String> expectedSources) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             List<KnowledgeDocumentEntity> rows = documentMapper.selectList(
-                    new LambdaQueryWrapper<KnowledgeDocumentEntity>()
-                            .eq(KnowledgeDocumentEntity::getLayer, LAYER_BUILTIN));
-            Map<String, KnowledgeDocumentEntity> existingBySource = new HashMap<>();
+                    new LambdaQueryWrapper<KnowledgeDocumentEntity>().eq(KnowledgeDocumentEntity::getLayer, LAYER_BUILTIN)
+                            .eq(KnowledgeDocumentEntity::getTenantId, "0"));
             for (KnowledgeDocumentEntity row : rows) {
-                if (StringUtils.hasText(row.getSource())) {
-                    existingBySource.put(row.getSource(), row);
-                }
-            }
-
-            Map<String, Integer> chunkCounts = listChunkCounts();
-            Map<String, Resource> resources = listKnowledgeResources();
-            LocalDateTime now = LocalDateTime.now();
-            int inserted = 0;
-            int updated = 0;
-
-            for (String source : expected.keySet()) {
-                KnowledgeDocumentEntity row = existingBySource.get(source);
-                if (row == null) {
-                    KnowledgeDocumentEntity entity = new KnowledgeDocumentEntity();
-                    fillBuiltinEntity(entity, source, resources.get(source), chunkCounts, now);
-                    entity.setVersion(1);
-                    entity.setHitCount(0L);
-                    documentMapper.insert(entity);
-                    inserted++;
-                    continue;
-                }
-                boolean needRefresh = loadedSources.contains(source) || !StringUtils.hasText(row.getRawContent());
-                if (!needRefresh && Objects.equals(row.getChunkCount(), chunkCounts.getOrDefault(source, 0))) {
-                    continue;
-                }
-                String oldRaw = row.getRawContent();
-                fillBuiltinEntity(row, source, resources.get(source), chunkCounts, now);
-                // 全文发生变化才递增版本，向量重载不影响版本
-                if (StringUtils.hasText(row.getRawContent()) && !Objects.equals(oldRaw, row.getRawContent())) {
-                    row.setVersion(row.getVersion() == null ? 1 : row.getVersion() + 1);
-                }
-                documentMapper.updateById(row);
-                updated++;
-            }
-
-            // 清理目录中已不存在文件的内置记录
-            List<KnowledgeDocumentEntity> obsolete = existingBySource.entrySet().stream()
-                    .filter(e -> !expected.containsKey(e.getKey()))
-                    .map(Map.Entry::getValue)
-                    .toList();
-            for (KnowledgeDocumentEntity row : obsolete) {
+                if (expectedSources.contains(row.getSource())) continue;
+                chunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunkEntity>().eq(KnowledgeChunkEntity::getDocId, row.getId()));
                 documentMapper.deleteById(row.getId());
             }
-            log.info("内置知识元数据同步完成：新增 {}，更新 {}，清理 {}", inserted, updated, obsolete.size());
-        } catch (Exception e) {
-            // 元数据同步失败不影响向量加载结果，仅记录告警
-            log.warn("内置知识元数据同步失败（不影响向量加载）: {}", e.getMessage());
-        }
+        });
     }
 
     /**
-     * 填充内置知识文档元数据字段
+     * 填充平台公共内置文档，源码不经 Markdown 纯文本抽取。
+     * @param entity 待保存实体
+     * @param source 文件名
+     * @param rawContent 完整 Markdown 源码或其他格式的抽取正文
+     * @param now 本次入库时间
+     * @return 无返回值
      */
-    private void fillBuiltinEntity(KnowledgeDocumentEntity entity, String source, Resource resource,
-                                   Map<String, Integer> chunkCounts, LocalDateTime now) {
-        entity.setTitle(fileNameWithoutExtension(source));
+    private void fillBuiltinEntity(KnowledgeDocumentEntity entity, String source, String rawContent, LocalDateTime now) {
+        entity.setTitle(stripExtension(source));
         entity.setDocType(DocumentParserStrategyFactory.resolveDocType(source));
         entity.setLayer(LAYER_BUILTIN);
         entity.setTenantId("0");
@@ -400,73 +349,44 @@ public class DocumentLoader {
         entity.setOwner("system");
         entity.setSource(source);
         entity.setFilePath(CLASSPATH_KNOWLEDGE_PREFIX + source);
-        entity.setRawContent(parseRawText(resource, source));
-        entity.setChunkCount(chunkCounts.getOrDefault(source, 0));
-        if (entity.getSubmittedAt() == null) {
-            entity.setSubmittedAt(now);
-        }
+        entity.setRawContent(rawContent);
+        if (entity.getSubmittedAt() == null) entity.setSubmittedAt(now);
     }
 
     /**
-     * 解析内置文档全文（与向量化共用同一套解析策略）
+     * 读取与索引相同的正文，Markdown 逐字保留标题、换行、表格及代码围栏。
+     * @param resource 文件资源
+     * @param fileName 文件名
+     * @return 完整源码或抽取正文；读取失败时抛出异常，避免保存空正文
      */
-    private String parseRawText(Resource resource, String fileName) {
-        if (resource == null) {
-            return null;
-        }
+    private String parseRawText(Resource resource, String fileName) throws IOException {
+        if (resource == null) throw new IOException("内置文件不存在: " + fileName);
         String docType = DocumentParserStrategyFactory.resolveDocType(fileName);
-        if (docType == null) {
-            return null;
-        }
-        try {
-            List<Document> docs = parserStrategyFactory.getStrategy(docType).parse(resource);
-            return docs.stream()
-                    .map(Document::getText)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.joining("\n\n"));
-        } catch (Exception e) {
-            log.warn("内置文档解析失败 {}: {}", fileName, e.getMessage());
-            return null;
-        }
+        if ("MARKDOWN".equals(docType)) return resource.getContentAsString(StandardCharsets.UTF_8);
+        return parserStrategyFactory.getStrategy(docType).parse(resource).stream()
+                .map(Document::getText).filter(Objects::nonNull).collect(Collectors.joining("\n\n"));
     }
 
     /**
-     * 统计向量库中每个 source 的 chunk 数量
-     */
-    Map<String, Integer> listChunkCounts() {
-        String sql = "SELECT metadata->>'source' AS src, COUNT(*) AS cnt FROM vector_store "
-                + "WHERE metadata->>'source' IS NOT NULL GROUP BY metadata->>'source'";
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
-        Map<String, Integer> result = new HashMap<>();
-        for (Map<String, Object> row : rows) {
-            Object src = row.get("src");
-            Object cnt = row.get("cnt");
-            if (src != null) {
-                result.put(String.valueOf(src), cnt instanceof Number n ? n.intValue() : 0);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * 列出知识库目录下所有资源，文件名为 key
+     * 列出内置资源。
+     * @return 无入参，返回以文件名为键的资源映射
      */
     private Map<String, Resource> listKnowledgeResources() throws IOException {
         Map<String, Resource> resources = new HashMap<>();
-        for (Resource r : resourcePatternResolver.getResources("classpath*:knowledge/*")) {
-            if (r.getFilename() != null) {
-                resources.put(r.getFilename(), r);
-            }
+        for (Resource resource : resourcePatternResolver.getResources("classpath*:knowledge/*")) {
+            if (resource.getFilename() != null) resources.put(resource.getFilename(), resource);
         }
         return resources;
     }
 
     /**
-     * 去掉扩展名作为默认标题
+     * 以文件名去掉扩展名作为默认标题。
+     * @param fileName 文件名
+     * @return 不含扩展名的标题
      */
-    private String fileNameWithoutExtension(String fileName) {
-        int idx = fileName.lastIndexOf('.');
-        return idx > 0 ? fileName.substring(0, idx) : fileName;
+    private static String stripExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     /**
