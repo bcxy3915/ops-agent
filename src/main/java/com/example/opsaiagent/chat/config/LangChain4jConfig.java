@@ -23,15 +23,13 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
-import dev.langchain4j.memory.ChatMemory;
+
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.tool.ToolArgumentsErrorHandler;
 import dev.langchain4j.service.tool.ToolExecutionErrorHandler;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.convert.DurationStyle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,7 +38,6 @@ import java.time.Duration;
 
 /** LangChain4j 生产模型配置。 */
 @Configuration
-@ConditionalOnProperty(prefix = "ops-agent.ai", name = "provider", havingValue = "langchain4j")
 public class LangChain4jConfig {
 
     /**
@@ -133,24 +130,8 @@ public class LangChain4jConfig {
      * @return 会话记忆仓库
      */
     @Bean
-    @ConditionalOnBean(ConversationService.class)
     public ChatMemoryStore langChain4jChatMemoryStore(ConversationService conversationService) {
         return new ConversationChatMemoryStore(conversationService, 20);
-    }
-
-    /**
-     * 注册最近 20 条消息窗口的 LangChain4j 聊天记忆。
-     *
-     * @param chatMemoryStore 用户隔离的会话记忆仓库
-     * @return LangChain4j 聊天记忆
-     */
-    @Bean
-    @ConditionalOnBean(ConversationService.class)
-    public ChatMemory langChain4jChatMemory(ChatMemoryStore chatMemoryStore) {
-        return MessageWindowChatMemory.builder()
-                .maxMessages(20)
-                .chatMemoryStore(chatMemoryStore)
-                .build();
     }
 
     /**
@@ -163,8 +144,6 @@ public class LangChain4jConfig {
      * @return LangChain4j 运维助手
      */
     @Bean
-    @ConditionalOnBean({ConversationService.class, HealthCheckTools.class, MetricQueryTools.class,
-            MetricDiscoveryTools.class, ServiceDiscoveryTools.class, HybridRetriever.class})
     public OpsAssistant langChain4jOpsAssistant(ChatModel chatModel,
                                                 ChatMemoryStore chatMemoryStore,
                                                 LangChain4jReadOnlyToolBindings tools,
@@ -195,8 +174,6 @@ public class LangChain4jConfig {
      * @return LangChain4j 流式运维助手
      */
     @Bean
-    @ConditionalOnBean({ConversationService.class, HealthCheckTools.class, MetricQueryTools.class,
-            MetricDiscoveryTools.class, ServiceDiscoveryTools.class, HybridRetriever.class})
     public OpsStreamingAssistant langChain4jOpsStreamingAssistant(
             OpenAiStreamingChatModel streamingChatModel,
             ChatMemoryStore chatMemoryStore,
@@ -225,7 +202,6 @@ public class LangChain4jConfig {
      * @return LangChain4j RAG 内容检索器
      */
     @Bean
-    @ConditionalOnBean(HybridRetriever.class)
     public LangChain4jKnowledgeContentRetriever langChain4jKnowledgeContentRetriever(
             HybridRetriever hybridRetriever) {
         return new LangChain4jKnowledgeContentRetriever(hybridRetriever, 5);
@@ -241,8 +217,6 @@ public class LangChain4jConfig {
      * @return 只读工具门面
      */
     @Bean
-    @ConditionalOnBean({HealthCheckTools.class, MetricQueryTools.class,
-            MetricDiscoveryTools.class, ServiceDiscoveryTools.class})
     public LangChain4jReadOnlyToolBindings langChain4jReadOnlyToolBindings(
             HealthCheckTools healthCheckTools,
             MetricQueryTools metricQueryTools,

@@ -1,17 +1,15 @@
 package com.example.opsaiagent.service;
 
 import com.example.opsaiagent.chat.dto.AskResponse;
-import com.example.opsaiagent.chat.entity.MessageEntity;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
+import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import com.example.opsaiagent.chat.service.ConversationService;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.chat.service.OpsAgentService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
-import com.example.opsaiagent.tools.HealthCheckTools;
-import com.example.opsaiagent.tools.MetricDiscoveryTools;
-import com.example.opsaiagent.tools.MetricQueryTools;
-import com.example.opsaiagent.tools.ServiceDiscoveryTools;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,11 +19,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -50,26 +43,17 @@ import static org.mockito.Mockito.when;
 /**
  * OpsAgentService 单元测试
  * 覆盖：ask / askWithCitations / askStream / askStreamWithCitations / 会话保存 / 检索空场景 / 异常兜底
- * ChatClient 是深链式调用，用 RETURNS_DEEP_STUBS。
+ * 使用可控的 LangChain4j Agent 和流式回调夹具。
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("RAG 服务")
 class OpsAgentServiceTest {
 
-    @Mock(answer = org.mockito.Answers.RETURNS_DEEP_STUBS)
-    private ChatClient chatClient;
+    @Mock
+    private OpsAssistant assistant;
 
     @Mock
-    private HealthCheckTools healthCheckTools;
-
-    @Mock
-    private MetricQueryTools metricQueryTools;
-
-    @Mock
-    private MetricDiscoveryTools metricDiscoveryTools;
-
-    @Mock
-    private ServiceDiscoveryTools serviceDiscoveryTools;
+    private OpsStreamingAssistant streamingAssistant;
 
     @Mock
     private HybridRetriever hybridRetriever;
@@ -78,7 +62,7 @@ class OpsAgentServiceTest {
     private ConversationService conversationService;
 
     @Mock
-    private ChatMemory chatMemory;
+    private ChatMemoryStore memoryStore;
 
     @Mock
     private KnowledgeRetrievalService knowledgeRetrievalService;
@@ -92,11 +76,9 @@ class OpsAgentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new OpsAgentService(
-                chatClient, chatMemory, healthCheckTools, metricQueryTools,
-                metricDiscoveryTools, serviceDiscoveryTools,
-                hybridRetriever, conversationService,
-                knowledgeRetrievalService, knowledgeHitLogService, objectMapper);
+        service = new OpsAgentService(hybridRetriever, conversationService,
+                knowledgeRetrievalService, knowledgeHitLogService, objectMapper,
+                assistant, streamingAssistant, memoryStore);
     }
 
     @AfterEach
@@ -107,7 +89,6 @@ class OpsAgentServiceTest {
     // ==================== 辅助 ====================
 
     private Document doc(String text) {
-        // Spring AI 1.1.0 需要 metadata 非 null
         return new Document(text, Map.of("source", "test.md"));
     }
 
@@ -118,26 +99,38 @@ class OpsAgentServiceTest {
     }
 
     private void mockAskChain(String answer) {
-        when(chatClient.prompt().system(anyString()).user(anyString())
-                .advisors(any(java.util.function.Consumer.class))
-                .tools(any(), any(), any(), any())
-                .call().content()).thenReturn(answer);
+        when(assistant.ask(anyString(), anyString(), anyString())).thenReturn(answer);
     }
 
+    /**
+     * 将测试 token 流适配为 LangChain4j 回调，覆盖成功、异常和未完成响应。
+     * @param tokens 模拟模型 token
+     * @return 无返回值
+     */
     private void mockStreamChain(Flux<String> tokens) {
-        when(chatClient.prompt().system(anyString()).user(anyString())
-                .advisors(any(java.util.function.Consumer.class))
-                .tools(any(), any(), any(), any())
-                .stream().content()).thenReturn(tokens);
-    }
-
-    private MessageEntity history(Long id, String role, String content) {
-        MessageEntity m = new MessageEntity();
-        m.setId(id);
-        m.setSessionId("sess-1");
-        m.setRole(role);
-        m.setContent(content);
-        return m;
+        var stream = org.mockito.Mockito.mock(dev.langchain4j.service.TokenStream.class,
+                org.mockito.Answers.RETURNS_SELF);
+        var partial = new java.util.concurrent.atomic.AtomicReference<java.util.function.BiConsumer<
+                dev.langchain4j.model.chat.response.PartialResponse,
+                dev.langchain4j.model.chat.response.PartialResponseContext>>();
+        var done = new java.util.concurrent.atomic.AtomicReference<java.util.function.Consumer<
+                dev.langchain4j.model.chat.response.ChatResponse>>();
+        var error = new java.util.concurrent.atomic.AtomicReference<java.util.function.Consumer<Throwable>>();
+        org.mockito.Mockito.doAnswer(call -> { partial.set(call.getArgument(0)); return stream; })
+                .when(stream).onPartialResponseWithContext(any());
+        org.mockito.Mockito.doAnswer(call -> { done.set(call.getArgument(0)); return stream; })
+                .when(stream).onCompleteResponse(any());
+        org.mockito.Mockito.doAnswer(call -> { error.set(call.getArgument(0)); return stream; })
+                .when(stream).onError(any());
+        org.mockito.Mockito.doAnswer(call -> {
+            var handle = org.mockito.Mockito.mock(dev.langchain4j.model.chat.response.StreamingHandle.class);
+            tokens.subscribe(token -> partial.get().accept(
+                            new dev.langchain4j.model.chat.response.PartialResponse(token),
+                            new dev.langchain4j.model.chat.response.PartialResponseContext(handle)),
+                    failure -> error.get().accept(failure), () -> done.get().accept(null));
+            return null;
+        }).when(stream).start();
+        when(streamingAssistant.askStream(anyString(), anyString(), anyString())).thenReturn(stream);
     }
 
     private RetrievalHitResponse hit(Long id, String title) {
@@ -309,52 +302,6 @@ class OpsAgentServiceTest {
                 .saveAssistantMessage("sess-1", "已获取的部分答案");
     }
 
-    // ==================== 聊天记忆回填 ====================
-
-    @Test
-    @DisplayName("askStream：内存记忆为空时从数据库回填历史")
-    void askStream_warmUpMemoryWhenEmpty() {
-        mockAuthenticated();
-        when(chatMemory.get("sess-1")).thenReturn(List.of());
-        when(conversationService.loadRecentMessages("sess-1", "admin", 20)).thenReturn(List.of(
-                history(1L, "USER", "todo-service 健康吗"),
-                history(2L, "ASSISTANT", "当前健康状态为 UP")));
-        when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
-        when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
-        mockStreamChain(Flux.just("好"));
-
-        StepVerifier.create(service.askStream("sess-1", "再次检查一下"))
-                .expectNext("好", "[]", "[DONE]")
-                .verifyComplete();
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Message>> captor = ArgumentCaptor.forClass(List.class);
-        verify(chatMemory).add(eq("sess-1"), captor.capture());
-        List<Message> history = captor.getValue();
-        assertThat(history).hasSize(2);
-        assertThat(history.get(0)).isInstanceOf(UserMessage.class);
-        assertThat(history.get(0).getText()).isEqualTo("todo-service 健康吗");
-        assertThat(history.get(1)).isInstanceOf(AssistantMessage.class);
-        assertThat(history.get(1).getText()).isEqualTo("当前健康状态为 UP");
-    }
-
-    @Test
-    @DisplayName("askStream：内存记忆非空时不回填")
-    void askStream_skipWarmUpWhenMemoryNotEmpty() {
-        mockAuthenticated();
-        when(chatMemory.get("sess-1")).thenReturn(List.of(new UserMessage("已有历史")));
-        when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
-        when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
-        mockStreamChain(Flux.just("好"));
-
-        StepVerifier.create(service.askStream("sess-1", "问题"))
-                .expectNext("好", "[]", "[DONE]")
-                .verifyComplete();
-
-        verify(conversationService, never()).loadRecentMessages(anyString(), anyString(), anyInt());
-        verify(chatMemory, never()).add(anyString(), anyList());
-    }
-
     // ==================== askStreamWithCitations ====================
 
     @Test
@@ -431,10 +378,7 @@ class OpsAgentServiceTest {
             else if (complete) { done.get().accept(null); }
             return null;
         }).when(stream).start();
-        var assistant = org.mockito.Mockito.mock(
-                com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant.class);
-        when(assistant.askStream(anyString(), anyString(), anyString())).thenReturn(stream);
-        service.setLangChain4jOpsStreamingAssistant(assistant);
+        when(streamingAssistant.askStream(anyString(), anyString(), anyString())).thenReturn(stream);
         when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
         when(knowledgeRetrievalService.toHits(anyList(), anyString(), anyInt())).thenReturn(List.of());
         return stream;
@@ -448,8 +392,8 @@ class OpsAgentServiceTest {
     @DisplayName("LangChain4j 流按答案、引用、DONE 输出并在保存当前问题前回填记忆")
     void langChainStreamPreservesContractAndHistoryOrder() {
         mockAuthenticated();
-        var store = org.mockito.Mockito.mock(dev.langchain4j.store.memory.chat.ChatMemoryStore.class);
-        service.setLangChain4jMemoryStore(store);
+        var store = memoryStore;
+
         langChainStream(true, false, org.mockito.Mockito.mock(
                 dev.langchain4j.model.chat.response.StreamingHandle.class));
         StepVerifier.create(service.askStreamWithCitations("lc-session", "问题"))
@@ -462,7 +406,7 @@ class OpsAgentServiceTest {
                 com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of("admin", "lc-session"));
         order.verify(conversationService).saveUserMessage("lc-session", "问题");
         verify(conversationService, timeout(1000)).saveAssistantMessage("lc-session", "回答");
-        verify(chatMemory, never()).get(anyString());
+
     }
 
     /**

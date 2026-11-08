@@ -1,15 +1,16 @@
 ![Backend CI](https://github.com/bcxy3915/ops-agent/actions/workflows/ci.yml/badge.svg)
 
-> 当前分支：`migration/langchain4j`。已开始按 v4 周计划迁移，生产链路暂仍使用 Spring AI。
-> 已建立迁移基线及隔离的 LangChain4j 协议 PoC，真实模型与 Pgvector 兼容验证尚未完成。
+> 当前分支：`migration/langchain4j`。生产代码及 Maven 依赖已统一为 LangChain4j，Spring AI 已移除。
+> 同步/流式 Agent、记忆、工具、诊断与知识链路已切换；真实模型、数据库与页面验收仍需进行。
 > 迁移范围、测试命令和进度见 [迁移执行记录](docs/migration/langchain4j/01-baseline-and-poc.md)。
+> 配置统一使用 `ops-agent.ai.*`，原 `spring.ai.*` 仅保留取值兼容；`provider` 不再生效。向量表使用现有初始化脚本，不自动重建。
 > 旧版本保留在 `maintenance/spring-ai`；下文历史功能与版本信息在迁移中逐项核对。
 
 <h1 align="center">Ops Agent</h1>
 
 <p align="center">
   通用运维智能体 —— 用自然语言诊断服务问题的 AI 应用<br />
-  基于 Spring AI + RAG + Function Calling，实现「服务无关」的自动化运维诊断平台
+  基于 LangChain4j + RAG + Tool Calling，实现「服务无关」的自动化运维诊断平台
 </p>
 
 <p align="center">
@@ -78,7 +79,7 @@
 | :--- | :--- |
 | 语言 | Java 21 |
 | 框架 | Spring Boot 3.4.13 |
-| AI 框架 | Spring AI 1.1.0 |
+| AI 框架 | LangChain4j 1.23.0 |
 | Chat 模型 | DeepSeek（deepseek-chat，OpenAI 协议） |
 | Embedding | 阿里云百炼 text-embedding-v3（1024 维） |
 | Reranker | 阿里云百炼 gte-rerank-v2 |

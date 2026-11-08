@@ -6,8 +6,6 @@ import com.example.opsaiagent.resilience.RestClientFactory;
 import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -19,9 +17,13 @@ public class HealthCheckTools {
     private final ServiceRegistry serviceRegistry;
     private final RestClient restClient = RestClientFactory.builder().build();
 
-    @Tool(description = "查询指定服务的健康状态，返回 UP 表示健康，DOWN 表示异常。服务名如 todo-service")
+    /**
+     * 查询注册服务的实时健康状态。
+     * @param serviceName 服务名
+     * @return 健康结果或明确的查询错误
+     */
     public String queryServiceHealth(
-            @ToolParam(description = "服务名，例如 todo-service") String serviceName) {
+            String serviceName) {
 
         ServiceInfo service = serviceRegistry.getByName(serviceName);
         if (service == null) {

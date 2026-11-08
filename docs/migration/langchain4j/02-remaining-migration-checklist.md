@@ -1,59 +1,47 @@
-# LangChain4j 剩余迁移清单
+# LangChain4j 迁移完成情况与待验收清单
 
-核对日期：2026-11-08。以当前生产代码和配置为准；本清单区分模型调用已切换与框架依赖已移除。
+核对日期：2026-11-08。第十二切片已删除 Spring AI 的全部生产和测试依赖、BOM、适配层、配置类及工具注解。代码迁移完成不代表真实环境验收完成。
 
-## 1. 当前结论
+## 1. 当前生产入口
 
-同步问答、SSE 流式 Agent、工具循环、会话记忆、RAG 内容检索接入、结构化诊断和诊断追问，均已有 LangChain4j 生产实现。通过 `ops-agent.ai.provider=langchain4j` 选择；当前默认仍为 `spring-ai`。
+| 能力 | 当前实现 |
+| --- | --- |
+| 同步与流式运维 Agent | LangChain4j AiServices、OpsAssistant、OpsStreamingAssistant，最多 8 轮工具调用 |
+| 会话记忆 | ConversationChatMemoryStore + 20 条窗口，按用户名和 sessionId 隔离，从 ops_message 冷启动回填 |
+| 诊断结构化输出与追问 | LangChain4j StructuredOutputGateway / ChatGateway |
+| 只读工具 | LangChain4jReadOnlyToolBindings 调用原领域服务，保留服务查询权限与外部 HTTP 容错 |
+| 知识解析与切分 | CommonMark、PDFBox、POI、JTokkit 与项目结构化/递归策略 |
+| 向量生成与存储 | LangChain4j embedding + KnowledgeVectorStore / JDBC，复用 public.vector_store |
+| 混合检索与引用 | 项目 Document、BM25、RRF、多样性治理和重排，保留权限范围 |
 
-知识向量生成与存储已固定使用 LangChain4j + JDBC，与聊天 provider 无关。`HybridRetriever` 和 `VectorIndexer` 强制依赖 `KnowledgeVectorStore`；Spring AI Pgvector starter、存储回退和 embedding bridge 已删除。业务文档使用项目 `knowledge/model/Document`，原框架转换器已移至测试源。聊天模型、记忆和工具注解仍有 Spring AI 依赖。
+`ops-agent.ai.provider` 已从默认配置移除；历史本地值不再控制框架选择。生产 Bean 强制注入，依赖缺失时启动失败，不静默选择其他框架。`langchain4j-poc` 仅添加兼容测试源。
 
-## 2. 剩余项与顺序
+## 2. 当前配置与兼容
 
-| 优先级 | 当前依赖与入口 | 迁移内容 | 验收重点 |
-| --- | --- | --- | --- |
-| P1（已删除存储回退，待真实数据库验收） | 生产仅使用 `KnowledgeVectorStore`，不再依赖 `VectorStore/SearchRequest` | JDBC 存储固定接管读写，原 starter 已移除；待补真实数据库验收 | 复用 `vector_store` 的 ID、content、metadata、embedding；审核状态、公开/租户/部门/个人范围一致；相似度阈值、topK、批次和失败降级一致 |
-| P2（已完成业务类型替换） | BM25、融合、重排、引用、诊断与入库链路统一使用项目 `Document` | `SpringAiDocumentMapper` 已移至测试源，仅用于迁移对照 | 保留 ID、正文、完整 metadata、评分和引用映射；各算法仍能使用可变 metadata，不丢失来源与权限字段 |
-| P3（已完成生产替换） | Markdown 直接解析 CommonMark，token 兜底直接使用 JTokkit，JDBC 格式化使用项目实现 | 旧 Markdown Reader 仅为测试对照依赖；embedding bridge 已删除 | 旧新实现的文本、元数据、分块和默认向量输入对照；现有三套切分契约回归 |
-| P4 | `OpsAgentService` 的 Spring AI 分支、`AiConfig`、`ChatMemoryConfig`、`ai/adapter/springai` 和原工具注解 | 实际环境验收完成后，移除回退分支、聊天模型和记忆配置、工具注解；embedding 过渡层已删除 | 默认配置可启动；无 Spring AI 业务入口；SSE 顺序、取消、冷启动记忆、工具权限及诊断失败降级保持 |
-| P5（部分完成） | Spring AI BOM、聊天模型 starter、测试用 Markdown reader，以及 `spring.ai.*` 配置 | 向量 starter 与 PDF reader 已移除，PDFBox/CommonMark/JTokkit 已显式声明；后续清理回退和对照测试依赖，将有效配置统一到项目配置 | 主源码及生产依赖树不再使用 Spring AI；配置继承明确；无需重新初始化数据库或自动重建索引 |
+项目配置统一使用 `ops-agent.ai.*`：聊天为 base-url/api-key/model/timeout/temperature；向量为 embedding.base-url/api-key/model/dimensions/metadata-mode/timeout/max-retries；存储为 vector-store.dimensions/schema/table/distance-type。
 
-下一切片清理聊天回退和 provider 选择，再移除剩余 starter 与旧配置。真实模型和数据库验收仍独立保留，不能用 Mock 结果替代。
+为保护已有本地配置，原 `spring.ai.openai.*` 与 `spring.ai.vectorstore.pgvector.*` 仅在占位符中作为后备取值来源。它们不加载任何旧框架组件，不再拥有 initialize-schema、index-type 或 provider 切换效果。本片未读取、修改或输出 application-local.yml 中的真实密钥；可以逐步手动改写为项目配置，不需要立即迁移密钥。
 
-`ai/api/VectorIndex` 与 `KnowledgeSearch` 是早期预留的框架无关接口。实际生产读写边界为 `KnowledgeVectorStore`，已使用项目 `Document` 与可信 `RetrievalScope`。本片未将预留接口接入生产；后续清理接口时需核对其删除语义和权限上下文，避免长期保留重复边界。
+聊天和向量使用独立服务地址与密钥。仍使用原 embedding 模型、1024 维与默认格式化规则；更换模型或维度必须另行评估已有向量兼容性。模型维度与存储配置维度启动校验不等于真实数据库列维度检查。
 
-JDBC 存储已使用项目 `EmbeddingMetadataMode` 与 `EmbeddingContentFormatter`，不再将项目文档转换为 Spring AI 文档以格式化。保留默认模板、系统元数据换行、正文前双换行与元数据收集顺序；所有模式均有旧新对照测试。旧 `LangChain4jEmbeddingBridge` 已删除，新 JDBC 路径不支持注入框架自定义模板。
+存储仅支持 public.vector_store 和 COSINE_DISTANCE。新环境通过 init-scripts/schema.sql 创建表和索引，现有环境直接复用，不自动创建或重建。
 
-## 3. 可以继续复用的能力
+## 3. 尚需实际环境验收
 
-- BM25、RRF、去重、多样性控制与重排算法：属于业务检索能力，调整数据类型和边界即可。
-- PDFBox、POI、TXT 编码识别：已是通用解析实现，不需要改成 Agent 框架的解析器。
-- Markdown 结构化切分、递归边界切分和 JTokkit token 计量：保留既有业务规则与测试。
-- PostgreSQL、Pgvector、MyBatis、RBAC、索引任务、告警、通知、部署和巡检等领域服务：框架切换不能改变其业务语义。
+1. 重启后确认默认 LangChain4j 链路正常：同步问答、SSE 答案 → citations → DONE、取消与失败时的部分答案保存。
+2. 使用真实模型执行健康查询、指标查询和连续工具调用，验证响应与业务服务数据一致。
+3. 上传、审核、异步索引与检索真实文档，验证 PG 实际读写、事务回滚、表维度和跨租户/部门/个人隔离。
+4. 进程重启后追问，验证历史消息按 ID 正序回填且当前问题不重复注入。
+5. 告警诊断与诊断追问在模型失败时保留原失败状态和通知闭环。
+6. 需要时在专用测试库显式运行 SplitEvalIT；常规 test/package 不执行真实模型评测。
 
-MCP、多 Agent 协作与 LangGraph4j 是后续新增能力，不是完成这次 Spring AI 替换的先决条件。
+上述项目本轮没有执行，不应以 Mock 或本地协议夹具替代。
 
-## 4. 本轮 embedding 配置与边界
+## 4. 后续能力与优化
 
-`knowledge/config/LangChain4jEmbeddingConfig` 现固定生效，不再受聊天 provider 控制。默认复用当前 `text-embedding-v3`、1024 维和独立百炼地址；向量地址与密钥不继承聊天服务地址与密钥。
+- 引用记录与 Agent RAG 目前仍各检索一次，后续可统一检索快照以减少重复调用并保证完全相同的引用集合。
+- 流式首片段返回前尚未获得取消句柄，无法保证立即中断底层 HTTP；后续片段会取消，后续工具不再开始。
+- MCP、自动部署/回滚、复杂工作流与多 Agent 为后续业务开发，不属于本次框架移除的完成条件。
+- ai/api/VectorIndex 与 KnowledgeSearch 为早期预留接口，实际存储使用 KnowledgeVectorStore；后续按生产需求收敛重复边界。
 
-| 配置 | 环境变量 | 默认/继承来源 |
-| --- | --- | --- |
-| `ops-agent.ai.embedding.base-url` | `OPS_EMBEDDING_BASE_URL` | 原 `spring.ai.openai.embedding.base-url` |
-| `ops-agent.ai.embedding.api-key` | `OPS_EMBEDDING_API_KEY` | 原 `spring.ai.openai.embedding.api-key` |
-| `ops-agent.ai.embedding.model` | `OPS_EMBEDDING_MODEL` | 原 embedding 模型，默认 `text-embedding-v3` |
-| `ops-agent.ai.embedding.dimensions` | `OPS_EMBEDDING_DIMENSIONS` | `spring.ai.vectorstore.pgvector.dimensions`，默认 1024 |
-| `ops-agent.ai.embedding.timeout` | `OPS_EMBEDDING_TIMEOUT` | 60 秒 |
-| `ops-agent.ai.embedding.max-retries` | `OPS_EMBEDDING_MAX_RETRIES` | 2 次 |
-
-保留 `spring.ai.openai.embedding.metadata-mode` 的格式化语义。每批最多 10 条；返回数量、维度和非有限数值都经 JDBC 存储校验；存储接口不暴露单次请求改变模型或维度的选项。模型维度须与 Pgvector **配置**维度一致，此启动校验不等于已读取真实表的列维度。
-
-应用排除 `OpenAiEmbeddingAutoConfiguration`，避免剩余聊天 starter 再创建原生 embedding Bean。Pgvector starter 已删除，`initialize-schema/index-type` 不再生效，不自动执行 DDL；新环境应使用 `init-scripts/schema.sql` 创建现有表和索引。原 `spring.ai.*` 向量配置仅作为兼容属性源，后续统一到项目配置。
-
-仅切换调用 SDK 时须保持原模型、维度与内容格式化规则；如果主动更换 embedding 模型，即使维度相同也不能直接把新旧向量混在同一索引中，应另行评估重建和切换方案。
-
-## 5. 验证与未验收范围
-
-定向验证固定向量 Bean 注册、聊天 provider 独立性、缺失数据库和非法配置启动失败、分批写入、存储异常传播、BM25 降级和内置知识加载。协议夹具改为验证 LangChain4j 模型与项目 JDBC 存储；真实数据库读写、事务回滚、表列维度及外部模型精度尚未验收。
-
-A/B 评测入口已移除旧 VectorStore Bean，改为在测试代码中仅查询带 evalDoc 和 splitVersion 标记的评测数据；不向生产接口开放任意元数据过滤。本片未运行真实评测、数据库迁移或重索引。逐切片测试结果见 `01-baseline-and-poc.md`。
+迁移前的解析、token 切分及格式化结果已采集为 src/test/resources/migration/ingest-legacy-golden.json，当前回归直接比对固定结果，不再依赖旧 SDK。详细逐片进度与本轮验证数字见 01-baseline-and-poc.md。

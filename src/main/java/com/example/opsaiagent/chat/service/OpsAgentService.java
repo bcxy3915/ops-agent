@@ -2,29 +2,18 @@ package com.example.opsaiagent.chat.service;
 
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
-import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
-import com.example.opsaiagent.chat.entity.MessageEntity;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import com.example.opsaiagent.security.util.SecurityUtils;
-import com.example.opsaiagent.tools.HealthCheckTools;
-import com.example.opsaiagent.tools.MetricDiscoveryTools;
-import com.example.opsaiagent.tools.MetricQueryTools;
-import com.example.opsaiagent.tools.ServiceDiscoveryTools;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
@@ -38,7 +27,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * RAG服务
@@ -48,74 +36,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OpsAgentService {
 
-    // 聊天客户端
-    private final ChatClient chatClient;
-
-    // 聊天记忆（进程内），用于冷启动时从数据库回填历史
-    private final ChatMemory chatMemory;
-
-    /**
-     * 冷启动回填的历史条数，与 MessageWindowChatMemory 的窗口大小保持一致
-     */
-    private static final int MEMORY_RECALL_LIMIT = 20;
-
-    private final HealthCheckTools healthCheckTools;
-    private final MetricQueryTools metricQueryTools;
-    private final MetricDiscoveryTools metricDiscoveryTools;
-    private final ServiceDiscoveryTools serviceDiscoveryTools;
     private final HybridRetriever hybridRetriever;
     private final ConversationService conversationService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
     private final KnowledgeHitLogService knowledgeHitLogService;
     private final ObjectMapper objectMapper;
 
-    private OpsAssistant langChain4jOpsAssistant;
-    private LangChain4jKnowledgeContentRetriever langChain4jKnowledgeContentRetriever;
-    private OpsStreamingAssistant langChain4jOpsStreamingAssistant;
-    private ChatMemoryStore langChain4jMemoryStore;
-
-    /**
-     * 注入用户隔离的 LangChain4j 记忆仓库。
-     * @param store 会话记忆仓库
-     * @return 无返回值
-     */
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setLangChain4jMemoryStore(ChatMemoryStore store) {
-        this.langChain4jMemoryStore = store;
-    }
-
-    /**
-     * 注入可选的 LangChain4j 运维助手，仅在选择 LangChain4j provider 时存在。
-     *
-     * @param assistant LangChain4j 运维助手
-     * @return 无返回值
-     */
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setLangChain4jOpsAssistant(OpsAssistant assistant) {
-        this.langChain4jOpsAssistant = assistant;
-    }
-
-    /**
-     * 注入可选的 LangChain4j RAG 内容检索器。
-     *
-     * @param contentRetriever LangChain4j 知识内容检索器
-     * @return 无返回值
-     */
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setLangChain4jKnowledgeContentRetriever(LangChain4jKnowledgeContentRetriever contentRetriever) {
-        this.langChain4jKnowledgeContentRetriever = contentRetriever;
-    }
-
-    /**
-     * 注入可选的 LangChain4j 流式运维助手。
-     *
-     * @param assistant LangChain4j 流式运维助手
-     * @return 无返回值
-     */
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setLangChain4jOpsStreamingAssistant(OpsStreamingAssistant assistant) {
-        this.langChain4jOpsStreamingAssistant = assistant;
-    }
+    private final OpsAssistant langChain4jOpsAssistant;
+    private final OpsStreamingAssistant langChain4jOpsStreamingAssistant;
+    private final ChatMemoryStore langChain4jMemoryStore;
 
     /**
      * 统一的系统提示词：告诉模型它的角色、能力、回答要求
@@ -168,16 +97,7 @@ public class OpsAgentService {
     public AskResponse askWithCitations(String sessionId, String question) {
         log.info("问题: {}", question);
 
-        // 0.冷启动回填聊天记忆（进程重启/多实例切换后内存记忆为空）
-        if (langChain4jOpsAssistant == null) {
-            warmUpMemory(sessionId, SecurityUtils.getCurrentUsername());
-        }
-
-        // 1.混合检索
-        List<Document> documents = langChain4jOpsAssistant != null && langChain4jKnowledgeContentRetriever != null
-                ? langChain4jKnowledgeContentRetriever.retrieveDocuments(question)
-                : hybridRetriever.retrieve(question, 5);
-        String context = buildContext(documents);
+        List<Document> documents = hybridRetriever.retrieve(question, 5);
 
         // 打印召回的片段
         documents.forEach(d -> log.info("召回片段[来源={}][距离={}]: {}",
@@ -185,26 +105,10 @@ public class OpsAgentService {
                 d.getMetadata().get("distance"),
                 Objects.requireNonNull(d.getText()).substring(0, Math.min(150, d.getText().length()))));
 
-        // 3.Prompt 模板填充
-        String systemPrompt = SYSTEM_PROMPT.replace("{context}", context);
-
-        // 4.调用聊天模型生成答案
-        String answer;
-        if (langChain4jOpsAssistant != null) {
-            String username = SecurityUtils.getCurrentUsername();
-            String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
-            String ragSystemPrompt = SYSTEM_PROMPT.replace("{context}", "");
-            answer = langChain4jOpsAssistant.ask(
-                    LangChain4jMemoryId.of(memoryUsername, sessionId), question, ragSystemPrompt);
-        } else {
-            answer = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(question)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
-                    .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
-                    .call()
-                    .content();
-        }
+        String username = SecurityUtils.getCurrentUsername();
+        String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
+        String answer = langChain4jOpsAssistant.ask(LangChain4jMemoryId.of(memoryUsername, sessionId),
+                question, SYSTEM_PROMPT.replace("{context}", ""));
         log.info("RAG 问答完成，召回 {} 个片段", documents.size());
 
         // 5.构建结构化引用
@@ -275,11 +179,7 @@ public class OpsAgentService {
         if (username != null) {
             try {
                 // 必须在 saveUserMessage 之前回填，避免当前问题被当成历史重复注入
-                if (langChain4jOpsStreamingAssistant != null && langChain4jMemoryStore != null) {
-                    langChain4jMemoryStore.getMessages(LangChain4jMemoryId.of(username, sessionId));
-                } else {
-                    warmUpMemory(sessionId, username);
-                }
+                langChain4jMemoryStore.getMessages(LangChain4jMemoryId.of(username, sessionId));
                 conversationService.ensureConversation(sessionId, username, question);
                 conversationService.saveUserMessage(sessionId, question);
             } catch (Exception e) {
@@ -289,7 +189,7 @@ public class OpsAgentService {
 
         // 3.RAG 检索
         List<Document> documents = hybridRetriever.retrieve(question, 5);
-        String context = buildContext(documents);
+
         List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
 
         // 3.1 记录命中流水（对话引用来源 ASK），失败不影响主流程
@@ -300,43 +200,8 @@ public class OpsAgentService {
         }
         String citationsJson = toJson(citations);
 
-        // 4.拼接 System Prompt
-        String systemPrompt = SYSTEM_PROMPT.replace("{context}", context);
-
-        // 5.流式调用：token 事件（答案先出）→ citations 事件（知识来源最后附上）→ [DONE]
-        if (langChain4jOpsStreamingAssistant != null) {
-            return streamWithLangChain4j(sessionId, question, username, citationsJson,
-                    SYSTEM_PROMPT.replace("{context}", ""));
-        }
-        StringBuilder answerBuffer = new StringBuilder();
-        Flux<ServerSentEvent<String>> citationsEvent = Flux.just(
-                ServerSentEvent.builder("").event("citations").data(citationsJson).build());
-        Flux<ServerSentEvent<String>> tokenEvents = chatClient.prompt()
-                .system(systemPrompt)
-                .user(question)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, sessionId)) // 指定会话ID，用于聊天记忆
-                .tools(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools)
-                .stream()
-                .content()
-                .map(token -> ServerSentEvent.builder(token).build())      // 默认 message 事件
-                .doOnNext(ev -> answerBuffer.append(String.valueOf(ev.data())));
-        Flux<ServerSentEvent<String>> doneEvent = Flux.just(
-                ServerSentEvent.builder("[DONE]").build());
-
-        // 答案流式输出完成后，再发送 citations（知识来源），最后 [DONE]
-        return Flux.concat(tokenEvents, citationsEvent, doneEvent)
-                .publishOn(Schedulers.boundedElastic())
-                .doFinally(signal -> {
-                    // 无论完成、出错、取消，都保存
-                    String answer = answerBuffer.toString();
-                    if (username != null && !answer.isEmpty()) {
-                        try {
-                            conversationService.saveAssistantMessage(sessionId, answer);
-                        } catch (Exception e) {
-                            log.error("保存 AI 消息失败", e);
-                        }
-                    }
-                });
+        return streamWithLangChain4j(sessionId, question, username, citationsJson,
+                SYSTEM_PROMPT.replace("{context}", ""));
     }
 
     /**
@@ -423,64 +288,9 @@ public class OpsAgentService {
     }
 
     /**
-     * 冷启动回填聊天记忆。
-     *
-     * 聊天记忆是进程内的（MessageWindowChatMemory + 内存仓库），进程重启或请求落到
-     * 另一个实例时会丢失，而历史消息一直持久化在 ops_message 表中。这里在记忆为空时
-     * 从数据库加载最近若干条消息回填，保证多轮上下文连续。
-     *
-     * @param sessionId 会话 ID
-     * @param username 当前用户名，用于校验会话归属
-     */
-    private void warmUpMemory(String sessionId, String username) {
-        if (username == null) {
-            return;
-        }
-        try {
-            if (!chatMemory.get(sessionId).isEmpty()) {
-                return;
-            }
-            List<Message> history = conversationService
-                    .loadRecentMessages(sessionId, username, MEMORY_RECALL_LIMIT)
-                    .stream()
-                    .filter(m -> m.getContent() != null && !m.getContent().isBlank())
-                    .map(this::toChatMessage)
-                    .toList();
-            if (history.isEmpty()) {
-                return;
-            }
-            chatMemory.add(sessionId, history);
-            log.info("冷启动回填聊天记忆: sessionId={}, 条数={}", sessionId, history.size());
-        } catch (Exception e) {
-            // 回填失败不影响主流程
-            log.warn("冷启动回填聊天记忆失败: sessionId={}", sessionId, e);
-        }
-    }
-
-    /**
-     * 历史消息转 Spring AI 消息
-     */
-    private Message toChatMessage(MessageEntity entity) {
-        return "ASSISTANT".equals(entity.getRole())
-                ? new AssistantMessage(entity.getContent())
-                : new UserMessage(entity.getContent());
-    }
-
-    /**
-     * 拼接检索上下文
-     */
-    private String buildContext(List<Document> documents) {
-        if (documents == null || documents.isEmpty()) {
-            return "（知识库中未找到相关内容，请基于工具查询或已有知识回答）";
-        }
-        return documents.stream()
-                .map(d -> "【来源：" + d.getMetadata().getOrDefault("source", "未知文档") + "】\n"
-                        + Objects.requireNonNullElse(d.getText(), ""))
-                .collect(Collectors.joining("\n\n---\n\n"));
-    }
-
-    /**
      * 引用列表转 JSON 字符串
+     * @param citations 引用列表
+     * @return 引用 JSON，序列化失败时返回空数组
      */
     private String toJson(List<RetrievalHitResponse> citations) {
         try {

@@ -6,8 +6,6 @@ import com.example.opsaiagent.resilience.RestClientFactory;
 import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -24,8 +22,12 @@ public class MetricDiscoveryTools {
     private final ServiceRegistry serviceRegistry;
     private final RestClient restClient = RestClientFactory.builder().build();
 
-    @Tool(description = "列出指定服务支持的所有监控指标名。当用户问某服务有哪些监控指标，或不确定具体指标名时使用")
-    public String listMetrics(@ToolParam(description = "服务名, 例如todo-service") String serviceName) {
+    /**
+     * 列出注册服务支持的关键监控指标。
+     * @param serviceName 服务名
+     * @return 指标列表或明确的查询错误
+     */
+    public String listMetrics(String serviceName) {
         ServiceInfo service = serviceRegistry.getByName(serviceName);
         if (service == null) {
             return "服务 " + serviceName + " 未注册。可用服务：" +

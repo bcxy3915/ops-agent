@@ -1,0 +1,428 @@
+{
+  "format" : [ {
+    "expected" : "\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "ALL",
+    "metadata" : { }
+  }, {
+    "expected" : "\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "EMBED",
+    "metadata" : { }
+  }, {
+    "expected" : "\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "INFERENCE",
+    "metadata" : { }
+  }, {
+    "expected" : "\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "NONE",
+    "metadata" : { }
+  }, {
+    "expected" : "tenantId: 2\r\nenabled: true\r\nsource: 告警.md\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "ALL",
+    "metadata" : {
+      "tenantId" : 2,
+      "enabled" : true,
+      "source" : "告警.md"
+    }
+  }, {
+    "expected" : "tenantId: 2\r\nsource: 告警.md\r\nenabled: true\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "EMBED",
+    "metadata" : {
+      "tenantId" : 2,
+      "enabled" : true,
+      "source" : "告警.md"
+    }
+  }, {
+    "expected" : "tenantId: 2\r\nsource: 告警.md\r\nenabled: true\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "INFERENCE",
+    "metadata" : {
+      "tenantId" : 2,
+      "enabled" : true,
+      "source" : "告警.md"
+    }
+  }, {
+    "expected" : "\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "NONE",
+    "metadata" : {
+      "tenantId" : 2,
+      "enabled" : true,
+      "source" : "告警.md"
+    }
+  }, {
+    "expected" : "key1: value1\r\nAa: 正文 {metadata_string}\n检查\r\nBB: {value}\r\nkey2: value2\r\nkey0: value0\r\nkey5: value5\r\nkey6: value6\r\nkey3: value3\r\nkey4: value4\r\nkey9: value9\r\nkey7: value7\r\nkey8: value8\r\nkey22: value22\r\nkey21: value21\r\nkey20: value20\r\nkey15: value15\r\nkey37: value37\r\nkey14: value14\r\nkey36: value36\r\nkey13: value13\r\nkey35: value35\r\nkey12: value12\r\nkey34: value34\r\nkey19: value19\r\nkey18: value18\r\nkey17: value17\r\nkey39: value39\r\nkey16: value16\r\nkey38: value38\r\nkey11: value11\r\nkey33: value33\r\nkey10: value10\r\nkey32: value32\r\nkey31: value31\r\nkey30: value30\r\nkey26: value26\r\nkey25: value25\r\nkey24: value24\r\nkey23: value23\r\nkey29: value29\r\nkey28: value28\r\nkey27: value27\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "ALL",
+    "metadata" : {
+      "key1" : "value1",
+      "Aa" : "{content}",
+      "BB" : "{value}",
+      "key2" : "value2",
+      "key0" : "value0",
+      "key5" : "value5",
+      "key6" : "value6",
+      "key3" : "value3",
+      "key4" : "value4",
+      "key9" : "value9",
+      "key7" : "value7",
+      "key8" : "value8",
+      "key22" : "value22",
+      "key21" : "value21",
+      "key20" : "value20",
+      "key15" : "value15",
+      "key37" : "value37",
+      "key14" : "value14",
+      "key36" : "value36",
+      "key13" : "value13",
+      "key35" : "value35",
+      "key12" : "value12",
+      "key34" : "value34",
+      "key19" : "value19",
+      "key18" : "value18",
+      "key17" : "value17",
+      "key39" : "value39",
+      "key16" : "value16",
+      "key38" : "value38",
+      "key11" : "value11",
+      "key33" : "value33",
+      "key10" : "value10",
+      "key32" : "value32",
+      "key31" : "value31",
+      "key30" : "value30",
+      "key26" : "value26",
+      "key25" : "value25",
+      "key24" : "value24",
+      "key23" : "value23",
+      "key29" : "value29",
+      "key28" : "value28",
+      "key27" : "value27"
+    }
+  }, {
+    "expected" : "key1: value1\r\nAa: 正文 {metadata_string}\n检查\r\nBB: {value}\r\nkey2: value2\r\nkey0: value0\r\nkey5: value5\r\nkey6: value6\r\nkey3: value3\r\nkey4: value4\r\nkey9: value9\r\nkey7: value7\r\nkey8: value8\r\nkey22: value22\r\nkey21: value21\r\nkey20: value20\r\nkey15: value15\r\nkey37: value37\r\nkey14: value14\r\nkey36: value36\r\nkey13: value13\r\nkey35: value35\r\nkey12: value12\r\nkey34: value34\r\nkey19: value19\r\nkey18: value18\r\nkey17: value17\r\nkey39: value39\r\nkey16: value16\r\nkey38: value38\r\nkey11: value11\r\nkey33: value33\r\nkey10: value10\r\nkey32: value32\r\nkey31: value31\r\nkey30: value30\r\nkey26: value26\r\nkey25: value25\r\nkey24: value24\r\nkey23: value23\r\nkey29: value29\r\nkey28: value28\r\nkey27: value27\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "EMBED",
+    "metadata" : {
+      "key1" : "value1",
+      "Aa" : "{content}",
+      "BB" : "{value}",
+      "key2" : "value2",
+      "key0" : "value0",
+      "key5" : "value5",
+      "key6" : "value6",
+      "key3" : "value3",
+      "key4" : "value4",
+      "key9" : "value9",
+      "key7" : "value7",
+      "key8" : "value8",
+      "key22" : "value22",
+      "key21" : "value21",
+      "key20" : "value20",
+      "key15" : "value15",
+      "key37" : "value37",
+      "key14" : "value14",
+      "key36" : "value36",
+      "key13" : "value13",
+      "key35" : "value35",
+      "key12" : "value12",
+      "key34" : "value34",
+      "key19" : "value19",
+      "key18" : "value18",
+      "key17" : "value17",
+      "key39" : "value39",
+      "key16" : "value16",
+      "key38" : "value38",
+      "key11" : "value11",
+      "key33" : "value33",
+      "key10" : "value10",
+      "key32" : "value32",
+      "key31" : "value31",
+      "key30" : "value30",
+      "key26" : "value26",
+      "key25" : "value25",
+      "key24" : "value24",
+      "key23" : "value23",
+      "key29" : "value29",
+      "key28" : "value28",
+      "key27" : "value27"
+    }
+  }, {
+    "expected" : "key1: value1\r\nAa: 正文 {metadata_string}\n检查\r\nBB: {value}\r\nkey2: value2\r\nkey0: value0\r\nkey5: value5\r\nkey6: value6\r\nkey3: value3\r\nkey4: value4\r\nkey9: value9\r\nkey7: value7\r\nkey8: value8\r\nkey22: value22\r\nkey21: value21\r\nkey20: value20\r\nkey15: value15\r\nkey37: value37\r\nkey14: value14\r\nkey36: value36\r\nkey13: value13\r\nkey35: value35\r\nkey12: value12\r\nkey34: value34\r\nkey19: value19\r\nkey18: value18\r\nkey17: value17\r\nkey39: value39\r\nkey16: value16\r\nkey38: value38\r\nkey11: value11\r\nkey33: value33\r\nkey10: value10\r\nkey32: value32\r\nkey31: value31\r\nkey30: value30\r\nkey26: value26\r\nkey25: value25\r\nkey24: value24\r\nkey23: value23\r\nkey29: value29\r\nkey28: value28\r\nkey27: value27\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "INFERENCE",
+    "metadata" : {
+      "key1" : "value1",
+      "Aa" : "{content}",
+      "BB" : "{value}",
+      "key2" : "value2",
+      "key0" : "value0",
+      "key5" : "value5",
+      "key6" : "value6",
+      "key3" : "value3",
+      "key4" : "value4",
+      "key9" : "value9",
+      "key7" : "value7",
+      "key8" : "value8",
+      "key22" : "value22",
+      "key21" : "value21",
+      "key20" : "value20",
+      "key15" : "value15",
+      "key37" : "value37",
+      "key14" : "value14",
+      "key36" : "value36",
+      "key13" : "value13",
+      "key35" : "value35",
+      "key12" : "value12",
+      "key34" : "value34",
+      "key19" : "value19",
+      "key18" : "value18",
+      "key17" : "value17",
+      "key39" : "value39",
+      "key16" : "value16",
+      "key38" : "value38",
+      "key11" : "value11",
+      "key33" : "value33",
+      "key10" : "value10",
+      "key32" : "value32",
+      "key31" : "value31",
+      "key30" : "value30",
+      "key26" : "value26",
+      "key25" : "value25",
+      "key24" : "value24",
+      "key23" : "value23",
+      "key29" : "value29",
+      "key28" : "value28",
+      "key27" : "value27"
+    }
+  }, {
+    "expected" : "\n\n正文 {metadata_string}\n检查",
+    "input" : "正文 {metadata_string}\n检查",
+    "mode" : "NONE",
+    "metadata" : {
+      "key1" : "value1",
+      "Aa" : "{content}",
+      "BB" : "{value}",
+      "key2" : "value2",
+      "key0" : "value0",
+      "key5" : "value5",
+      "key6" : "value6",
+      "key3" : "value3",
+      "key4" : "value4",
+      "key9" : "value9",
+      "key7" : "value7",
+      "key8" : "value8",
+      "key22" : "value22",
+      "key21" : "value21",
+      "key20" : "value20",
+      "key15" : "value15",
+      "key37" : "value37",
+      "key14" : "value14",
+      "key36" : "value36",
+      "key13" : "value13",
+      "key35" : "value35",
+      "key12" : "value12",
+      "key34" : "value34",
+      "key19" : "value19",
+      "key18" : "value18",
+      "key17" : "value17",
+      "key39" : "value39",
+      "key16" : "value16",
+      "key38" : "value38",
+      "key11" : "value11",
+      "key33" : "value33",
+      "key10" : "value10",
+      "key32" : "value32",
+      "key31" : "value31",
+      "key30" : "value30",
+      "key26" : "value26",
+      "key25" : "value25",
+      "key24" : "value24",
+      "key23" : "value23",
+      "key29" : "value29",
+      "key28" : "value28",
+      "key27" : "value27"
+    }
+  } ],
+  "token" : [ {
+    "input" : "",
+    "chunks" : [ ]
+  }, {
+    "input" : "短文",
+    "chunks" : [ ]
+  }, {
+    "input" : "  服务检查正常，继续处理。  ",
+    "chunks" : [ {
+      "score" : 0.9,
+      "text" : "服务检查正常，继续处理。",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 0,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 1
+      }
+    } ]
+  }, {
+    "input" : "CPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\n",
+    "chunks" : [ {
+      "score" : 0.9,
+      "text" : "CPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high.",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 0,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 3
+      }
+    }, {
+      "score" : 0.9,
+      "text" : "Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 1,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 3
+      }
+    }, {
+      "score" : 0.9,
+      "text" : "CPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!\nCPU usage is high. Check service health!",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 2,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 3
+      }
+    } ]
+  }, {
+    "input" : "数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n",
+    "chunks" : [ {
+      "score" : 0.9,
+      "text" : "数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 0,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 5
+      }
+    }, {
+      "score" : 0.9,
+      "text" : "数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 1,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 5
+      }
+    }, {
+      "score" : 0.9,
+      "text" : "数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 2,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 5
+      }
+    }, {
+      "score" : 0.9,
+      "text" : "数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 3,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 5
+      }
+    }, {
+      "score" : 0.9,
+      "text" : "数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。\n数据库连接池耗尽，需要查询慢日志。",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 4,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 5
+      }
+    } ]
+  }, {
+    "input" : " a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a",
+    "chunks" : [ {
+      "score" : 0.9,
+      "text" : "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 0,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 1
+      }
+    } ]
+  }, {
+    "input" : " a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a",
+    "chunks" : [ {
+      "score" : 0.9,
+      "text" : "a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a",
+      "metadata" : {
+        "tenantId" : 2,
+        "chunk_index" : 0,
+        "parent_document_id" : "parent-id",
+        "source" : "runbook.md",
+        "total_chunks" : 1
+      }
+    } ]
+  } ],
+  "source" : "Spring AI 2.0.2，迁移前固定配置的实际输出；元数据换行按 Windows 采集",
+  "markdown" : [ {
+    "input" : "",
+    "chunks" : [ ]
+  }, {
+    "input" : "# 健康检查\n\n服务正常\n下一行  \n硬换行\n\n## 指标\n查询 **CPU** 和 [文档](https://example.com)",
+    "chunks" : [ {
+      "text" : "服务正常 下一行 硬换行",
+      "metadata" : {
+        "category" : "header_1",
+        "title" : "健康检查"
+      }
+    }, {
+      "text" : "查询 CPU 和 文档",
+      "metadata" : {
+        "category" : "header_2",
+        "title" : "指标"
+      }
+    } ]
+  }, {
+    "input" : "# 排查\n\n> 检查 `threads`\n\n- CPU\n- 内存\n\n```shell\ncurl localhost/health\n```\n\n后续步骤\n\n---\n\n结束",
+    "chunks" : [ {
+      "text" : "检查 threads CPU 内存 curl localhost/health\n",
+      "metadata" : {
+        "category" : "code_block",
+        "title" : "排查",
+        "lang" : "shell"
+      }
+    }, {
+      "text" : "后续步骤结束",
+      "metadata" : { }
+    } ]
+  }, {
+    "input" : "标题\n===\n\n正文\n\n## **强调标题**\n\n内容\n\n![说明](image.png)",
+    "chunks" : [ {
+      "text" : "正文",
+      "metadata" : {
+        "category" : "header_1",
+        "title" : "标题"
+      }
+    }, {
+      "text" : "强调标题内容说明",
+      "metadata" : { }
+    } ]
+  } ]
+}

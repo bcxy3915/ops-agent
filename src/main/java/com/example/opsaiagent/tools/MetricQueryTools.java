@@ -6,8 +6,6 @@ import com.example.opsaiagent.resilience.RestClientFactory;
 import com.example.opsaiagent.tools.support.ToolErrorFormatter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -22,10 +20,15 @@ public class MetricQueryTools {
     private final ServiceRegistry serviceRegistry;
     private final RestClient restClient = RestClientFactory.builder().build();
 
-    @Tool(description = "查询指定服务的指定监控指标。常用指标：system.cpu.usage（CPU 使用率）、jvm.memory.used（JVM 内存）、jvm.gc.pause（GC 暂停时间）、http.server.requests（HTTP 请求统计）")
+    /**
+     * 查询注册服务的指定监控指标。
+     * @param serviceName 服务名
+     * @param metricName 指标名
+     * @return 指标内容或明确的查询错误
+     */
     public String queryMetric(
-            @ToolParam(description = "服务名，例如 todo-service") String serviceName,
-            @ToolParam(description = "指标名，例如 system.cpu.usage") String metricName) {
+            String serviceName,
+            String metricName) {
 
         ServiceInfo service = serviceRegistry.getByName(serviceName);
         if (service == null) {

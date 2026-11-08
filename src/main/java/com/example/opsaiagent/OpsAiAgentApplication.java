@@ -4,10 +4,9 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 
-/** 应用入口；聊天回退尚在，显式排除其已替换的向量模型自动配置。 */
+/** 统一使用 LangChain4j 的运维智能体应用入口。 */
 @SpringBootApplication(exclude = {
-        UserDetailsServiceAutoConfiguration.class,
-        org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration.class
+        UserDetailsServiceAutoConfiguration.class
 })
 public class OpsAiAgentApplication {
 

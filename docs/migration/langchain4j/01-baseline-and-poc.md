@@ -358,3 +358,17 @@ Maven 移除 Spring AI PDF Reader，显式声明 PDFBox 3.0.7、CommonMark 0.22.
 协议夹具改为验证 LangChain4j 模型与项目 JDBC 存储，覆盖 11 条文本的 10＋1 批次、模型/维度参数、写入和查询调用；JDBC 仍为 Mock。`SplitEvalIT` 改用 LangChain4j 查询向量及仅限 evalDoc/splitVersion 的测试 SQL，避免移除旧 Bean 后无法运行；本片只编译该入口，没有运行真实模型评测。
 
 定向 **41 项通过**；清理旧构建产物后的默认全量 **1052 项通过**，含 LangChain4j 兼容测试全量 **1065 项通过**，均为 0 failures、0 errors、0 skipped。测试数量减少来自删除过渡 bridge 的六项测试，保留了正式存储的向量错误、权限过滤与失败处理验证。运行时依赖树已不含 Spring AI Pgvector starter、vector-store 和 pgvector 组件；仍有聊天 starter 及其模型公共依赖。未进行真实模型、数据库或页面验收。
+
+### 正式迁移第十二切片：全面移除 Spring AI（2026-11-08）
+
+删除 Spring AI 聊天模型 starter、Markdown 测试 Reader、BOM、所有 Spring AI 网关适配器、AiConfig、ChatMemoryConfig 及旧自动配置排除项。领域工具移除原框架 Tool/ToolParam 注解，统一由已有 LangChain4jReadOnlyToolBindings 暴露，服务查询与权限实现不变。显式增加 Spring Boot RestClient starter，承接旧框架之前间接引入的外部 HTTP 配置依赖。
+
+LangChain4jConfig 不再受 provider 条件或可选 Bean 条件控制；同步/流式助手、模型网关、只读工具与用户隔离记忆均为强制依赖。OpsAgentService 删除旧模型调用、旧记忆回填与可选 setter，构造器直接注入同步/流式 Agent 和记忆仓库。保留 20 条窗口、用户名/sessionId 隔离、当前问题落库前回填、异步权限恢复、失败和取消保存部分答案及 SSE 答案 → citations → DONE 契约。
+
+配置统一到 ops-agent.ai.*，补充 embedding.metadata-mode 和 vector-store 的维度/schema/table/distance-type 项。spring.ai.* 仅在占位符中作为旧本地配置取值兼容，不加载任何旧框架组件；默认配置不再包含 provider 与 spring.ai 配置块。没有读取、修改或输出 application-local.yml 的密钥，也没有改动数据库或索引。
+
+删除依赖旧 SDK 的动态对照测试及文档转换器；在删除前从旧 2.0.2 实现采集 Markdown、token 分块和格式化实际结果，保存到 src/test/resources/migration/ingest-legacy-golden.json，新测试直接对照固定结果。OpsAgentService 的原同步和流式测试改用 LangChain4j Agent/TokenStream 夹具，记忆回填语义由现有 ConversationChatMemoryStoreTest 及落库前预加载顺序测试覆盖。
+
+验证结果：定向 **51 项通过**；clean test 默认全量 **1047 项通过**；启用 langchain4j-poc 的 package **1060 项通过并打包成功**，均为 0 failures、0 errors、0 skipped。旧新测试合并以及删除旧转换器和旧记忆路径的用例导致数量减少；未删除新框架的 SSE 错误/取消、工具循环、权限传播和冷启动记忆测试。
+
+主源码、测试源码和 pom.xml 中已无 org.springframework.ai 引用；完整 Maven 依赖树（含测试范围）无 Spring AI；实际可执行 JAR 中 Spring AI 库、旧适配器、AiConfig 和 ChatMemoryConfig 条目数为零。上述验证使用 Mock/本地协议夹具，没有运行真实模型、PostgreSQL 或页面；代码迁移已完成，真实环境验收尚未完成。forkCount=0 的回归未生成新的 JaCoCo 执行数据，不报告覆盖率。

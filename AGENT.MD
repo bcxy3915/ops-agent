@@ -9,7 +9,7 @@
 Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响应、知识检索、服务健康与指标查询、告警、通知、故障诊断和权限管理等能力。
 
 - 语言与构建：Java 21、Maven，仓库提供 Maven Wrapper。
-- 核心框架：Spring Boot、Spring AI。
+- 核心框架：Spring Boot、LangChain4j。
 - 数据存储：PostgreSQL、Pgvector、MyBatis-Plus。
 - 接口与安全：Spring MVC、WebFlux/SSE、Spring Security、JWT、RBAC。
 - 检索：向量检索、BM25、RRF 融合与重排序。
@@ -254,10 +254,10 @@ docker compose up -d
 ### LangChain4j 迁移工作入口
 
 - `migration/langchain4j` 按 v4 周计划推进；实际进度与验证边界见 `docs/migration/langchain4j/01-baseline-and-poc.md`。
-- Maven profile `langchain4j-poc` 用于引入 `src/poc/java` 兼容测试，生产实现由 `ops-agent.ai.provider` 选择（默认 `spring-ai`，迁移链路使用 `langchain4j`）；启用该测试 profile 不等于切换生产 provider。
+- Maven profile `langchain4j-poc` 只引入 `src/poc/java` 兼容测试；生产固定使用 LangChain4j，`ops-agent.ai.provider` 已移除，历史值不再选择框架。
 - LangChain4j 同步与流式 Agent 共用用户隔离的记忆仓库、混合检索与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须预加载 LangChain4j 记忆，避免冷启动重复回填当前问题。
-- `knowledge/config/LangChain4jEmbeddingConfig` 固定注册 LangChain4j 向量模型和 JDBC 存储，与聊天 provider 无关；`LangChain4jEmbeddingBridge` 与 Spring AI Pgvector starter 已删除。聊天模型 starter 尚在，应用显式排除其 embedding 自动配置，后续删除聊天回退时一并清理排除项。向量地址、密钥、模型和维度暂兼容原 `spring.ai.*` 配置，不读取聊天密钥作为向量密钥。剩余入口与验收要求见 `docs/migration/langchain4j/02-remaining-migration-checklist.md`。
-- 向量读写生产入口统一为 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`，不再自动建表或索引；新环境使用 `init-scripts/schema.sql`，已有环境不得自动重建。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；`SpringAiDocumentMapper` 已移至测试源，仅供新旧对照。Markdown 解析直接使用 CommonMark；token 兜底直接使用 JTokkit；JDBC 向量写入使用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，必须保持存量向量输入格式。旧 Markdown Reader 仅作测试依赖对照。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
+- `chat/config/LangChain4jConfig` 固定注册同步/流式模型、诊断网关、记忆和只读 Agent；所有依赖强制注入，不因 Bean 缺失回退到其他框架。`knowledge/config/LangChain4jEmbeddingConfig` 固定注册向量模型与 JDBC 存储。Spring AI 的 starter、BOM、适配层、记忆配置与工具注解均已删除，测试也不依赖旧 SDK。配置统一为 `ops-agent.ai.*`，其中 `spring.ai.*` 仅作旧本地配置的取值兼容，不代表加载旧框架；不要输出或自动改写本地密钥。
+- 向量读写生产入口统一为 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`，不再自动建表或索引；新环境使用 `init-scripts/schema.sql`，已有环境不得自动重建。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；迁移前解析、切分和格式化输出存入 `src/test/resources/migration/ingest-legacy-golden.json` 固定夹具，已删除框架文档转换器。Markdown 解析直接使用 CommonMark；token 兜底直接使用 JTokkit；JDBC 向量写入使用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，必须保持存量向量输入格式。CommonMark/JTokkit/PDFBox 均为显式通用库依赖。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
 - 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。
 - SSE 保留实际顺序“答案 → citations → DONE”；原周计划的引用先发描述须以代码与回归测试为准。
 

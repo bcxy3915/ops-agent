@@ -28,7 +28,6 @@
     </scm>
     <properties>
         <java.version>21</java.version>
-        <spring-ai.version>2.0.2</spring-ai.version>
         <langchain4j.version>1.23.0</langchain4j.version>
         <mybatis-plus.version>3.5.18</mybatis-plus.version>
         <springdoc-openapi.version>3.2.0</springdoc-openapi.version>
@@ -38,32 +37,13 @@
         <maven.compiler.release>21</maven.compiler.release>
     </properties>
 
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.springframework.ai</groupId>
-                <artifactId>spring-ai-bom</artifactId>
-                <version>${spring-ai.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
-
-    <dependencies>
-        <!-- Spring AI OpenAI Starter（兼容 DeepSeek 等 OpenAI 协议模型） -->
+<dependencies>
+        <!-- 外部 HTTP 调用的自定义配置，不再经 AI 框架间接引入 -->
         <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>io.swagger.core.v3</groupId>
-                    <artifactId>swagger-annotations-jakarta</artifactId>
-                </exclusion>
-            </exclusions>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
         </dependency>
-
-        <!-- PDF 文本抽取直接使用 PDFBox -->
+<!-- PDF 文本抽取直接使用 PDFBox -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
@@ -82,14 +62,7 @@
             <version>1.1.0</version>
         </dependency>
 
-        <!-- 仅用于迁移对照测试，生产不再使用旧 Reader -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-markdown-document-reader</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- LangChain4j：按 provider 配置逐步接管生产模型调用 -->
+<!-- LangChain4j：统一模型、Agent、记忆和工具调用 -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j</artifactId>

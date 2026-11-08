@@ -37,7 +37,7 @@ public class DashScopeReranker implements RerankerClient {
     private final RestClient restClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${spring.ai.openai.embedding.api-key}")
+    @Value("${ops-agent.ai.embedding.api-key:${spring.ai.openai.embedding.api-key:${DASHSCOPE_API_KEY:}}}")
     private String apiKey;
 
     @Value("${ops-agent.retrieval.rerank.model:gte-rerank-v2}")

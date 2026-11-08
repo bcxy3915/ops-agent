@@ -29,7 +29,7 @@ class LangChain4jEmbeddingConfigTest {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(EmbeddingModel.class);
             assertThat(context).hasSingleBean(KnowledgeVectorStore.class);
-            assertThat(context).doesNotHaveBean(org.springframework.ai.embedding.EmbeddingModel.class);
+
             assertThat(context.getBean(KnowledgeVectorStore.class)).isInstanceOf(
                     com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jPgVectorStore.class);
         });
