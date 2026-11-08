@@ -86,6 +86,7 @@ public class ChatController {
 
     /**
      * 根据问题返回答案（流式，SSE 增加 citations 事件）
+     * @param request 用户问题及会话标识
      * @return SSE 事件流：答案 token + citations 事件 + [DONE]
      */
     @Operation(
@@ -95,7 +96,7 @@ public class ChatController {
     @RateLimit(key = "askStream", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")
     public Flux<ServerSentEvent<String>> askStream(
-            @RequestBody AskStreamRequest request) {
+            @jakarta.validation.Valid @RequestBody AskStreamRequest request) {
         String sessionId = (request.getSessionId() == null || request.getSessionId().isBlank())
                 ? "default" : request.getSessionId();
         return opsAgentService.askStreamWithCitations(sessionId, request.getQuestion());
@@ -105,7 +106,9 @@ public class ChatController {
     @lombok.Data
     @lombok.NoArgsConstructor
     public static class AskStreamRequest {
+        @jakarta.validation.constraints.NotBlank(message = "问题不能为空")
         private String question;
+        @jakarta.validation.constraints.Size(max = 64, message = "会话 ID 不能超过 64 个字符")
         private String sessionId;
     }
 }

@@ -69,6 +69,16 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
     }
 
     /**
+     * 删除事务提交后清理记忆；事务回滚时不提前丢弃仍有效的缓存。
+     * @param event 已删除会话的记忆标识
+     * @return 无返回值
+     */
+    @org.springframework.transaction.event.TransactionalEventListener
+    public void onConversationDeleted(com.example.opsaiagent.chat.event.ConversationDeletedEvent event) {
+        deleteMessages(event.memoryId());
+    }
+
+    /**
      * 校验记忆标识所属租户与当前执行上下文一致，缓存命中也不能绕过校验。
      * @param memoryId 含租户、用户名及会话的标识
      * @return 无返回值

@@ -49,6 +49,24 @@ import static org.mockito.Mockito.when;
 @DisplayName("RAG 服务")
 class OpsAgentServiceTest {
 
+    /**
+     * 验证无效输入在任何检索、持久化和模型操作前被拒绝。
+     * @return 无返回值
+     */
+    @Test
+    void invalidInputCannotReachModelOrPersistence() {
+        for (String question : new String[]{null, "", "  "}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.ask("session", question))
+                    .isInstanceOf(com.example.opsaiagent.exception.BusinessException.class);
+            StepVerifier.create(service.askStreamWithCitations("session", question))
+                    .expectError(com.example.opsaiagent.exception.BusinessException.class).verify();
+        }
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.ask("s".repeat(65), "问题"))
+                .isInstanceOf(com.example.opsaiagent.exception.BusinessException.class);
+        org.mockito.Mockito.verifyNoInteractions(conversationService, memoryStore,
+                hybridRetriever, assistant, streamingAssistant);
+    }
+
     @Mock
     private OpsAssistant assistant;
 

@@ -109,6 +109,9 @@ class ConversationServiceTest {
     @Mock
     private MessageMapper messageMapper;
 
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -527,6 +530,8 @@ class ConversationServiceTest {
             assertThat(result).isTrue();
             verify(conversationMapper).deleteById(c.getId());
             verify(messageMapper).delete(any(Wrapper.class));
+            verify(eventPublisher).publishEvent(new com.example.opsaiagent.chat.event.ConversationDeletedEvent(
+                    com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of("admin", "sess-1")));
         }
 
         @Test

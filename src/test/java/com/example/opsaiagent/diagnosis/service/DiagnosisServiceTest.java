@@ -44,6 +44,26 @@ import static org.mockito.Mockito.when;
 @DisplayName("LLM 智能诊断服务")
 class DiagnosisServiceTest {
 
+    /**
+     * 验证部门权限范围解析失败时仍持久化失败诊断，不调用模型也不扩大检索范围。
+     * @return 无返回值
+     */
+    @Test
+    void scopeResolutionFailureIsPersistedAsFailedDiagnosis() {
+        var scope = org.mockito.Mockito.mock(DiagnosisScope.class);
+        when(scope.of(snapshot)).thenThrow(new IllegalStateException("部门范围加载失败"));
+        var scopedService = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate,
+                chatGateway, structuredOutputGateway, objectMapper, hybridRetriever,
+                documentMapper, caseMapper, scope);
+
+        var result = scopedService.diagnose(snapshot);
+
+        assertThat(result.getStatus()).isEqualTo("FAILED");
+        assertThat(result.getErrorMessage()).contains("部门范围加载失败");
+        verify(diagnosisMapper).insert(result);
+        org.mockito.Mockito.verifyNoInteractions(structuredOutputGateway, hybridRetriever);
+    }
+
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private ChatGateway chatGateway;
 

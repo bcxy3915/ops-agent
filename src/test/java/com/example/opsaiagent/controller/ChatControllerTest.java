@@ -31,6 +31,23 @@ import static org.mockito.Mockito.when;
 @DisplayName("智能问答接口")
 class ChatControllerTest {
 
+    /**
+     * 验证 HTTP 层在建立 SSE 响应前拒绝空问题和超长会话 ID。
+     * @return 无返回值
+     * @throws Exception 模拟请求异常
+     */
+    @Test
+    void invalidStreamRequestIsRejectedBeforeStartingSse() throws Exception {
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        for (String body : new String[]{"{}", "{\"question\":\"  \"}",
+                "{\"question\":\"问题\",\"sessionId\":\"" + "s".repeat(65) + "\"}"}) {
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ops/ask/stream")
+                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+        }
+        org.mockito.Mockito.verifyNoInteractions(opsAgentService);
+    }
+
     @Mock
     private OpsAgentService opsAgentService;
 

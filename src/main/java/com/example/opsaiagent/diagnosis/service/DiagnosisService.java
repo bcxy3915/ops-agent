@@ -83,8 +83,8 @@ public class DiagnosisService {
         record.setUpdatedAt(LocalDateTime.now());
 
         long start = System.currentTimeMillis();
-        RetrievalScope retrievalScope = diagnosisScope.of(snapshot).retrievalScope();
         try {
+            RetrievalScope retrievalScope = diagnosisScope.of(snapshot).retrievalScope();
             DiagnosisResult result = callLlm(snapshot.getSnapshotJson(), null, retrievalScope);
             applyResult(record, result);
             // P1 溯源：把本次 RAG 检索命中（参考知识/历史案例）落库

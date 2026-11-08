@@ -33,6 +33,7 @@ public class ConversationService {
     private final ConversationMapper conversationMapper;
     private final MessageMapper messageMapper;
     private final ObjectMapper objectMapper;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     /**
      * 确保会话存在（首次提问时创建）
@@ -297,6 +298,8 @@ public class ConversationService {
         messageMapper.delete(new LambdaQueryWrapper<MessageEntity>()
                 .eq(MessageEntity::getTenantId, currentTenant())
                 .eq(MessageEntity::getSessionId, sessionId));
+        eventPublisher.publishEvent(new com.example.opsaiagent.chat.event.ConversationDeletedEvent(
+                com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of(username, sessionId)));
         log.info("删除会话: sessionId={}, username={}", sessionId, username);
         return true;
     }

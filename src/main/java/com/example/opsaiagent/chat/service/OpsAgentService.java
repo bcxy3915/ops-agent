@@ -208,6 +208,12 @@ public class OpsAgentService {
      * @return 无返回值
      */
     private void prepareConversation(String sessionId, String question, String username) {
+        if (question == null || question.isBlank() || sessionId == null
+                || sessionId.isBlank() || sessionId.length() > 64) {
+            throw new com.example.opsaiagent.exception.BusinessException(
+                    com.example.opsaiagent.common.error.ErrorCode.INVALID_PARAMETER,
+                    "问题不能为空，会话 ID 必须为 1 至 64 个字符");
+        }
         if (username == null) {
             return;
         }
