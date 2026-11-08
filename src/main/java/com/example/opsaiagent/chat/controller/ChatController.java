@@ -8,6 +8,10 @@ import com.example.opsaiagent.retrieval.KeywordRetriever;
 import com.example.opsaiagent.chat.service.OpsAgentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.http.MediaType;
@@ -98,17 +102,20 @@ public class ChatController {
     public Flux<ServerSentEvent<String>> askStream(
             @jakarta.validation.Valid @RequestBody AskStreamRequest request) {
         String sessionId = (request.getSessionId() == null || request.getSessionId().isBlank())
-                ? "default" : request.getSessionId();
+                ? "default"
+                : request.getSessionId();
         return opsAgentService.askStreamWithCitations(sessionId, request.getQuestion());
     }
 
     /** 流式问答请求体（长文本走 body，不走 URL query） */
-    @lombok.Data
-    @lombok.NoArgsConstructor
+    @Data
+    @NoArgsConstructor
     public static class AskStreamRequest {
-        @jakarta.validation.constraints.NotBlank(message = "问题不能为空")
+
+        @NotBlank(message = "问题不能为空")
         private String question;
-        @jakarta.validation.constraints.Size(max = 64, message = "会话 ID 不能超过 64 个字符")
+
+        @Size(max = 64, message = "会话 ID 不能超过 64 个字符")
         private String sessionId;
     }
 }

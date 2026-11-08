@@ -126,8 +126,7 @@ public class OpsAgentService {
                             });
                     return tokens(round, question)
                             .takeUntilOther(invalidation)
-                            .takeUntilOther(Mono.delay(turns.timeout()).flatMap(tick ->
-                                    Mono.error(new java.util.concurrent.TimeoutException("本轮问答超过最长时间"))))
+                            .takeUntilOther(Mono.delay(turns.timeout()).flatMap(tick -> Mono.error(new java.util.concurrent.TimeoutException("本轮问答超过最长时间"))))
                             .doOnNext(round.answer::append)
                             .map(token -> ServerSentEvent.builder(token).build())
                             .concatWith(Flux.defer(() -> withContext(snapshot, () -> {
@@ -136,7 +135,8 @@ public class OpsAgentService {
                                         ServerSentEvent.builder("[DONE]").build());
                             })));
                 },
-                round -> withContext(snapshot, () -> { round.close(); return null; }), true)));
+                round -> withContext(snapshot, () -> { round.close(); return null; }), true))
+        );
     }
 
     /**
@@ -219,8 +219,9 @@ public class OpsAgentService {
      * @return 引用 JSON
      */
     private String toJson(List<RetrievalHitResponse> citations) {
-        try { return objectMapper.writeValueAsString(citations); }
-        catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+        try {
+            return objectMapper.writeValueAsString(citations);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
             throw new IllegalStateException("引用序列化失败", failure);
         }
     }
@@ -235,8 +236,11 @@ public class OpsAgentService {
     private static <T> T withContext(RbacContextSnapshot snapshot, java.util.function.Supplier<T> action) {
         var previous = RbacContextSnapshot.capture();
         snapshot.restore();
-        try { return action.get(); }
-        finally { previous.restore(); }
+        try {
+            return action.get();
+        } finally {
+            previous.restore();
+        }
     }
 
     /** 单次订阅持有的资源，终态只落库一次，关闭后移除两层框架记忆及项目缓存。 */
@@ -251,13 +255,17 @@ public class OpsAgentService {
          * @param turn 本轮令牌
          * @return 无返回值
          */
-        private Round(ChatTurn turn) { this.turn = turn; }
+        private Round(ChatTurn turn) {
+            this.turn = turn;
+        }
         /**
          * 保存答案并释放本轮租约，失败时不发送成功尾事件。
          * @return 无返回值
          */
         private void finish() {
-            if (finished.compareAndSet(false, true)) { turns.finish(turn, answer.toString()); }
+            if (finished.compareAndSet(false, true)) {
+                turns.finish(turn, answer.toString());
+            }
         }
         /**
          * 原子取出并取消当前模型句柄，终态清理不依赖 Reactor 上游的取消时序。
@@ -265,7 +273,9 @@ public class OpsAgentService {
          */
         private void cancelModel() {
             StreamingHandle handle = streamingHandle.getAndSet(null);
-            if (handle != null) { handle.cancel(); }
+            if (handle != null) {
+                handle.cancel();
+            }
         }
         /**
          * 错误或取消时尝试保存部分答案，并始终清理所有轮次资源。

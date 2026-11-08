@@ -11,6 +11,7 @@ import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +20,8 @@ import static org.mockito.Mockito.mock;
 /** 验证默认配置即可组装唯一的 LangChain4j 生产链路。 */
 class AiProviderConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withInitializer(context -> context.getBeanFactory()
+                    .setConversionService(ApplicationConversionService.getSharedInstance()))
             .withUserConfiguration(LangChain4jConfig.class,
                     com.example.opsaiagent.chat.service.OpsAgentService.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)

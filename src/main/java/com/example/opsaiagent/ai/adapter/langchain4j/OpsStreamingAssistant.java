@@ -5,9 +5,10 @@ import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
+import dev.langchain4j.service.memory.ChatMemoryAccess;
 
 /** LangChain4j 流式运维助手调用接口。 */
-public interface OpsStreamingAssistant extends dev.langchain4j.service.memory.ChatMemoryAccess {
+public interface OpsStreamingAssistant extends ChatMemoryAccess {
 
     /**
      * 在指定用户会话中执行流式运维问答。
@@ -18,6 +19,7 @@ public interface OpsStreamingAssistant extends dev.langchain4j.service.memory.Ch
      * @return LangChain4j 流式事件
      */
     @SystemMessage("{{systemPrompt}}")
-    TokenStream askStream(@MemoryId String memoryId, @UserMessage String question,
+    TokenStream askStream(@MemoryId String memoryId,
+                          @UserMessage String question,
                           @V("systemPrompt") String systemPrompt);
 }

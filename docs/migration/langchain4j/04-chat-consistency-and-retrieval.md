@@ -66,3 +66,14 @@ init-scripts/migrations/20261108-chat-turn.sql
 - `ChatTurnPostgresIT` 在独立临时 PostgreSQL 容器中执行，2 项通过，覆盖双实例竞争、消息顺序、租约接管和删除重建。测试 schema 及临时容器均已清理，未连接用户业务库。
 - 启用 `langchain4j-poc` 的全量回归共 1077 项，1043 项通过，6 failures、28 errors；失败均涉及当前 Windows JDK 创建本地 socket/HTTP 夹具时的 `Unable to establish loopback connection`，未宣称全量通过。尝试 `forkCount=0` 后环境错误仍存在。
 - `git diff --check` 通过。未调用真实模型，未做浏览器或重启验收，未提交 Git；用户升级前仍需执行增量 SQL 并重启后端。
+
+### 配置测试修复补记
+
+用户环境完整回归报告 1064 项中 3 failures、2 errors，均来自 `AiProviderConfigurationTest`：轻量 `ApplicationContextRunner` 未配置 Spring Boot 的 `ApplicationConversionService`，新增的 `@Value Duration` 无法转换。先前本地 HTTP 客户端的 socket 错误发生得更早，掩盖了此项测试装配缺陷；不能将用户此次失败归因于 socket 环境。
+
+已在配置测试初始化时安装与 Spring Boot 一致的类型转换服务，生产配置不变。新增 `ChatDurationConfigurationTest` 直接装配生产记忆工厂方法和 `ChatTurnService` 构造器，不创建 HTTP 客户端，验证默认秒数、分钟/ISO 格式及无效 TTL 校验。与记忆、问答测试一起运行，22 项全部通过。原完整配置装配测试在当前开发环境仍受 JDK socket 错误阻塞，用户环境全量结果需重新运行确认。
+
+```powershell
+.\mvnw.cmd "-Dtest=ChatDurationConfigurationTest,ConversationChatMemoryStoreTest,OpsAgentServiceTest" test
+.\mvnw.cmd "-Dtest=AiProviderConfigurationTest" test
+```
