@@ -112,6 +112,9 @@ class ConversationServiceTest {
     @Mock
     private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 

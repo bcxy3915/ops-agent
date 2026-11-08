@@ -128,11 +128,20 @@ public class LangChain4jConfig {
      * 注册基于现有会话历史的 LangChain4j 记忆仓库。
      *
      * @param conversationService 现有会话历史服务
+     * @param capacity 缓存最大项数
+     * @param ttl 缓存过期时间
+     * @param turnTimeout 整轮超时，必须小于缓存过期时间
      * @return 会话记忆仓库
      */
     @Bean
-    public ChatMemoryStore langChain4jChatMemoryStore(ConversationService conversationService) {
-        return new ConversationChatMemoryStore(conversationService, 20);
+    public ConversationChatMemoryStore langChain4jChatMemoryStore(ConversationService conversationService,
+            @Value("${ops-agent.chat.memory.max-entries:1000}") int capacity,
+            @Value("${ops-agent.chat.memory.ttl:600s}") java.time.Duration ttl,
+            @Value("${ops-agent.chat.turn.timeout:300s}") java.time.Duration turnTimeout) {
+        if (ttl.compareTo(turnTimeout) <= 0) {
+            throw new IllegalArgumentException("记忆过期时间必须大于整轮超时");
+        }
+        return new ConversationChatMemoryStore(conversationService, 20, capacity, ttl, System::nanoTime);
     }
 
     /**
@@ -159,6 +168,12 @@ public class LangChain4jConfig {
                 .chatMemoryProvider(memoryProvider)
                 .tools(tools)
                 .contentRetriever(contentRetriever)
+                .storeRetrievedContentInChatMemory(false)
+                .beforeToolExecution(tool -> chatMemoryStore.getMessages(tool.invocationContext().chatMemoryId()))
+                .chatRequestTransformer((request, memoryId) -> {
+                    chatMemoryStore.getMessages(memoryId);
+                    return request;
+                })
                 .maxToolCallingRoundTrips(8)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
@@ -190,6 +205,12 @@ public class LangChain4jConfig {
                 .chatMemoryProvider(memoryProvider)
                 .tools(tools)
                 .contentRetriever(contentRetriever)
+                .storeRetrievedContentInChatMemory(false)
+                .beforeToolExecution(tool -> chatMemoryStore.getMessages(tool.invocationContext().chatMemoryId()))
+                .chatRequestTransformer((request, memoryId) -> {
+                    chatMemoryStore.getMessages(memoryId);
+                    return request;
+                })
                 .maxToolCallingRoundTrips(8)
                 .toolArgumentsErrorHandler(ToolArgumentsErrorHandler.failInvocation())
                 .toolExecutionErrorHandler(ToolExecutionErrorHandler.failInvocationUnlessVisibleToLlm())
@@ -200,12 +221,13 @@ public class LangChain4jConfig {
      * 注册基于现有混合检索的 LangChain4j RAG 内容检索器。
      *
      * @param hybridRetriever 现有向量、BM25、融合和重排检索服务
+     * @param memoryStore 轮次检索快照仓库
      * @return LangChain4j RAG 内容检索器
      */
     @Bean
     public LangChain4jKnowledgeContentRetriever langChain4jKnowledgeContentRetriever(
-            HybridRetriever hybridRetriever) {
-        return new LangChain4jKnowledgeContentRetriever(hybridRetriever, 5);
+            HybridRetriever hybridRetriever, ConversationChatMemoryStore memoryStore) {
+        return new LangChain4jKnowledgeContentRetriever(hybridRetriever, 5, memoryStore);
     }
 
     /**

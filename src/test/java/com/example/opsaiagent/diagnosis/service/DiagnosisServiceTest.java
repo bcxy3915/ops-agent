@@ -45,6 +45,27 @@ import static org.mockito.Mockito.when;
 class DiagnosisServiceTest {
 
     /**
+     * 验证诊断只检索一次，交给模型的参考正文和最终保存引用一致。
+     * @return 无返回值
+     */
+    @Test
+    void diagnosisContextAndReferencesShareSingleRetrieval() {
+        when(hybridRetriever.retrieve(anyString(), eq(3))).thenReturn(List.of(
+                new Document("本轮唯一诊断参考", Map.of("source", "one-snapshot.md"))));
+        when(structuredOutputGateway.generate(any(ChatRequest.class), eq(DiagnosisResult.class)))
+                .thenAnswer(call -> {
+                    ChatRequest request = call.getArgument(0);
+                    assertThat(request.systemPrompt()).contains("本轮唯一诊断参考");
+                    return sampleResult();
+                });
+        var result = service.diagnose(snapshot);
+        assertThat(result.getStatus()).isEqualTo("SUCCESS");
+        assertThat(result.getReferencesJson()).contains("one-snapshot.md");
+        org.mockito.Mockito.verify(hybridRetriever, org.mockito.Mockito.times(1)).retrieve(anyString(), eq(3));
+        org.mockito.Mockito.verifyNoMoreInteractions(hybridRetriever);
+    }
+
+    /**
      * 验证部门权限范围解析失败时仍持久化失败诊断，不调用模型也不扩大检索范围。
      * @return 无返回值
      */

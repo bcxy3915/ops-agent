@@ -35,7 +35,7 @@ public final class LangChain4jMemoryId {
      */
     public static Identity parse(Object memoryId) {
         String[] parts = String.valueOf(memoryId).split("\\.", -1);
-        if (parts.length != 3) {
+        if (parts.length != 3 && parts.length != 4) {
             throw new IllegalArgumentException("无效的 LangChain4j 记忆标识");
         }
         Base64.Decoder decoder = Base64.getUrlDecoder();

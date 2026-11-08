@@ -6,7 +6,7 @@ import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
 
 /** LangChain4j 运维助手调用接口。 */
-public interface OpsAssistant {
+public interface OpsAssistant extends dev.langchain4j.service.memory.ChatMemoryAccess {
 
     /**
      * 在指定用户会话中执行运维问答。

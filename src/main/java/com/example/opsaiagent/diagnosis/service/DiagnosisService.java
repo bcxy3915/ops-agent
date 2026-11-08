@@ -85,10 +85,23 @@ public class DiagnosisService {
         long start = System.currentTimeMillis();
         try {
             RetrievalScope retrievalScope = diagnosisScope.of(snapshot).retrievalScope();
-            DiagnosisResult result = callLlm(snapshot.getSnapshotJson(), null, retrievalScope);
+            String query = buildSearchQuery(snapshot.getSnapshotJson());
+            List<Document> documents;
+            String context;
+            try {
+                documents = retrieve(query, 3, retrievalScope).stream()
+                        .filter(d -> d != null && StringUtils.hasText(d.getText()))
+                        .map(d -> new Document(d.getId(), d.getText(), d.getMetadata(), d.getScore())).toList();
+                context = formatContext(documents);
+            } catch (Exception retrievalFailure) {
+                log.warn("知识库检索失败，诊断使用快照事实: {}", retrievalFailure.getMessage());
+                documents = List.of();
+                context = "（知识库检索失败，请仅基于快照事实诊断）";
+            }
+            DiagnosisResult result = callLlm(snapshot.getSnapshotJson(), context, retrievalScope);
             applyResult(record, result);
             // P1 溯源：把本次 RAG 检索命中（参考知识/历史案例）落库
-            record.setReferencesJson(buildReferencesJson(snapshot.getSnapshotJson(), retrievalScope));
+            record.setReferencesJson(referencesFromDocuments(documents, query));
         } catch (Exception e) {
             log.warn("LLM 诊断失败 snapshotId={}: {}", snapshot.getId(), e.getMessage());
             record.setStatus("FAILED");
@@ -216,13 +229,7 @@ public class DiagnosisService {
         try {
             String query = buildSearchQuery(snapshotJson);
             List<Document> docs = retrieve(query, 3, scope);
-            if (docs.isEmpty()) {
-                return "（知识库中未检索到相关参考，请仅基于快照事实诊断）";
-            }
-            return docs.stream()
-                    .map(d -> "【来源：" + d.getMetadata().getOrDefault("source", "知识库") + "】\n"
-                            + Objects.requireNonNullElse(d.getText(), ""))
-                    .collect(Collectors.joining("\n\n---\n\n"));
+            return formatContext(docs);
         } catch (Exception e) {
             log.warn("知识库检索失败，降级为无参考: {}", e.getMessage());
             return "（知识库检索失败，请仅基于快照事实诊断）";
@@ -230,31 +237,29 @@ public class DiagnosisService {
     }
 
     /**
-     * 生成诊断引用来源 JSON（P1 规格 4.5 溯源）
-     * 以快照检索词执行 RAG 检索，把命中项转换为结构化引用列表（类型/标题/章节/片段/相关度/层级/版本/作者/被引用次数）。
-     * 检索失败或为空时返回空数组 JSON，不阻断诊断。
+     * 从本次唯一检索结果构造模型上下文。
+     * @param documents 本轮检索快照
+     * @return 模型参考文本
      */
-    protected String buildReferencesJson(String snapshotJson) {
-        return buildReferencesJson(snapshotJson, null);
+    private String formatContext(List<Document> documents) {
+        if (documents.isEmpty()) { return "（知识库中未检索到相关参考，请仅基于快照事实诊断）"; }
+        return documents.stream().map(d -> "【来源：" + d.getMetadata().getOrDefault("source", "知识库")
+                + "】\n" + Objects.requireNonNullElse(d.getText(), ""))
+                .collect(Collectors.joining("\n\n---\n\n"));
     }
 
     /**
-     * 带检索范围生成诊断引用来源 JSON。
+     * 从实际交给模型的文档生成引用，禁止重新检索。
+     * @param documents 本轮模型参考文档
+     * @param query 本轮检索词
+     * @return 引用 JSON；引用元数据处理失败时为空数组
      */
-    protected String buildReferencesJson(String snapshotJson, RetrievalScope scope) {
+    private String referencesFromDocuments(List<Document> documents, String query) {
         try {
-            String query = buildSearchQuery(snapshotJson);
-            List<Document> docs = retrieve(query, 5, scope);
-            if (docs.isEmpty()) {
-                return "[]";
-            }
-            List<DiagnosisReferenceResponse> refs = docs.stream()
-                    .map(doc -> toReference(doc, query))
-                    .filter(Objects::nonNull)
-                    .toList();
-            return objectMapper.writeValueAsString(refs);
-        } catch (Exception e) {
-            log.warn("诊断引用生成失败，降级为空引用: {}", e.getMessage());
+            return objectMapper.writeValueAsString(documents.stream().map(doc -> toReference(doc, query))
+                    .filter(Objects::nonNull).toList());
+        } catch (Exception failure) {
+            log.warn("诊断引用生成失败: {}", failure.getMessage());
             return "[]";
         }
     }

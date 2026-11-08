@@ -1190,6 +1190,18 @@ COMMENT ON COLUMN ops_message.created_at IS '创建时间';
 COMMENT ON COLUMN ops_message.tenant_id IS '所属租户（冗余自会话，便于隔离）';
 
 -- ------------------------------------------------------------
+-- ops_chat_turn：问答轮次租约，防止多实例并发及陈旧请求回写
+-- 问答租约供新环境使用；已有环境执行 migrations/20261108-chat-turn.sql。
+CREATE TABLE IF NOT EXISTS ops_chat_turn (
+    tenant_id VARCHAR(32) NOT NULL,
+    session_id VARCHAR(64) NOT NULL,
+    request_id VARCHAR(36) NOT NULL,
+    conversation_id VARCHAR(36),
+    expires_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (tenant_id, session_id)
+);
+COMMENT ON TABLE ops_chat_turn IS '问答轮次租约；跨实例互斥、请求令牌与会话代次校验';
+
 -- vector_store：知识向量存储表；保存知识分块的向量与元数据
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS vector_store (

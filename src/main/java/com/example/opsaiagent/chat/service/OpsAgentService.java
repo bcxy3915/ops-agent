@@ -1,54 +1,44 @@
 package com.example.opsaiagent.chat.service;
 
-import com.example.opsaiagent.chat.dto.AskResponse;
-import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
+import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
+import com.example.opsaiagent.chat.dto.AskResponse;
+import com.example.opsaiagent.common.error.ErrorCode;
+import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
 import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
 import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
-import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
-import com.example.opsaiagent.security.util.SecurityUtils;
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.chat.response.StreamingHandle;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import dev.langchain4j.service.TokenStream;
-import dev.langchain4j.model.chat.response.StreamingHandle;
-import dev.langchain4j.store.memory.chat.ChatMemoryStore;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
-
-/**
- * RAG服务
- */
+/** 使用持久化轮次令牌、一次检索快照和受控记忆执行问答。 */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OpsAgentService {
-
     private final HybridRetriever hybridRetriever;
-    private final ConversationService conversationService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
     private final KnowledgeHitLogService knowledgeHitLogService;
     private final ObjectMapper objectMapper;
-
     private final OpsAssistant langChain4jOpsAssistant;
     private final OpsStreamingAssistant langChain4jOpsStreamingAssistant;
-    private final ChatMemoryStore langChain4jMemoryStore;
-
-    /**
-     * 统一的系统提示词：告诉模型它的角色、能力、回答要求
-     */
+    private final ConversationChatMemoryStore memoryStore;
+    private final ChatTurnService turns;
     private static final String SYSTEM_PROMPT = """
         你是一个运维智能体。你的职责是帮助用户排查和诊断服务问题。
 
@@ -77,246 +67,225 @@ public class OpsAgentService {
         【参考资料】
         {context}
         """;
-
     /**
-     * 根据问题生成答案（兼容入口：仅返回答案文本）
-     * @param sessionId 会话ID
-     * @param question 问题
-     * @return 答案
+     * 同步问答的纯文本兼容入口。
+     * @param sessionId 会话标识
+     * @param question 用户问题
+     * @return 完整答案
      */
     public String ask(String sessionId, String question) {
         return askWithCitations(sessionId, question).getAnswer();
     }
 
     /**
-     * 根据问题生成答案，并携带结构化引用 citations
-     * @param sessionId 会话ID
-     * @param question 问题
-     * @return 答案 + 引用列表
+     * 同步执行一轮问答，答案落库后才释放跨实例互斥。
+     * @param sessionId 会话标识
+     * @param question 用户问题
+     * @return 答案和本轮相同检索快照的引用
      */
     public AskResponse askWithCitations(String sessionId, String question) {
-        log.info("问题: {}", question);
-
-        String username = SecurityUtils.getCurrentUsername();
-        prepareConversation(sessionId, question, username);
-
-        List<Document> documents = hybridRetriever.retrieve(question, 5);
-
-        // 打印召回的片段
-        documents.forEach(d -> log.info("召回片段[来源={}][距离={}]: {}",
-                d.getMetadata().get("source"),
-                d.getMetadata().get("distance"),
-                Objects.requireNonNull(d.getText()).substring(0, Math.min(150, d.getText().length()))));
-
-        String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
-        String answer = langChain4jOpsAssistant.ask(LangChain4jMemoryId.of(memoryUsername, sessionId),
-                question, SYSTEM_PROMPT.replace("{context}", ""));
-        if (username != null && answer != null && !answer.isEmpty()) {
-            conversationService.saveAssistantMessage(sessionId, answer);
+        try (Round round = begin(sessionId, question)) {
+            List<RetrievalHitResponse> citations = retrieve(round, question);
+            String answer = langChain4jOpsAssistant.ask(round.turn.memoryId(), question,
+                    SYSTEM_PROMPT.replace("{context}", ""));
+            if (answer == null || answer.isBlank()) { throw new IllegalStateException("模型未返回答案"); }
+            round.answer.append(answer);
+            round.finish();
+            return AskResponse.builder().sessionId(sessionId).question(question).answer(answer)
+                    .citations(citations).build();
         }
-        log.info("RAG 问答完成，召回 {} 个片段", documents.size());
-
-        // 5.构建结构化引用
-        List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
-
-        // 6.记录命中流水（对话引用来源 ASK），失败不影响主流程
-        try {
-            knowledgeHitLogService.recordHits(citations, question,
-                    KnowledgeHitLogService.SOURCE_ASK, SecurityUtils.getCurrentUsername());
-        } catch (Exception e) {
-            log.warn("记录问答命中流水失败", e);
-        }
-
-        return AskResponse.builder()
-                .sessionId(sessionId)
-                .question(question)
-                .answer(answer)
-                .citations(citations)
-                .build();
     }
 
     /**
-     * 根据问题生成答案 流式问答：逐字返回答案（兼容入口：仅返回文本流）
-     * @param sessionId 会话ID
-     * @param question 问题
-     * @return 答案
+     * 流式纯文本兼容入口。
+     * @param sessionId 会话标识
+     * @param question 用户问题
+     * @return 答案、引用及结束标记的数据流
      */
     public Flux<String> askStream(String sessionId, String question) {
-        return askStreamWithCitations(sessionId, question)
-                .map(ServerSentEvent::data)
-                .map(String::valueOf);
+        return askStreamWithCitations(sessionId, question).map(ServerSentEvent::data);
     }
 
     /**
-     * 根据问题生成答案，逐字返回答案后推送引用。
-     * SSE 事件：
-     *   - 默认事件（onmessage）：答案 token
-     *   - event=citations, data=引用列表 JSON
-     *   - 最后追加 data=[DONE]
-     * @param sessionId 会话ID
-     * @param question 问题
+     * 每次订阅独立领取轮次，成功依次输出答案、引用和 DONE，失败或取消保存部分答案。
+     * @param sessionId 会话标识
+     * @param question 用户问题
      * @return SSE 事件流
      */
     public Flux<ServerSentEvent<String>> askStreamWithCitations(String sessionId, String question) {
         RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
-        return Flux.defer(() -> {
-            RbacContextSnapshot previous = RbacContextSnapshot.capture();
-            snapshot.restore();
-            try {
-                return doAskStreamWithCitations(sessionId, question);
-            } finally {
-                previous.restore();
-            }
-        });
+        return Flux.defer(() -> withContext(snapshot, () -> Flux.using(
+                () -> begin(sessionId, question),
+                round -> {
+                    List<RetrievalHitResponse> citations = retrieve(round, question);
+                    Flux<String> invalidation = Flux.interval(Duration.ofSeconds(1))
+                            .publishOn(Schedulers.boundedElastic())
+                            .handle((tick, sink) -> {
+                                try { turns.assertActive(round.turn); }
+                                catch (Exception failure) { sink.error(failure); }
+                            });
+                    return tokens(round, question)
+                            .takeUntilOther(invalidation)
+                            .takeUntilOther(Mono.delay(turns.timeout()).flatMap(tick ->
+                                    Mono.error(new java.util.concurrent.TimeoutException("本轮问答超过最长时间"))))
+                            .doOnNext(round.answer::append)
+                            .map(token -> ServerSentEvent.builder(token).build())
+                            .concatWith(Flux.defer(() -> withContext(snapshot, () -> {
+                                round.finish();
+                                return Flux.just(ServerSentEvent.builder(toJson(citations)).event("citations").build(),
+                                        ServerSentEvent.builder("[DONE]").build());
+                            })));
+                },
+                round -> withContext(snapshot, () -> { round.close(); return null; }), true)));
     }
 
     /**
-     * 在恢复的请求上下文中构建 SSE 流。
-     * @param sessionId 会话 ID
+     * 验证输入、领取跨实例租约并在当前问题落库前加载数据库历史。
+     * @param sessionId 会话标识
      * @param question 用户问题
-     * @return SSE 事件流
+     * @return 需要关闭的轮次资源
      */
-    private Flux<ServerSentEvent<String>> doAskStreamWithCitations(String sessionId, String question) {
-        // 1. 拿当前用户名
-        String username = SecurityUtils.getCurrentUsername();
-
-        // 2. 确保会话存在（同步）
-        prepareConversation(sessionId, question, username);
-
-        // 3.RAG 检索
-        List<Document> documents = hybridRetriever.retrieve(question, 5);
-
-        List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(documents, question, 5);
-
-        // 3.1 记录命中流水（对话引用来源 ASK），失败不影响主流程
+    private Round begin(String sessionId, String question) {
+        if (question == null || question.isBlank() || sessionId == null || sessionId.isBlank() || sessionId.length() > 64) {
+            throw new BusinessException(ErrorCode.INVALID_PARAMETER, "问题不能为空，会话 ID 必须为 1 至 64 个字符");
+        }
+        Round round = new Round(turns.begin(sessionId, question));
         try {
-            knowledgeHitLogService.recordHits(citations, question, KnowledgeHitLogService.SOURCE_ASK, username);
-        } catch (Exception e) {
-            log.warn("记录流式问答命中流水失败", e);
+            memoryStore.openTurn(round.turn.memoryId(), () -> turns.assertActive(round.turn));
+            turns.saveQuestion(round.turn, question);
+            return round;
+        } catch (RuntimeException failure) {
+            round.close();
+            throw failure;
         }
-        String citationsJson = toJson(citations);
-
-        return streamWithLangChain4j(sessionId, question, username, citationsJson,
-                SYSTEM_PROMPT.replace("{context}", ""));
     }
 
     /**
-     * 校验会话归属并回填历史，再保存当前问题；失败时终止问答，避免越权或历史丢失。
-     * @param sessionId 会话 ID
-     * @param question 当前问题
-     * @param username 当前登录用户名，匿名调用不持久化
-     * @return 无返回值
-     */
-    private void prepareConversation(String sessionId, String question, String username) {
-        if (question == null || question.isBlank() || sessionId == null
-                || sessionId.isBlank() || sessionId.length() > 64) {
-            throw new com.example.opsaiagent.exception.BusinessException(
-                    com.example.opsaiagent.common.error.ErrorCode.INVALID_PARAMETER,
-                    "问题不能为空，会话 ID 必须为 1 至 64 个字符");
-        }
-        if (username == null) {
-            return;
-        }
-        conversationService.ensureConversation(sessionId, username, question);
-        langChain4jMemoryStore.getMessages(LangChain4jMemoryId.of(username, sessionId));
-        conversationService.saveUserMessage(sessionId, question);
-    }
-
-    /**
-     * 使用 LangChain4j 流式 Agent 生成 SSE 事件。
-     *
-     * @param sessionId 会话 ID
+     * 检索一次并绑定模型快照，引用和命中记录从同一份文档生成。
+     * @param round 当前轮次
      * @param question 用户问题
-     * @param username 当前用户名
-     * @param citationsJson 引用 JSON
-     * @param systemPrompt 系统提示词
-     * @return SSE 事件流
+     * @return 本轮引用
      */
-    private Flux<ServerSentEvent<String>> streamWithLangChain4j(String sessionId, String question,
-                                                                  String username, String citationsJson,
-                                                                  String systemPrompt) {
-        RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
-        String memoryUsername = username == null ? "anonymous-" + UUID.randomUUID() : username;
-        StringBuilder answerBuffer = new StringBuilder();
-        Flux<String> tokens = Flux.create(sink -> {
-            AtomicReference<StreamingHandle> handle = new AtomicReference<>();
-            sink.onCancel(() -> {
-                StreamingHandle current = handle.get();
-                if (current != null) {
-                    current.cancel();
-                }
-            });
-            RbacContextSnapshot previous = RbacContextSnapshot.capture();
-            snapshot.restore();
-            try {
-                TokenStream stream = langChain4jOpsStreamingAssistant.askStream(
-                        LangChain4jMemoryId.of(memoryUsername, sessionId), question, systemPrompt);
-                stream.onPartialResponseWithContext((response, context) -> {
-                            handle.set(context.streamingHandle());
-                            if (sink.isCancelled()) {
-                                context.streamingHandle().cancel();
-                            } else {
-                                sink.next(response.text());
-                            }
-                        })
-                        .onPartialToolCallWithContext((tool, context) -> {
-                            handle.set(context.streamingHandle());
-                            if (sink.isCancelled()) {
-                                context.streamingHandle().cancel();
-                            }
-                        })
-                        .beforeToolExecution(tool -> {
-                            if (sink.isCancelled()) {
-                                throw new java.util.concurrent.CancellationException("客户端已取消问答");
-                            }
-                        })
-                        .onCompleteResponse(response -> sink.complete())
-                        .onError(sink::error)
-                        .start();
-            } catch (Exception e) {
-                sink.error(e);
-            } finally {
-                previous.restore();
-            }
-        });
-        Flux<ServerSentEvent<String>> tokenEvents = tokens
-                .doOnNext(answerBuffer::append)
-                .map(token -> ServerSentEvent.builder(token).build());
-        Flux<ServerSentEvent<String>> tailEvents = Flux.just(
-                ServerSentEvent.builder("").event("citations").data(citationsJson).build(),
-                ServerSentEvent.builder("[DONE]").build());
-        return Flux.concat(tokenEvents, tailEvents)
-                .publishOn(Schedulers.boundedElastic(), true, 256)
-                .doFinally(signal -> {
-                    String answer = answerBuffer.toString();
-                    if (username != null && !answer.isEmpty()) {
-                        try {
-                            RbacContextSnapshot previous = RbacContextSnapshot.capture();
-                            try {
-                                snapshot.restore();
-                                conversationService.saveAssistantMessage(sessionId, answer);
-                            } finally {
-                                previous.restore();
-                            }
-                        } catch (Exception e) {
-                            log.error("保存 AI 消息失败", e);
-                        }
-                    }
-                });
+    private List<RetrievalHitResponse> retrieve(Round round, String question) {
+        memoryStore.bindDocuments(round.turn.memoryId(), hybridRetriever.retrieve(question, 5));
+        List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(
+                memoryStore.documents(round.turn.memoryId()), question, 5);
+        try {
+            knowledgeHitLogService.recordHits(citations, question, KnowledgeHitLogService.SOURCE_ASK, round.turn.username());
+        } catch (Exception failure) { log.warn("记录问答命中流水失败", failure); }
+        return citations;
     }
 
     /**
-     * 引用列表转 JSON 字符串
+     * 将 LangChain4j 回调转换为可取消的 token 流，删除或过期后停止输出与后续工具。
+     * @param round 当前轮次
+     * @param question 用户问题
+     * @return 纯答案 token
+     */
+    private Flux<String> tokens(Round round, String question) {
+        RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
+        return Flux.create(sink -> {
+            sink.onDispose(round::cancelModel);
+            try {
+                withContext(snapshot, () -> {
+                    var stream = langChain4jOpsStreamingAssistant.askStream(round.turn.memoryId(), question,
+                            SYSTEM_PROMPT.replace("{context}", ""));
+                    stream.onPartialResponseWithContext((response, context) -> {
+                                round.streamingHandle.set(context.streamingHandle());
+                                if (sink.isCancelled()) { round.cancelModel(); return; }
+                                try {
+                                    turns.assertActive(round.turn);
+                                    sink.next(response.text());
+                                } catch (Exception failure) { sink.error(failure); }
+                            })
+                            .onPartialToolCallWithContext((tool, context) -> {
+                                round.streamingHandle.set(context.streamingHandle());
+                                if (sink.isCancelled()) { round.cancelModel(); }
+                            })
+                            .beforeToolExecution(tool -> {
+                                if (sink.isCancelled()) { throw new java.util.concurrent.CancellationException("客户端已取消问答"); }
+                                turns.assertActive(round.turn);
+                            })
+                            .onCompleteResponse(response -> sink.complete()).onError(sink::error).start();
+                    return null;
+                });
+            } catch (Exception failure) { sink.error(failure); }
+        });
+    }
+
+    /**
+     * 序列化引用，失败时中止响应而不伪造成功引用。
      * @param citations 引用列表
-     * @return 引用 JSON，序列化失败时返回空数组
+     * @return 引用 JSON
      */
     private String toJson(List<RetrievalHitResponse> citations) {
-        try {
-            return objectMapper.writeValueAsString(citations);
-        } catch (JsonProcessingException e) {
-            log.warn("citations 序列化失败", e);
-            return "[]";
+        try { return objectMapper.writeValueAsString(citations); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw new IllegalStateException("引用序列化失败", failure);
         }
     }
 
+    /**
+     * 在请求上下文中执行任务，结束后还原线程原状态。
+     * @param snapshot 请求权限快照
+     * @param action 待执行任务
+     * @param <T> 返回类型
+     * @return 任务结果
+     */
+    private static <T> T withContext(RbacContextSnapshot snapshot, java.util.function.Supplier<T> action) {
+        var previous = RbacContextSnapshot.capture();
+        snapshot.restore();
+        try { return action.get(); }
+        finally { previous.restore(); }
+    }
+
+    /** 单次订阅持有的资源，终态只落库一次，关闭后移除两层框架记忆及项目缓存。 */
+    private final class Round implements AutoCloseable {
+        private final ChatTurn turn;
+        private final StringBuffer answer = new StringBuffer();
+        private final AtomicBoolean finished = new AtomicBoolean();
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicReference<StreamingHandle> streamingHandle = new AtomicReference<>();
+        /**
+         * 绑定本轮持久化令牌。
+         * @param turn 本轮令牌
+         * @return 无返回值
+         */
+        private Round(ChatTurn turn) { this.turn = turn; }
+        /**
+         * 保存答案并释放本轮租约，失败时不发送成功尾事件。
+         * @return 无返回值
+         */
+        private void finish() {
+            if (finished.compareAndSet(false, true)) { turns.finish(turn, answer.toString()); }
+        }
+        /**
+         * 原子取出并取消当前模型句柄，终态清理不依赖 Reactor 上游的取消时序。
+         * @return 无返回值
+         */
+        private void cancelModel() {
+            StreamingHandle handle = streamingHandle.getAndSet(null);
+            if (handle != null) { handle.cancel(); }
+        }
+        /**
+         * 错误或取消时尝试保存部分答案，并始终清理所有轮次资源。
+         * @return 无返回值
+         */
+        @Override
+        public void close() {
+            if (!closed.compareAndSet(false, true)) { return; }
+            try { cancelModel(); finish(); }
+            catch (Exception failure) { log.warn("轮次结束时答案未保存: {}", failure.getMessage()); }
+            finally {
+                try { langChain4jOpsAssistant.evictChatMemory(turn.memoryId()); }
+                finally {
+                    try { langChain4jOpsStreamingAssistant.evictChatMemory(turn.memoryId()); }
+                    finally {
+                        memoryStore.closeTurn(turn.memoryId());
+                        turns.release(turn);
+                    }
+                }
+            }
+        }
+    }
 }

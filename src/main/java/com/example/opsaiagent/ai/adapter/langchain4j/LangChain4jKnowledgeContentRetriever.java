@@ -18,6 +18,7 @@ public class LangChain4jKnowledgeContentRetriever implements ContentRetriever {
 
     private final HybridRetriever hybridRetriever;
     private final int topK;
+    private final ConversationChatMemoryStore memoryStore;
 
     /**
      * 创建 LangChain4j 知识内容检索器。
@@ -27,8 +28,21 @@ public class LangChain4jKnowledgeContentRetriever implements ContentRetriever {
      * @return 无返回值
      */
     public LangChain4jKnowledgeContentRetriever(HybridRetriever hybridRetriever, int topK) {
+        this(hybridRetriever, topK, null);
+    }
+
+    /**
+     * 创建支持轮次快照复用的检索适配器。
+     * @param hybridRetriever 现有混合检索服务
+     * @param topK 检索数量
+     * @param memoryStore 轮次记忆与检索快照仓库
+     * @return 无返回值
+     */
+    public LangChain4jKnowledgeContentRetriever(HybridRetriever hybridRetriever, int topK,
+                                                ConversationChatMemoryStore memoryStore) {
         this.hybridRetriever = hybridRetriever;
         this.topK = topK;
+        this.memoryStore = memoryStore;
     }
 
     /**
@@ -41,6 +55,10 @@ public class LangChain4jKnowledgeContentRetriever implements ContentRetriever {
     public List<Content> retrieve(Query query) {
         if (query == null || query.text() == null || query.text().isBlank()) {
             return List.of();
+        }
+        Object memoryId = query.metadata() == null ? null : query.metadata().chatMemoryId();
+        if (memoryStore != null && memoryId != null && memoryId.toString().split("\\.", -1).length == 4) {
+            return toContents(memoryStore.documents(memoryId));
         }
         return toContents(retrieveDocuments(query.text()));
     }

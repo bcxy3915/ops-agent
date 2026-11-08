@@ -94,11 +94,14 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 工具调用沿用服务注册与现有工具接口约定，避免在业务代码中硬编码服务地址。
 - 修改 Prompt、工具定义、检索范围、融合与重排序逻辑时，检查引用来源、租户隔离和失败降级行为。
 - 保持同步与流式输出在授权、错误处理和会话归属上的一致性。
-- 聊天记忆以 `ops_message` 为唯一事实来源：内存 `ChatMemory`（`MessageWindowChatMemory`，窗口 20 条）只作缓存。同步和流式调用均须先校验会话归属，再通过 `ConversationChatMemoryStore.getMessages()` 预加载历史，且必须在 `saveUserMessage` 之前执行，禁止把当前问题重复注入记忆。准备会话或保存用户消息失败时终止问答，不吞掉权限或持久化异常。
+- 聊天记忆以 `ops_message` 为唯一事实来源：内存 `ChatMemory`（`MessageWindowChatMemory`，窗口 20 条）只作缓存。同步和流式问答均通过 `ChatTurnService.begin()` 领取数据库租约并校验归属，再以 `ConversationChatMemoryStore.openTurn()` 从数据库刷新历史，必须先于 `saveQuestion()`，禁止把当前问题重复注入记忆。准备会话或保存用户消息失败时终止问答，不吞掉权限或持久化异常。
 - 会话与消息查询、写入必须限定可信租户；缺少租户上下文时拒绝访问。记忆标识包含租户、用户名和 sessionId，缓存命中也校验租户上下文，不能只用用户名隔离跨租户同名用户。
-- 删除会话通过 ConversationDeletedEvent 在事务提交后清理本进程记忆，回滚不清缓存。该机制不覆盖其他实例或仍在进行的问答，不能据此宣称已实现分布式记忆失效或并发取消。
+- 同一租户、会话的同步与流式请求共用 `ops_chat_turn` 租约，重叠请求返回 `CHAT_TURN_BUSY`。答案在释放租约前同步落库；保存时按租约、会话顺序加锁，并校验请求令牌、租约期限、会话实体 ID 和用户名。删除使用相同锁顺序，防止删除重建及过期接管后的旧请求回写。
+- 删除通过 `ConversationDeletedEvent` 在提交后清理本进程缓存，回滚不清缓存；其他实例通过数据库令牌校验拒绝读取旧轮次和保存答案，流式请求每秒检查失效。已经发出的远端模型请求只能尽力取消，不能撤回已输出的 token。
+- 生产记忆按请求令牌隔离，每轮重新回填，结束清理同步/流式框架记忆和项目缓存。容量与过期由 `ops-agent.chat.memory.max-entries/ttl` 控制；满额时优先淘汰非活动项，全部活动时拒绝新请求。过期惰性清理，晚到回调不得复活已关闭轮次。
+- 问答先检索一次并绑定轮次快照，LangChain4j RAG、引用与命中记录复用同组文档；诊断的模型上下文和引用也复用同组结果，禁止单独为引用再检索。已有数据库升级前手动执行 `init-scripts/migrations/20261108-chat-turn.sql`。
 - 回填历史按自增 `id` 正序排列，不按 `createdAt`：助手消息是异步落库的，时间戳可能与用户消息乱序。
-- 禁止只依赖进程内记忆实现多轮能力；多实例部署下靠 DB 回填保持一致，如需跨实例强一致再演进为共享 `ChatMemoryRepository`。
+- 禁止只依赖进程内记忆实现多轮能力；多实例部署下使用数据库租约、轮次代次校验和每轮 DB 回填，不依赖节点间缓存广播。
 - 不伪造模型响应、检索命中、外部指标或诊断结论；测试中的模拟数据应明确为测试夹具。
 - 默认使用 Mock 验证外部模型和通知调用，避免测试产生真实费用或向外部发送通知。
 
@@ -257,7 +260,7 @@ docker compose up -d
 
 - `migration/langchain4j` 按 v4 周计划推进；实际进度与验证边界见 `docs/migration/langchain4j/01-baseline-and-poc.md`。
 - Maven profile `langchain4j-poc` 只引入 `src/poc/java` 兼容测试；生产固定使用 LangChain4j，`ops-agent.ai.provider` 已移除，历史值不再选择框架。
-- LangChain4j 同步与流式 Agent 共用用户隔离的记忆仓库、混合检索与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须预加载 LangChain4j 记忆，避免冷启动重复回填当前问题。
+- LangChain4j 同步与流式 Agent 共用按租户、用户、会话及请求令牌隔离的记忆仓库、检索快照与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须刷新本轮 LangChain4j 记忆，避免重复回填当前问题。并发、失效、缓存治理及升级脚本见 `docs/migration/langchain4j/04-chat-consistency-and-retrieval.md`。
 - `chat/config/LangChain4jConfig` 固定注册同步/流式模型、诊断网关、记忆和只读 Agent；所有依赖强制注入，不因 Bean 缺失回退到其他框架。`knowledge/config/LangChain4jEmbeddingConfig` 固定注册向量模型与 JDBC 存储。Spring AI 的 starter、BOM、适配层、记忆配置与工具注解均已删除，测试也不依赖旧 SDK。配置统一为 `ops-agent.ai.*`，其中 `spring.ai.*` 仅作旧本地配置的取值兼容，不代表加载旧框架；不要输出或自动改写本地密钥。
 - 向量读写生产入口统一为 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`，不再自动建表或索引；新环境使用 `init-scripts/schema.sql`，已有环境不得自动重建。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；迁移前解析、切分和格式化输出存入 `src/test/resources/migration/ingest-legacy-golden.json` 固定夹具，已删除框架文档转换器。Markdown 解析直接使用 CommonMark；token 兜底直接使用 JTokkit；JDBC 向量写入使用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，必须保持存量向量输入格式。CommonMark/JTokkit/PDFBox 均为显式通用库依赖。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
 - 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。

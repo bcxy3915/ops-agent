@@ -18,6 +18,75 @@ import static org.mockito.Mockito.when;
 class ConversationChatMemoryStoreTest {
 
     /**
+     * 验证跨实例下一轮总从数据库刷新，关闭后的旧回调不能复活窗口。
+     * @return 无返回值
+     */
+    @Test
+    void eachTurnRefreshesHistoryAndRejectsLateCallbacks() {
+        var conversations = mock(ConversationService.class);
+        when(conversations.loadRecentMessages("s", "alice", 20)).thenReturn(
+                List.of(message("USER", "第一轮")), List.of(message("ASSISTANT", "其他实例的新答案")));
+        var store = new ConversationChatMemoryStore(conversations, 20);
+        String base = LangChain4jMemoryId.of("alice", "s");
+        store.openTurn(base + ".one", () -> { });
+        assertThat(store.getMessages(base + ".one")).containsExactly(new UserMessage("第一轮"));
+        store.closeTurn(base + ".one");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.updateMessages(base + ".one", List.of()))
+                .isInstanceOf(IllegalStateException.class);
+        store.openTurn(base + ".two", () -> { });
+        assertThat(store.getMessages(base + ".two")).containsExactly(
+                dev.langchain4j.data.message.AiMessage.from("其他实例的新答案"));
+        org.mockito.Mockito.verify(conversations, org.mockito.Mockito.times(2)).loadRecentMessages("s", "alice", 20);
+    }
+
+    /**
+     * 验证缓存采用容量限制和空闲过期，活动项满额时拒绝新轮次且不会淘汰正在使用的窗口。
+     * @return 无返回值
+     */
+    @Test
+    void boundedCacheExpiresAndProtectsActiveTurns() {
+        var time = new java.util.concurrent.atomic.AtomicLong();
+        var store = new ConversationChatMemoryStore(mock(ConversationService.class), 20, 2,
+                java.time.Duration.ofSeconds(10), time::get);
+        String a = LangChain4jMemoryId.of("alice", "a");
+        String b = LangChain4jMemoryId.of("alice", "b");
+        String c = LangChain4jMemoryId.of("alice", "c");
+        store.openTurn(a + ".one", () -> { });
+        store.updateMessages(b, List.of(new UserMessage("可淘汰缓存")));
+        store.openTurn(c + ".one", () -> { });
+        assertThat(store.size()).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.openTurn(b + ".one", () -> { }))
+                .hasMessageContaining("容量已满");
+        assertThat(store.getMessages(a + ".one")).isEmpty();
+        time.set(java.time.Duration.ofSeconds(10).toNanos());
+        assertThat(store.size()).isZero();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.getMessages(a + ".one"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    /**
+     * 验证远端删除令牌失效立即阻止缓存读取，并隔离检索结果的元数据修改。
+     * @return 无返回值
+     */
+    @Test
+    void invalidatedTurnCannotReadMemoryOrSnapshot() {
+        var active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var store = new ConversationChatMemoryStore(mock(ConversationService.class), 20);
+        String id = LangChain4jMemoryId.of("alice", "s") + ".request";
+        store.openTurn(id, () -> {
+            if (!active.get()) { throw new IllegalStateException("远端已删除"); }
+        });
+        var original = new com.example.opsaiagent.knowledge.model.Document("正文", java.util.Map.of("source", "原始来源"));
+        store.bindDocuments(id, List.of(original));
+        original.getMetadata().put("source", "被修改");
+        store.documents(id).getFirst().getMetadata().put("source", "调用方修改");
+        assertThat(store.documents(id).getFirst().getMetadata()).containsEntry("source", "原始来源");
+        active.set(false);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.getMessages(id)).hasMessage("远端已删除");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.documents(id)).hasMessage("远端已删除");
+    }
+
+    /**
      * 验证同名用户和同会话 ID 在两个租户下拥有独立缓存，错误上下文不能读缓存。
      * @return 无返回值
      */

@@ -45,7 +45,9 @@ public enum ErrorCode {
     TENANT_REQUIRED(1036, "缺少租户上下文"),
     KNOWLEDGE_REVIEW_INVALID(1037, "知识审核状态不合法"),
     KNOWLEDGE_OPERATION_FORBIDDEN(1038, "无权操作该知识文档"),
-    NOT_SUPPORTED_FILE_TYPE(1039, "不支持的文件类型");
+    NOT_SUPPORTED_FILE_TYPE(1039, "不支持的文件类型"),
+    CHAT_TURN_BUSY(1040, "会话正在回答"),
+    CHAT_TURN_EXPIRED(1041, "问答轮次已失效");
 
     private final int code;
     private final String message;

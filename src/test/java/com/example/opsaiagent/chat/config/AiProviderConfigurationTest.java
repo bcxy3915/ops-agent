@@ -23,6 +23,8 @@ class AiProviderConfigurationTest {
                     com.example.opsaiagent.chat.service.OpsAgentService.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(ConversationService.class, () -> mock(ConversationService.class))
+            .withBean(com.example.opsaiagent.chat.service.ChatTurnService.class,
+                    () -> mock(com.example.opsaiagent.chat.service.ChatTurnService.class))
             .withBean(KnowledgeRetrievalService.class, () -> mock(KnowledgeRetrievalService.class))
             .withBean(KnowledgeHitLogService.class, () -> mock(KnowledgeHitLogService.class))
             .withBean(HybridRetriever.class, () -> mock(HybridRetriever.class))

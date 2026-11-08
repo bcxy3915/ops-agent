@@ -51,6 +51,15 @@ mybatis-plus:
 
 
 ops-agent:
+  chat:
+    turn:
+      # 租约必须大于整轮超时；实例崩溃后到期可由新请求接管
+      lease-seconds: 360
+      timeout: 300s
+    memory:
+      # 活动项满额时拒绝新请求，避免淘汰仍在使用的工具消息
+      max-entries: 1000
+      ttl: 600s
   # 统一使用 LangChain4j；旧本地配置键暂作取值兼容，不再加载旧框架
   ai:
     base-url: ${OPS_AI_BASE_URL:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}

@@ -7,7 +7,7 @@ import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
 
 /** LangChain4j 流式运维助手调用接口。 */
-public interface OpsStreamingAssistant {
+public interface OpsStreamingAssistant extends dev.langchain4j.service.memory.ChatMemoryAccess {
 
     /**
      * 在指定用户会话中执行流式运维问答。

@@ -34,6 +34,7 @@ public class ConversationService {
     private final MessageMapper messageMapper;
     private final ObjectMapper objectMapper;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     /**
      * 确保会话存在（首次提问时创建）
@@ -289,6 +290,10 @@ public class ConversationService {
      */
     @Transactional
     public boolean deleteConversation(String sessionId, String username) {
+        jdbcTemplate.queryForList("SELECT request_id FROM ops_chat_turn WHERE tenant_id=? AND session_id=? FOR UPDATE",
+                currentTenant(), sessionId);
+        jdbcTemplate.queryForList("SELECT id FROM ops_conversation WHERE tenant_id=? AND session_id=? FOR UPDATE",
+                currentTenant(), sessionId);
         ConversationEntity conv = findBySessionId(sessionId);
         if (conv == null || !conv.getUsername().equals(username)) {
             return false;
@@ -298,6 +303,8 @@ public class ConversationService {
         messageMapper.delete(new LambdaQueryWrapper<MessageEntity>()
                 .eq(MessageEntity::getTenantId, currentTenant())
                 .eq(MessageEntity::getSessionId, sessionId));
+        jdbcTemplate.update("DELETE FROM ops_chat_turn WHERE tenant_id=? AND session_id=? AND conversation_id=?",
+                currentTenant(), sessionId, conv.getId());
         eventPublisher.publishEvent(new com.example.opsaiagent.chat.event.ConversationDeletedEvent(
                 com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of(username, sessionId)));
         log.info("删除会话: sessionId={}, username={}", sessionId, username);
