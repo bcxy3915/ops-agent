@@ -5,6 +5,8 @@ import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.StreamingChatGateway;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import com.example.opsaiagent.chat.service.ConversationService;
+import com.example.opsaiagent.knowledge.service.KnowledgeHitLogService;
+import com.example.opsaiagent.knowledge.service.KnowledgeRetrievalService;
 import com.example.opsaiagent.retrieval.HybridRetriever;
 import com.example.opsaiagent.tools.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,9 +19,12 @@ import static org.mockito.Mockito.mock;
 /** 验证默认配置即可组装唯一的 LangChain4j 生产链路。 */
 class AiProviderConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(LangChain4jConfig.class)
+            .withUserConfiguration(LangChain4jConfig.class,
+                    com.example.opsaiagent.chat.service.OpsAgentService.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(ConversationService.class, () -> mock(ConversationService.class))
+            .withBean(KnowledgeRetrievalService.class, () -> mock(KnowledgeRetrievalService.class))
+            .withBean(KnowledgeHitLogService.class, () -> mock(KnowledgeHitLogService.class))
             .withBean(HybridRetriever.class, () -> mock(HybridRetriever.class))
             .withBean(HealthCheckTools.class, () -> mock(HealthCheckTools.class))
             .withBean(MetricQueryTools.class, () -> mock(MetricQueryTools.class))
@@ -54,8 +59,44 @@ class AiProviderConfigurationTest {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(OpsAssistant.class);
             assertThat(context).hasSingleBean(OpsStreamingAssistant.class);
+            assertThat(context).hasSingleBean(com.example.opsaiagent.chat.service.OpsAgentService.class);
             assertThat(context).hasSingleBean(dev.langchain4j.store.memory.chat.ChatMemoryStore.class);
         });
+    }
+
+    /**
+     * 验证同步与流式模型使用相同的项目模型及温度配置。
+     * @return 无返回值
+     */
+    @Test
+    void syncAndStreamShareModelAndTemperature() {
+        runner.withPropertyValues("ops-agent.ai.model=audit-model", "ops-agent.ai.temperature=0.25")
+                .run(context -> {
+                    var sync = context.getBean(dev.langchain4j.model.openai.OpenAiChatModel.class)
+                            .defaultRequestParameters();
+                    var stream = context.getBean(dev.langchain4j.model.openai.OpenAiStreamingChatModel.class)
+                            .defaultRequestParameters();
+                    assertThat(sync.modelName()).isEqualTo("audit-model");
+                    assertThat(stream.modelName()).isEqualTo(sync.modelName());
+                    assertThat(sync.temperature()).isEqualTo(0.25);
+                    assertThat(stream.temperature()).isEqualTo(sync.temperature());
+                });
+    }
+
+    /**
+     * 验证历史本地配置的模型名和温度在未配置项目项时继续生效。
+     * @return 无返回值
+     */
+    @Test
+    void legacyLocalModelAndTemperatureRemainCompatible() {
+        runner.withPropertyValues("spring.ai.openai.chat.model=legacy-model",
+                        "spring.ai.openai.chat.temperature=0.15")
+                .run(context -> {
+                    assertThat(context.getBean(dev.langchain4j.model.openai.OpenAiChatModel.class)
+                            .defaultRequestParameters().modelName()).isEqualTo("legacy-model");
+                    assertThat(context.getBean(dev.langchain4j.model.openai.OpenAiStreamingChatModel.class)
+                            .defaultRequestParameters().temperature()).isEqualTo(0.15);
+                });
     }
 
     /**

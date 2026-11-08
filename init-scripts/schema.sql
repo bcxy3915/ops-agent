@@ -837,8 +837,8 @@ WHERE trust_status = 'VERIFIED'
   AND publish_status = 'UNPUBLISHED';
 
 -- 存量向量回填（幂等）：历史向量缺少 reviewStatus 时按文档当前审核状态回填，
--- 避免检索新增 reviewStatus 过滤后丢失召回。vector_store 由 Spring AI 启动时创建，
--- 首次初始化时可能尚不存在，故先判断表是否存在。
+-- 避免检索新增 reviewStatus 过滤后丢失召回。历史环境的 vector_store 曾由框架启动时创建，
+-- 首次初始化执行到此处时表可能尚不存在；当前由下方 DDL 创建，不依赖应用自动建表。
 DO $$
 BEGIN
     IF to_regclass('vector_store') IS NOT NULL THEN
@@ -1190,7 +1190,7 @@ COMMENT ON COLUMN ops_message.created_at IS '创建时间';
 COMMENT ON COLUMN ops_message.tenant_id IS '所属租户（冗余自会话，便于隔离）';
 
 -- ------------------------------------------------------------
--- vector_store：Spring AI 向量存储表；保存知识分块的向量与元数据
+-- vector_store：知识向量存储表；保存知识分块的向量与元数据
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS vector_store (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -1202,7 +1202,7 @@ CREATE TABLE IF NOT EXISTS vector_store (
 
 CREATE INDEX IF NOT EXISTS spring_ai_vector_index ON vector_store USING hnsw (embedding vector_cosine_ops);
 
-COMMENT ON TABLE vector_store IS 'Spring AI 向量存储表；保存知识分块的向量与元数据';
+COMMENT ON TABLE vector_store IS '知识向量存储表；保存知识分块的向量与元数据';
 COMMENT ON COLUMN vector_store.id IS '主键 ID';
 COMMENT ON COLUMN vector_store.content IS '文本内容';
 COMMENT ON COLUMN vector_store.metadata IS '元数据（JSON）';

@@ -24,6 +24,8 @@
 
 聊天和向量使用独立服务地址与密钥。仍使用原 embedding 模型、1024 维与默认格式化规则；更换模型或维度必须另行评估已有向量兼容性。模型维度与存储配置维度启动校验不等于真实数据库列维度检查。
 
+遗漏审计已补齐流式模型的 temperature 参数，同步与流式使用相同的模型、温度与超时配置。配置类自身的默认模型与 application.yml 统一为 DeepSeek；历史 chat.model、chat.temperature 与 chat.timeout 继续作为后备值。配置装配测试同时覆盖 OpsAgentService 入口，避免只验证底层模型 Bean。
+
 存储仅支持 public.vector_store 和 COSINE_DISTANCE。新环境通过 init-scripts/schema.sql 创建表和索引，现有环境直接复用，不自动创建或重建。
 
 ## 3. 尚需实际环境验收

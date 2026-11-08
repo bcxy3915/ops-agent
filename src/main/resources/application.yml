@@ -56,8 +56,8 @@ ops-agent:
     base-url: ${OPS_AI_BASE_URL:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}
     api-key: ${OPS_AI_API_KEY:${spring.ai.openai.api-key:${AI_API_KEY:}}}
     model: ${OPS_AI_MODEL:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}
-    timeout: ${OPS_AI_TIMEOUT:60s}
-    temperature: ${OPS_AI_TEMPERATURE:0.7}
+    timeout: ${OPS_AI_TIMEOUT:${spring.ai.openai.chat.timeout:60s}}
+    temperature: ${OPS_AI_TEMPERATURE:${spring.ai.openai.chat.temperature:0.7}}
     # 知识向量模型使用 LangChain4j，与聊天模型配置独立；保持存量模型与维度一致
     embedding:
       base-url: ${OPS_EMBEDDING_BASE_URL:${spring.ai.openai.embedding.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}}

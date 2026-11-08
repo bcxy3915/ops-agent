@@ -34,8 +34,6 @@ import org.springframework.boot.convert.DurationStyle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
-
 /** LangChain4j 生产模型配置。 */
 @Configuration
 public class LangChain4jConfig {
@@ -52,11 +50,11 @@ public class LangChain4jConfig {
      */
     @Bean
     public ChatModel langChain4jChatModel(
-            @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.openai.com/v1}}") String baseUrl,
-            @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:}}") String apiKey,
-            @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:gpt-4o-mini}}") String modelName,
-            @Value("${ops-agent.ai.timeout:60s}") String timeout,
-            @Value("${ops-agent.ai.temperature:0.7}") double temperature) {
+            @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}") String baseUrl,
+            @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:${AI_API_KEY:}}}") String apiKey,
+            @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}") String modelName,
+            @Value("${ops-agent.ai.timeout:${spring.ai.openai.chat.timeout:60s}}") String timeout,
+            @Value("${ops-agent.ai.temperature:${spring.ai.openai.chat.temperature:0.7}}") double temperature) {
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
@@ -96,19 +94,22 @@ public class LangChain4jConfig {
      * @param apiKey 模型服务密钥
      * @param modelName 模型名称
      * @param timeout 超时时间
+     * @param temperature 与同步模型一致的采样温度
      * @return LangChain4j 流式聊天模型
      */
     @Bean
     public OpenAiStreamingChatModel langChain4jStreamingChatModel(
-            @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.openai.com/v1}}") String baseUrl,
-            @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:}}") String apiKey,
-            @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:gpt-4o-mini}}") String modelName,
-            @Value("${ops-agent.ai.timeout:60s}") String timeout) {
+            @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}") String baseUrl,
+            @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:${AI_API_KEY:}}}") String apiKey,
+            @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}") String modelName,
+            @Value("${ops-agent.ai.timeout:${spring.ai.openai.chat.timeout:60s}}") String timeout,
+            @Value("${ops-agent.ai.temperature:${spring.ai.openai.chat.temperature:0.7}}") double temperature) {
         return OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
                 .modelName(modelName)
                 .timeout(DurationStyle.detectAndParse(timeout))
+                .temperature(temperature)
                 .build();
     }
 

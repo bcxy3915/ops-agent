@@ -372,3 +372,11 @@ LangChain4jConfig 不再受 provider 条件或可选 Bean 条件控制；同步/
 验证结果：定向 **51 项通过**；clean test 默认全量 **1047 项通过**；启用 langchain4j-poc 的 package **1060 项通过并打包成功**，均为 0 failures、0 errors、0 skipped。旧新测试合并以及删除旧转换器和旧记忆路径的用例导致数量减少；未删除新框架的 SSE 错误/取消、工具循环、权限传播和冷启动记忆测试。
 
 主源码、测试源码和 pom.xml 中已无 org.springframework.ai 引用；完整 Maven 依赖树（含测试范围）无 Spring AI；实际可执行 JAR 中 Spring AI 库、旧适配器、AiConfig 和 ChatMemoryConfig 条目数为零。上述验证使用 Mock/本地协议夹具，没有运行真实模型、PostgreSQL 或页面；代码迁移已完成，真实环境验收尚未完成。forkCount=0 的回归未生成新的 JaCoCo 执行数据，不报告覆盖率。
+
+### 迁移遗漏审计（2026-11-08）
+
+修复流式 OpenAiStreamingChatModel 未传入 temperature 的遗漏，使同步与流式模型遵循同一采样配置；配置类自身的默认地址与模型统一为 application.yml 使用的 DeepSeek。补齐旧本地 chat.model、chat.temperature、chat.timeout 的后备取值，不修改本地密钥文件。
+
+配置测试增加同步/流式模型参数一致性与旧本地配置兼容验证，并将 OpsAgentService 纳入装配检查。内置服务清单、故障处理手册、部署手册与建表说明更新为当前 LangChain4j 实现。数据库历史索引名 spring_ai_vector_index 保留，仅修订 SQL 注释，没有执行脚本或改变结构。
+
+定向配置测试 **5 项通过**；包含 langchain4j-poc 的全量回归 **1062 项通过**，0 failures、0 errors、0 skipped。再次核对主源码、测试源码、PoC 与 pom.xml，无 org.springframework.ai 引用；完整依赖树的 org.springframework.ai 过滤结果为空。git diff --check 通过。本轮未重新打包，未调用真实模型或 PostgreSQL，也未执行页面验收、重索引和数据库脚本；forkCount=0 未生成新的覆盖率数据。内置手册变更可能在后续启动时触发知识加载器的增量更新，真实环境待验收项继续见 02-remaining-migration-checklist.md。
