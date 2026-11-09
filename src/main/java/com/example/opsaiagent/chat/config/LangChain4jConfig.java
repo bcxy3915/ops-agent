@@ -1,5 +1,6 @@
 package com.example.opsaiagent.chat.config;
 
+import java.time.Duration;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jChatGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStructuredOutputGateway;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jStreamingChatGateway;
@@ -136,8 +137,8 @@ public class LangChain4jConfig {
     @Bean
     public ConversationChatMemoryStore langChain4jChatMemoryStore(ConversationService conversationService,
             @Value("${ops-agent.chat.memory.max-entries:1000}") int capacity,
-            @Value("${ops-agent.chat.memory.ttl:600s}") java.time.Duration ttl,
-            @Value("${ops-agent.chat.turn.timeout:300s}") java.time.Duration turnTimeout) {
+            @Value("${ops-agent.chat.memory.ttl:600s}") Duration ttl,
+            @Value("${ops-agent.chat.turn.timeout:300s}") Duration turnTimeout) {
         if (ttl.compareTo(turnTimeout) <= 0) {
             throw new IllegalArgumentException("记忆过期时间必须大于整轮超时");
         }

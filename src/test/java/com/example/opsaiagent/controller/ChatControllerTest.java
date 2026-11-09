@@ -1,5 +1,15 @@
 package com.example.opsaiagent.controller;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import org.mockito.Mockito;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.StringHttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import com.example.opsaiagent.chat.controller.ChatController;
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
@@ -40,23 +50,23 @@ class ChatControllerTest {
     void streamingHttpPreservesMarkdownWhitespace() throws Exception {
         List<String> tokens = List.of("**故障告警**\n", "-", " ", "集群异常\n", "  ", "- 子项\n",
                 "\n```sh\n", "  echo hello\n", "```\n", "行内 `GET", " ", "/_health`", "\n\n");
-        var events = new java.util.ArrayList<ServerSentEvent<String>>();
+        var events = new ArrayList<ServerSentEvent<String>>();
         tokens.forEach(token -> events.add(ServerSentEvent.builder(token).build()));
         events.add(ServerSentEvent.builder("[]").event("citations").build());
         events.add(ServerSentEvent.builder("[DONE]").build());
         when(opsAgentService.askStreamWithCitations("s", "问题")).thenReturn(Flux.fromIterable(events));
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller)
-                .setMessageConverters(new org.springframework.http.converter.StringHttpMessageConverter(java.nio.charset.StandardCharsets.UTF_8),
-                        new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter()).build();
-        var result = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ops/ask/stream")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        var mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new StringHttpMessageConverter(StandardCharsets.UTF_8),
+                        new MappingJackson2HttpMessageConverter()).build();
+        var result = mvc.perform(MockMvcRequestBuilders.post("/api/ops/ask/stream")
+                .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"sessionId\":\"s\",\"question\":\"问题\"}")).andReturn();
         result.getAsyncResult(5000);
-        String wire = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        String wire = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
         var answer = new StringBuilder();
         for (String event : wire.split("\\r?\\n\\r?\\n")) {
             if (event.contains("event:citations")) { continue; }
-            List<String> data = new java.util.ArrayList<>();
+            List<String> data = new ArrayList<>();
             for (String line : event.split("\\r?\\n")) {
                 if (line.startsWith("data:")) {
                     String value = line.substring(5);
@@ -76,14 +86,14 @@ class ChatControllerTest {
      */
     @Test
     void invalidStreamRequestIsRejectedBeforeStartingSse() throws Exception {
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var mvc = MockMvcBuilders.standaloneSetup(controller).build();
         for (String body : new String[]{"{}", "{\"question\":\"  \"}",
                 "{\"question\":\"问题\",\"sessionId\":\"" + "s".repeat(65) + "\"}"}) {
-            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ops/ask/stream")
-                            .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(body))
-                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+            mvc.perform(MockMvcRequestBuilders.post("/api/ops/ask/stream")
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(MockMvcResultMatchers.status().isBadRequest());
         }
-        org.mockito.Mockito.verifyNoInteractions(opsAgentService);
+        Mockito.verifyNoInteractions(opsAgentService);
     }
 
     @Mock
@@ -104,7 +114,7 @@ class ChatControllerTest {
     @DisplayName("重载知识库：调用 DocumentLoader 并返回 success 状态")
     void reloadDocument() {
         // 注意：reloadDocument 会对结果 Map 追加 indexRebuilt，必须返回可变 Map
-        Map<String, Object> reloadResult = new java.util.HashMap<>();
+        Map<String, Object> reloadResult = new HashMap<>();
         reloadResult.put("status", "success");
         reloadResult.put("loaded", 3);
         reloadResult.put("targets", 3);

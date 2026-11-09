@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
+import java.lang.reflect.Method;
 import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
@@ -348,7 +349,7 @@ class KnowledgeDocumentControllerTest {
     @Test
     @DisplayName("鉴权：重建索引允许写权限或审核权限")
     void reindex_requireWriteOrReviewPermission() throws Exception {
-        java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod("reindex", Long.class);
+        Method m = KnowledgeDocumentController.class.getMethod("reindex", Long.class);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("hasAnyAuthority('knowledge:write', 'knowledge:review')");
@@ -357,14 +358,14 @@ class KnowledgeDocumentControllerTest {
     @Test
     @DisplayName("鉴权：直接发布要求 knowledge:publish 或 knowledge:admin")
     void publishDirect_requirePublishPermission() throws Exception {
-        java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod("publishDirect", Long.class);
+        Method m = KnowledgeDocumentController.class.getMethod("publishDirect", Long.class);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("hasAnyAuthority('knowledge:publish', 'knowledge:admin')");
     }
 
     private void assertAuthority(String methodName, String authority, Class<?>... params) throws NoSuchMethodException {
-        java.lang.reflect.Method m = KnowledgeDocumentController.class.getMethod(methodName, params);
+        Method m = KnowledgeDocumentController.class.getMethod(methodName, params);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("hasAuthority('" + authority + "')");

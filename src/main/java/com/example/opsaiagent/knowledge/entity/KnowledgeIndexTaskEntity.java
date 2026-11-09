@@ -18,6 +18,9 @@ public class KnowledgeIndexTaskEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 本次领取令牌，防止旧 worker 回写 */
+    private String claimToken;
+
     /** 文档 ID */
     private Long docId;
 

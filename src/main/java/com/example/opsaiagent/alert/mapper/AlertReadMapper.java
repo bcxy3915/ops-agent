@@ -13,12 +13,16 @@ import org.apache.ibatis.annotations.Param;
 public interface AlertReadMapper extends BaseMapper<AlertReadEntity> {
 
     /**
-     * 幂等插入已读记录（已存在则忽略，PostgreSQL ON CONFLICT 匹配三列主键）
+     * 幂等插入已读记录，保留首次读取时间。
+     * @param tenantId 租户
+     * @param userId 用户
+     * @param alertEventId 告警
+     * @return 影响行数
      */
     @Insert("""
             INSERT INTO user_alert_read(tenant_id, user_id, alert_event_id, read_at)
             VALUES (#{tenantId}, #{userId}, #{alertEventId}, NOW())
-            ON CONFLICT (tenant_id, user_id, alert_event_id) DO NOTHING
+            ON DUPLICATE KEY UPDATE read_at = user_alert_read.read_at
             """)
     int insertIgnore(@Param("tenantId") String tenantId,
                      @Param("userId") String userId,

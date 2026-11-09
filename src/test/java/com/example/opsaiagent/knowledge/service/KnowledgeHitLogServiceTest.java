@@ -1,5 +1,7 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.opsaiagent.knowledge.dto.KnowledgeCaseReferenceResponse;
 import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHitLogResponse;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
@@ -170,8 +172,8 @@ class KnowledgeHitLogServiceTest {
         h2.setQuery("q2");
         h2.setHitSource("TEST");
         h2.setChannel("tester");
-        com.baomidou.mybatisplus.extension.plugins.pagination.Page<KnowledgeHitLogEntity> page =
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 10, 2);
+        Page<KnowledgeHitLogEntity> page =
+                new Page<>(1, 10, 2);
         page.setRecords(List.of(h1, h2));
         when(hitLogMapper.selectPage(any(), any())).thenReturn(page);
 
@@ -201,7 +203,7 @@ class KnowledgeHitLogServiceTest {
         h.setHitSource("ASK");
         when(hitLogMapper.selectList(any())).thenReturn(List.of(h));
 
-        com.example.opsaiagent.knowledge.dto.KnowledgeCaseReferenceResponse r =
+        KnowledgeCaseReferenceResponse r =
                 service.listCaseReferences(5L);
 
         assertThat(r.getCaseId()).isEqualTo(5L);
@@ -216,7 +218,7 @@ class KnowledgeHitLogServiceTest {
     void listCaseReferences_notFound() {
         when(documentMapper.selectOne(any())).thenReturn(null);
 
-        com.example.opsaiagent.knowledge.dto.KnowledgeCaseReferenceResponse r =
+        KnowledgeCaseReferenceResponse r =
                 service.listCaseReferences(99L);
 
         assertThat(r.getDocId()).isNull();

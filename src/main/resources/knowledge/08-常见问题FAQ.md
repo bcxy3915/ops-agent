@@ -47,14 +47,14 @@
 ### Q11. 如何启动整个系统？
 **A**：① `docker compose up -d` 启动数据库；② 启动 ops-agent 后端（`mvnw spring-boot:run -Dspring-boot.run.profiles=local`）；③ 启动 todo-service；④ 前端 `npm run dev`。详见《04-部署手册.md》。
 
-### Q12. 数据库端口为什么是 5433？
-**A**：项目 docker-compose 将容器内 5432 映射到宿主机 5433（`${DB_PORT:-5433}:5432`），避免与本地已安装 PostgreSQL（5432）冲突。
+### Q12. 数据库端口为什么是 23306？
+**A**：MySQL 容器 3306 映射至本机 23306，避免与已有 MySQL 冲突；ES 使用 9200。旧 PG 5433 仅保留用于迁移核对。
 
 ### Q13. 修改知识库文档后如何生效？
 **A**：将 md/pdf 放入 `src/main/resources/knowledge/` 后重启应用。DocumentLoader 会按 source 去重增量加载：文档缺失则删除旧向量并重建，已存在则跳过。
 
 ### Q14. 如何查看系统有哪些数据表？
-**A**：共 13 张表：alert_event、alert_rule、metric_sample、ops_audit_log、ops_conversation、ops_message、ops_service、ops_user、vector_store、notification_channel、notification_record、failure_snapshot、diagnosis_record。可用 psql 查看：`docker exec ops-postgres psql -U postgres -d opsdb -c "\dt"`。
+**A**：MySQL 当前共 33 张表，包括业务表和 knowledge_search_projection；ES 独立保存检索索引。使用 `docker exec -it ops-mysql mysql -u root -p opsdb -e "SHOW TABLES;"` 查看。
 
 ### Q15. LLM 诊断或问答报错怎么处理？
 **A**：① 检查 LLM 配置（API Key、模型名）是否正确；② 查看 diagnosis_record 的 error_message；③ 确认网络可访问模型服务；④ 重启后重试。详见《02-故障处理手册.md》第 7 节。

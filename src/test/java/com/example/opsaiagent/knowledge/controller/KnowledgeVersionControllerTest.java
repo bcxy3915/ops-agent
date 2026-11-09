@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
+import java.lang.reflect.Method;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeDocumentResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeVersionResponse;
@@ -90,7 +91,7 @@ class KnowledgeVersionControllerTest {
     @Test
     @DisplayName("鉴权：回滚接口要求 knowledge:write")
     void rollback_requiresWritePermission() throws Exception {
-        java.lang.reflect.Method m = KnowledgeVersionController.class.getMethod("rollback", Long.class, Long.class);
+        Method m = KnowledgeVersionController.class.getMethod("rollback", Long.class, Long.class);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("hasAuthority('knowledge:write')");
@@ -99,7 +100,7 @@ class KnowledgeVersionControllerTest {
     @Test
     @DisplayName("鉴权：版本列表要求 knowledge:read")
     void listVersions_requiresReadPermission() throws Exception {
-        java.lang.reflect.Method m = KnowledgeVersionController.class.getMethod("listVersions", Long.class);
+        Method m = KnowledgeVersionController.class.getMethod("listVersions", Long.class);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("hasAuthority('knowledge:read')");

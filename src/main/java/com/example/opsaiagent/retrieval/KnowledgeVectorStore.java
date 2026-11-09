@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval;
 
+import java.util.Collection;
 import com.example.opsaiagent.knowledge.model.Document;
 import java.util.List;
 
@@ -20,4 +21,17 @@ public interface KnowledgeVectorStore {
      * @return 按相关度排序的文档
      */
     List<Document> search(String query, int limit, RetrievalScope scope);
+
+    /**
+     * 在业务事务中登记指定来源的删除任务。
+     * @param sources 需要删除的来源标识
+     * @return 登记删除的分块数
+     */
+    int deleteBySources(Collection<String> sources);
+
+    /**
+     * 读取持久化投影，不依赖搜索引擎是否在线。
+     * @return 当前未删除的投影文档，无入参
+     */
+    List<Document> documents();
 }

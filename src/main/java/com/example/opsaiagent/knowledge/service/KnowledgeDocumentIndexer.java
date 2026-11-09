@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.knowledge.entity.KnowledgeChunkEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
@@ -44,7 +45,7 @@ public class KnowledgeDocumentIndexer {
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeChunkMapper chunkMapper;
     private final VectorIndexer vectorIndexer;
-    private final JdbcTemplate jdbcTemplate;
+    private final KnowledgeVectorStore vectorStore;
     private final SplitProperties splitProperties;
 
     /**
@@ -196,7 +197,10 @@ public class KnowledgeDocumentIndexer {
                     chunk.getMetadata().getOrDefault("splitVersion", TextChunkStrategy.CURRENT_SPLIT_VERSION));
             // 展示与检索文本分离：向量文本携带「标题｜章节」上下文头提升召回，
             // knowledge_chunk.content 永远存原始块文本用于前端展示
-            vectorDocs.add(new Document(embeddingText(title, chunkEntity.getSection(), chunk.getText(), keepHeader), metadata));
+            Document vectorDocument = new Document(embeddingText(title, chunkEntity.getSection(), chunk.getText(), keepHeader), metadata);
+            vectorDocs.add(vectorDocument);
+            chunkEntity.setVectorId(vectorDocument.getId());
+            chunkMapper.updateById(chunkEntity);
         }
         return vectorDocs;
     }
@@ -215,12 +219,13 @@ public class KnowledgeDocumentIndexer {
         return "【" + header + "】\n" + text;
     }
 
+    /**
+     * 在业务事务中登记旧投影删除，提交后由同步器处理 ES。
+     * @param vectorSource 来源
+     * @return 无返回值
+     */
     private void deleteVectors(String vectorSource) {
-        try {
-            jdbcTemplate.update("DELETE FROM vector_store WHERE metadata->>'source' = ?", vectorSource);
-        } catch (Exception e) {
-            log.warn("删除文档向量失败（表可能不存在）: source={}, err={}", vectorSource, e.getMessage());
-        }
+        vectorStore.deleteBySources(List.of(vectorSource));
     }
 
     /**

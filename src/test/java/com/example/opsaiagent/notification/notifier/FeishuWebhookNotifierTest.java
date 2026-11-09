@@ -1,5 +1,6 @@
 package com.example.opsaiagent.notification.notifier;
 
+import org.springframework.test.web.client.match.MockRestRequestMatchers;
 import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
@@ -62,7 +63,7 @@ class FeishuWebhookNotifierTest {
 
         server.expect(once(), requestTo(WEBHOOK_URL))
                 .andExpect(method(HttpMethod.POST))
-                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers
+                .andExpect(MockRestRequestMatchers
                         .content().contentType(MediaType.APPLICATION_JSON))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 

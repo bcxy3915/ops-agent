@@ -1,5 +1,10 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import dev.langchain4j.data.segment.TextSegment;
+import java.util.UUID;
+import com.example.opsaiagent.retrieval.elasticsearch.ElasticsearchGateway;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
@@ -42,7 +47,7 @@ import java.util.stream.Stream;
  * .\mvnw.cmd -Dtest=SplitEvalIT test
  *
  * 前置条件：
- * - 本地 PG + pgvector 就绪；
+ * - 本地 Elasticsearch 就绪；
  * - 环境变量 DASHSCOPE_API_KEY 可用（走真实 text-embedding-v3，与生产同口径）；
  * - 评测数据集已放置：src/test/resources/splitter/eval/documents/（md/pdf/docx/txt 文档池）
  *   与 src/test/resources/splitter/eval/qa-golden.json（QA 评测集，格式见 §10.3.2）。
@@ -64,12 +69,13 @@ class SplitEvalIT {
     private static final Path DOCUMENTS_DIR = DATASET_DIR.resolve("documents");
     private static final Path QA_FILE = DATASET_DIR.resolve("qa-golden.json");
     private static final Path REPORT_DIR = Paths.get("docs/design/text-split/eval");
-    private static final String CLEANUP_SQL = "DELETE FROM vector_store WHERE metadata->>'evalDoc' = 'true'";
+    private final String evaluationIndex = "ops-split-eval-" + UUID.randomUUID();
+    private boolean evaluationIndexCreated;
 
     @Autowired
     private EmbeddingModel embeddingClient;
     @Autowired
-    private VectorIndexer vectorIndexer;
+    private ElasticsearchGateway es;
     @Autowired
     private TextChunkStrategyResolver strategyResolver;
     @Autowired
@@ -78,8 +84,6 @@ class SplitEvalIT {
     private SplitProperties splitProperties;
     @Autowired
     private TokenMeter tokenMeter;
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
     @Autowired
     private RetrievalDiversifier diversifier;
 
@@ -93,21 +97,25 @@ class SplitEvalIT {
      * @return 相似度不低于零的前十个评测片段
      */
     private List<Document> searchEvaluationArm(String query, int version) {
-        String vector = java.util.Arrays.toString(embeddingClient.embed(query).content().vector());
-        return jdbcTemplate.query("SELECT * FROM (SELECT id, content, metadata, "
-                        + "embedding <=> CAST(? AS vector) AS distance FROM public.vector_store "
-                        + "WHERE metadata->>'evalDoc'='true' AND metadata->>'splitVersion'=?) candidates "
-                        + "WHERE distance <= 1 ORDER BY distance LIMIT 10", (rs, row) -> {
-                    try {
-                        Map<String, Object> metadata = new ObjectMapper().readValue(rs.getString("metadata"),
-                                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() { });
-                        double distance = rs.getDouble("distance");
-                        metadata.put("distance", distance);
-                        return new Document(rs.getString("id"), rs.getString("content"), metadata, 1 - distance);
-                    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-                        throw new java.sql.SQLException("评测向量元数据解析失败", e);
-                    }
-                }, vector, Integer.toString(version));
+        float[] vector = embeddingClient.embed(query).content().vector();
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            var body = Map.of("size", 10, "knn", Map.of("field", "embedding", "query_vector", vector,
+                    "k", 10, "num_candidates", 100, "filter", Map.of("term", Map.of("metadata.splitVersion", version))));
+            var response = es.request("POST", "/" + evaluationIndex + "/_search", mapper.writeValueAsString(body));
+            List<Document> results = new ArrayList<>();
+            for (var hit : response.path("hits").path("hits")) {
+                double similarity = 2 * hit.path("_score").asDouble() - 1;
+                if (similarity < 0) continue;
+                Map<String, Object> metadata = mapper.convertValue(hit.path("_source").path("metadata"),
+                        new TypeReference<Map<String, Object>>() {});
+                metadata.put("distance", 1 - similarity);
+                results.add(new Document(hit.path("_id").asText(), hit.path("_source").path("content").asText(), metadata, similarity));
+            }
+            return results;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("评测请求序列化失败", e);
+        }
     }
 
     /** QA 评测条目（qa-golden.json） */
@@ -156,12 +164,37 @@ class SplitEvalIT {
                 "未配置环境变量 DASHSCOPE_API_KEY（真实 embedding 前置），跳过 A/B 评测");
     }
 
+    /**
+     * 仅删除本测试创建的随机评测索引，绝不清理业务索引。
+     * @return 无返回值，无入参
+     */
     @AfterEach
     void cleanupEvalVectors() {
-        if (jdbcTemplate != null) {
-            int deleted = jdbcTemplate.update(CLEANUP_SQL);
-            // 评测数据按 evalDoc 标记清理，绝不触碰生产向量
-            System.out.println("[SplitEvalIT] 已清理评测向量 " + deleted + " 条");
+        if (evaluationIndexCreated) es.request("DELETE", "/" + evaluationIndex, null);
+    }
+
+    /**
+     * 在评测专属索引写入两种切分算法的向量，不经过业务权限投影。
+     * @param documents 评测分块
+     * @return 无返回值
+     * @throws IOException JSON 序列化异常
+     */
+    private void writeEvaluationDocuments(List<Document> documents) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        for (int start = 0; start < documents.size(); start += 10) {
+            var batch = documents.subList(start, Math.min(start + 10, documents.size()));
+            var embeddings = embeddingClient.embedAll(batch.stream().map(document ->
+                    TextSegment.from(document.getText())).toList()).content();
+            if (embeddings.size() != batch.size()) throw new IllegalStateException("评测向量数量不匹配");
+            StringBuilder body = new StringBuilder();
+            for (int i = 0; i < batch.size(); i++) {
+                var document = batch.get(i);
+                body.append(mapper.writeValueAsString(Map.of("index", Map.of("_index", evaluationIndex, "_id", document.getId())))).append('\n');
+                body.append(mapper.writeValueAsString(Map.of("content", document.getText(), "metadata", document.getMetadata(),
+                        "embedding", embeddings.get(i).vector()))).append('\n');
+            }
+            var response = es.request("POST", "/_bulk?refresh=wait_for", body.toString());
+            if (response.path("errors").asBoolean()) throw new IllegalStateException("评测向量写入失败");
         }
     }
 
@@ -169,7 +202,11 @@ class SplitEvalIT {
     @DisplayName("双链路评测：切分入库 → 双臂检索 → 指标计算 → gate 判定 → 报告输出")
     void runEval() throws IOException {
         // 0. 清理历史评测数据，保证可重复运行
-        jdbcTemplate.update(CLEANUP_SQL);
+        int dimensions = embeddingClient.embed("评测维度探测").content().dimension();
+        String mapping = new ObjectMapper().writeValueAsString(Map.of("mappings", Map.of("properties", Map.of(
+                "embedding", Map.of("type", "dense_vector", "dims", dimensions, "index", true, "similarity", "cosine")))));
+        es.request("PUT", "/" + evaluationIndex, mapping);
+        evaluationIndexCreated = true;
 
         // 1. 加载文档池与 QA 评测集
         List<Path> files = listDocuments();
@@ -213,8 +250,8 @@ class SplitEvalIT {
             baselineAll.addAll(baseline);
             freshAll.addAll(fresh);
         }
-        vectorIndexer.write(baselineAll);
-        vectorIndexer.write(freshAll);
+        writeEvaluationDocuments(baselineAll);
+        writeEvaluationDocuments(freshAll);
         System.out.println("[SplitEvalIT] 双链路入库完成: 基线 " + baselineAll.size()
                 + " 块 / 新策略 " + freshAll.size() + " 块");
 

@@ -1,5 +1,7 @@
 package com.example.opsaiagent.knowledge.loader;
 
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
+import java.util.Collection;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
@@ -42,7 +44,7 @@ import java.util.stream.Collectors;
  * - 以文件内容 SHA-256 指纹判断「同名覆盖」：文件内容变化后自动重载
  * - 增量加载缺失/变更文档，不重复加载未变化文档
  * - 清理目录中已删除文档的残留向量（仅内置文档，不误删 upload:/case: 用户向量）
- * vector_store.metadata.contentHash 保存文档指纹，用于后续比对。
+ * 检索投影 metadata.contentHash 保存文档指纹，用于后续比对。
  */
 @Slf4j
 @Component
@@ -71,8 +73,8 @@ public class DocumentLoader {
     // 资源加载器
     private final ResourcePatternResolver resourcePatternResolver;
 
-    // 用于查询 vector_store 表的状态
-    private final JdbcTemplate jdbcTemplate;
+    // 查询 MySQL 检索投影状态
+    private final KnowledgeVectorStore vectorStore;
 
     // 内置知识文档元数据（knowledge_document，供统计/列表/溯源使用）
     private final KnowledgeDocumentMapper documentMapper;
@@ -188,14 +190,11 @@ public class DocumentLoader {
      * @param sources source 集合
      * @return 删除条数
      */
-    public int deleteBySources(java.util.Collection<String> sources) {
+    public int deleteBySources(Collection<String> sources) {
         if (sources == null || sources.isEmpty()) {
             return 0;
         }
-        List<String> list = new ArrayList<>(sources);
-        String placeholders = String.join(",", Collections.nCopies(list.size(), "?"));
-        String sql = "DELETE FROM vector_store WHERE metadata->>'source' IN (" + placeholders + ")";
-        return jdbcTemplate.update(sql, list.toArray());
+        return vectorStore.deleteBySources(sources);
     }
 
     /**
@@ -218,20 +217,15 @@ public class DocumentLoader {
     }
 
     /**
-     * 查询 vector_store 表里已有的 source -> contentHash 映射
+     * 查询检索投影中已有的 source -> contentHash 映射
      * 旧数据没有 contentHash 时值为 null（视为需要重载校验）
      */
     Map<String, String> listExistingSourceHashes() {
-        String sql = "SELECT DISTINCT metadata->>'source' AS src, metadata->>'contentHash' AS hash "
-                + "FROM vector_store WHERE metadata->>'source' IS NOT NULL";
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
         Map<String, String> result = new HashMap<>();
-        for (Map<String, Object> row : rows) {
-            Object src = row.get("src");
-            Object hash = row.get("hash");
-            if (src != null) {
-                result.put(String.valueOf(src), hash == null ? null : String.valueOf(hash));
-            }
+        for (Document document : vectorStore.documents()) {
+            Object source = document.getMetadata().get("source");
+            Object hash = document.getMetadata().get("contentHash");
+            if (source != null) result.put(source.toString(), hash == null ? null : hash.toString());
         }
         return result;
     }
@@ -319,6 +313,7 @@ public class DocumentLoader {
                             .eq(KnowledgeDocumentEntity::getTenantId, "0"));
             for (KnowledgeDocumentEntity row : rows) {
                 if (expectedSources.contains(row.getSource())) continue;
+                vectorStore.deleteBySources(List.of(row.getSource()));
                 chunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunkEntity>().eq(KnowledgeChunkEntity::getDocId, row.getId()));
                 documentMapper.deleteById(row.getId());
             }
@@ -342,9 +337,9 @@ public class DocumentLoader {
         entity.setVisibility("PUBLIC");
         entity.setReviewStatus("APPROVED");
         entity.setReviewLevel("NONE");
-        entity.setPublishStatus("PUBLISHED");
+        entity.setPublishStatus("BUILDING");
         entity.setPublishError(null);
-        entity.setPublishedAt(now);
+        entity.setPublishedAt(null);
         entity.setTrustStatus("VERIFIED");
         entity.setOwner("system");
         entity.setSource(source);

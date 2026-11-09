@@ -1,5 +1,8 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import dev.langchain4j.model.ModelProvider;
+import dev.langchain4j.model.chat.Capability;
+import java.util.Set;
 import com.example.opsaiagent.rbac.context.RbacContextSnapshot;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -33,7 +36,7 @@ public final class ContextAwareStreamingChatModel implements StreamingChatModel 
      * @return 模型支持的能力集合
      */
     @Override
-    public java.util.Set<dev.langchain4j.model.chat.Capability> supportedCapabilities() {
+    public Set<Capability> supportedCapabilities() {
         return delegate.supportedCapabilities();
     }
 
@@ -42,7 +45,7 @@ public final class ContextAwareStreamingChatModel implements StreamingChatModel 
      * @return 模型供应商
      */
     @Override
-    public dev.langchain4j.model.ModelProvider provider() {
+    public ModelProvider provider() {
         return delegate.provider();
     }
 

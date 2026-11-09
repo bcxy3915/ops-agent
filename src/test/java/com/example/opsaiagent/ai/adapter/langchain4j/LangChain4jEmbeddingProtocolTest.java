@@ -1,5 +1,7 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import com.example.opsaiagent.retrieval.elasticsearch.ElasticsearchGateway;
+import com.example.opsaiagent.retrieval.elasticsearch.SearchProjectionService;
 import com.example.opsaiagent.knowledge.config.LangChain4jEmbeddingConfig;
 import com.example.opsaiagent.retrieval.RetrievalScope;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,7 +35,7 @@ class LangChain4jEmbeddingProtocolTest {
      * @throws Exception 本地协议夹具异常
      */
     @Test
-    void batchesAndPgvectorOperationsUseLangChain4j() throws Exception {
+    void batchesAndElasticsearchOperationsUseLangChain4j() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         List<JsonNode> requests = new CopyOnWriteArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -74,10 +76,13 @@ class LangChain4jEmbeddingProtocolTest {
                 assertThat(batch.get(i).vector()).containsExactly(i, 1, 0);
             }
 
-            JdbcTemplate jdbc = mock(JdbcTemplate.class);
-            when(jdbc.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
-            var store = new LangChain4jPgVectorStore(jdbc, model, mapper, 3, EmbeddingMetadataMode.EMBED);
-            store.write(List.of(new Document("运维处理步骤", Map.of("source", "fixture.md"))));
+            var projection = mock(SearchProjectionService.class);
+            var es = mock(ElasticsearchGateway.class);
+            when(es.readIndex()).thenReturn("ops-knowledge-read");
+            when(es.request(anyString(), anyString(), any())).thenReturn(mapper.readTree("{\"hits\":{\"hits\":[]}}"));
+            when(projection.json(any())).thenAnswer(call -> mapper.writeValueAsString(call.getArgument(0)));
+            var store = new LangChain4jElasticsearchStore(model, EmbeddingMetadataMode.EMBED, 3, es, projection);
+            store.write(List.of(new Document("运维处理步骤", Map.of("source", "fixture.md", "docId", "1"))));
             assertThat(store.search("检查服务", 5, RetrievalScope.publicOnly())).isEmpty();
             assertThat(requests).hasSize(4);
             assertThat(requests.get(2).path("input").toString()).contains("运维处理步骤");
@@ -86,7 +91,7 @@ class LangChain4jEmbeddingProtocolTest {
                 assertThat(request.path("model").asText()).isEqualTo("test-embedding");
                 assertThat(request.path("dimensions").asInt()).isEqualTo(3);
             }
-            verify(jdbc).query(contains("reviewStatus"), any(RowMapper.class), any(Object[].class));
+            verify(es).request(eq("POST"), contains("_search"), contains("reviewStatus"));
         } finally {
             server.stop(0);
         }

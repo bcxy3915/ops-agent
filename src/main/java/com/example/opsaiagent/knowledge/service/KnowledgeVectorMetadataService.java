@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.example.opsaiagent.knowledge.dto.VectorMetadataValidationResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,7 +18,7 @@ import java.util.Set;
 /**
  * 向量 metadata 校验服务。
  *
- * 检查 vector_store 中 tenantId / visibility / reviewStatus / owner 是否完整，
+ * 检查 检索投影中 tenantId / visibility / reviewStatus / owner 是否完整，
  * 并校验内置知识 PUBLIC、案例知识 TENANT 等约定，供迁移后验收使用。
  */
 @Slf4j
@@ -31,7 +32,7 @@ public class KnowledgeVectorMetadataService {
             Set.of("DRAFT", "PENDING_DEPT", "PENDING_TENANT", "APPROVED", "REJECTED");
     private static final int MAX_ISSUES = 20;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final KnowledgeVectorStore vectorStore;
     private final ObjectMapper objectMapper;
 
     /**
@@ -40,9 +41,10 @@ public class KnowledgeVectorMetadataService {
      * @return 校验统计与问题明细
      */
     public VectorMetadataValidationResponse validate() {
-        List<String> rows = jdbcTemplate.query(
-                "SELECT metadata::text FROM vector_store",
-                (rs, rowNum) -> rs.getString(1));
+        List<String> rows = vectorStore.documents().stream().map(document -> {
+            try { return objectMapper.writeValueAsString(document.getMetadata()); }
+            catch (Exception e) { throw new IllegalStateException("投影元数据序列化失败", e); }
+        }).toList();
 
         long total = rows.size();
         long valid = 0;

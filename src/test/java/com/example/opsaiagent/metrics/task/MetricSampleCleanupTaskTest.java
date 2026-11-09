@@ -1,5 +1,6 @@
 package com.example.opsaiagent.metrics.task;
 
+import org.mockito.ArgumentMatchers;
 import com.example.opsaiagent.metrics.store.MetricSampleStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,7 +51,7 @@ class MetricSampleCleanupTaskTest {
     @Test
     @DisplayName("cleanup：存储异常时静默记录不抛出")
     void cleanup_handlesStoreFailure() {
-        doThrow(new RuntimeException("db down")).when(metricSampleStore).deleteOlderThan(org.mockito.ArgumentMatchers.anyLong());
+        doThrow(new RuntimeException("db down")).when(metricSampleStore).deleteOlderThan(ArgumentMatchers.anyLong());
 
         assertThatCode(task::cleanup).doesNotThrowAnyException();
     }

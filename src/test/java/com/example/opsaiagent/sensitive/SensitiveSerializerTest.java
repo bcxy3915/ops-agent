@@ -1,5 +1,6 @@
 package com.example.opsaiagent.sensitive;
 
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.BeanProperty;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,7 +67,7 @@ class SensitiveSerializerTest {
         SensitiveSerializer serializer = new SensitiveSerializer();
         SerializerProvider provider = mock(SerializerProvider.class);
         BeanProperty property = mock(BeanProperty.class);
-        com.fasterxml.jackson.databind.JavaType type = mock(com.fasterxml.jackson.databind.JavaType.class);
+        JavaType type = mock(JavaType.class);
         JsonSerializer<Object> fallback = mock(JsonSerializer.class);
         when(property.getAnnotation(Sensitive.class)).thenReturn(null);
         when(property.getContextAnnotation(Sensitive.class)).thenReturn(null);

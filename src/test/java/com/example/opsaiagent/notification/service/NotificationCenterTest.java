@@ -1,5 +1,6 @@
 package com.example.opsaiagent.notification.service;
 
+import org.mockito.Mockito;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.crypto.util.AesGcmUtil;
@@ -123,7 +124,7 @@ class NotificationCenterTest {
         when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "飞书", "FEISHU_WEBHOOK")));
         when(notifierRegistry.get(NotificationChannelType.FEISHU_WEBHOOK)).thenReturn(notifier);
         when(templateService.render(any(AlertEventEntity.class), any())).thenReturn(
-                com.example.opsaiagent.notification.NotificationContent.builder()
+                NotificationContent.builder()
                         .title("告警通知 - cpu-high").content("cpu=95").build());
 
         notificationCenter.sendOnEvent(event(1L));
@@ -131,7 +132,7 @@ class NotificationCenterTest {
         verify(recordMapper).insert(any(NotificationRecordEntity.class));
         verify(notifier).send(any(NotificationChannelConfigEntity.class), any());
         // 记录最终 SUCCESS
-        var captor = org.mockito.ArgumentCaptor.forClass(NotificationRecordEntity.class);
+        var captor = ArgumentCaptor.forClass(NotificationRecordEntity.class);
         verify(recordMapper).updateById(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo("SUCCESS");
     }
@@ -142,13 +143,13 @@ class NotificationCenterTest {
         when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel(1L, "飞书", "FEISHU_WEBHOOK")));
         when(notifierRegistry.get(NotificationChannelType.FEISHU_WEBHOOK)).thenReturn(notifier);
         when(templateService.render(any(AlertEventEntity.class), any())).thenReturn(
-                com.example.opsaiagent.notification.NotificationContent.builder()
+                NotificationContent.builder()
                         .title("t").content("c").build());
         doThrow(new RuntimeException("timeout")).when(notifier).send(any(), any());
 
         notificationCenter.sendOnEvent(event(1L));
 
-        var captor = org.mockito.ArgumentCaptor.forClass(NotificationRecordEntity.class);
+        var captor = ArgumentCaptor.forClass(NotificationRecordEntity.class);
         verify(recordMapper).insert(captor.capture());
         NotificationRecordEntity record = captor.getValue();
         assertThat(record.getStatus()).isEqualTo("FAILED");
@@ -163,13 +164,13 @@ class NotificationCenterTest {
                 .thenReturn(List.of(channel(1L, "飞书", "FEISHU_WEBHOOK"), channel(2L, "邮件", "EMAIL")));
         when(notifierRegistry.get(any(NotificationChannelType.class))).thenReturn(notifier);
         when(templateService.render(any(AlertEventEntity.class), any())).thenReturn(
-                com.example.opsaiagent.notification.NotificationContent.builder()
+                NotificationContent.builder()
                         .title("t").content("c").build());
 
         notificationCenter.sendOnEvent(event(1L));
 
-        verify(notifier, org.mockito.Mockito.times(2)).send(any(), any());
-        verify(recordMapper, org.mockito.Mockito.times(2)).insert(any(NotificationRecordEntity.class));
+        verify(notifier, Mockito.times(2)).send(any(), any());
+        verify(recordMapper, Mockito.times(2)).insert(any(NotificationRecordEntity.class));
     }
 
     // ==================== sendOnEvent + 诊断联动（T18） ====================
@@ -348,7 +349,7 @@ class NotificationCenterTest {
         when(channelMapper.selectById(1L)).thenReturn(ch);
         when(notifierRegistry.get(NotificationChannelType.FEISHU_WEBHOOK)).thenReturn(notifier);
         when(templateService.render(any(AlertEventEntity.class), any())).thenReturn(
-                com.example.opsaiagent.notification.NotificationContent.builder()
+                NotificationContent.builder()
                         .title("测试通知 - 测试通知").content("测试").build());
 
         NotificationRecordEntity record = notificationCenter.sendTest(1L);

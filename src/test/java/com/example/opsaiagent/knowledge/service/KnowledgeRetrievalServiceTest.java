@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import org.mockito.ArgumentMatchers;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
@@ -129,7 +130,7 @@ class KnowledgeRetrievalServiceTest {
                 doc("vec-1", "部署手册内容",
                         Map.of("source", "04-部署手册.md"))
         ));
-        when(documentMapper.selectOne(org.mockito.ArgumentMatchers.any()))
+        when(documentMapper.selectOne(ArgumentMatchers.any()))
                 .thenReturn(dbDoc(4L, "部署手册", "BUILTIN", "VERIFIED", 1, "04-部署手册.md"));
 
         RetrievalTestResponse r = service.test(req("部署", 3, null));
@@ -270,7 +271,7 @@ class KnowledgeRetrievalServiceTest {
                         Map.of("source", "01-服务清单.md", "title", "内置手册"))
         );
         when(documentMapper.selectById(10L)).thenReturn(dbDoc(10L, "上传手册", "PRIVATE", "VERIFIED", 2, "upload:manual.md"));
-        when(documentMapper.selectOne(org.mockito.ArgumentMatchers.any()))
+        when(documentMapper.selectOne(ArgumentMatchers.any()))
                 .thenReturn(dbDoc(5L, "服务清单", "BUILTIN", "VERIFIED", 1, "01-服务清单.md"));
 
         List<RetrievalHitResponse> hits = service.toHits(docs, "数据库故障", 5);

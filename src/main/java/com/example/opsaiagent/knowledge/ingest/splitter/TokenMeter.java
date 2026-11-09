@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.ingest.splitter;
 
+import com.knuddels.jtokkit.Encodings;
 import com.knuddels.jtokkit.api.Encoding;
 import com.knuddels.jtokkit.api.EncodingRegistry;
 import com.knuddels.jtokkit.api.EncodingType;
@@ -21,7 +22,7 @@ public class TokenMeter {
     private final Encoding encoding;
 
     public TokenMeter() {
-        EncodingRegistry registry = com.knuddels.jtokkit.Encodings.newLazyEncodingRegistry();
+        EncodingRegistry registry = Encodings.newLazyEncodingRegistry();
         this.encoding = registry.getEncoding(EncodingType.CL100K_BASE);
     }
 

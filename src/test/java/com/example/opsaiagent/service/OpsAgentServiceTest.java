@@ -1,5 +1,13 @@
 package com.example.opsaiagent.service;
 
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.service.AiServices;
+import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import com.example.opsaiagent.ai.adapter.langchain4j.*;
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.chat.service.*;
@@ -38,18 +46,18 @@ class OpsAgentServiceTest {
         String memoryId = LangChain4jMemoryId.of("alice", "session") + ".request";
         var actualTurn = new ChatTurn("tenant", "session", "alice", "request", "conversation", memoryId);
         when(turns.begin("session", "问题")).thenReturn(actualTurn);
-        Document document = new Document("同一份故障处理正文", java.util.Map.of("source", "runbook"));
+        Document document = new Document("同一份故障处理正文", Map.of("source", "runbook"));
         when(retriever.retrieve("问题", 5)).thenReturn(List.of(document));
-        var model = mock(dev.langchain4j.model.chat.ChatModel.class);
-        when(model.chat(any(dev.langchain4j.model.chat.request.ChatRequest.class))).thenAnswer(call -> {
-            var request = (dev.langchain4j.model.chat.request.ChatRequest) call.getArgument(0);
+        var model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenAnswer(call -> {
+            var request = (ChatRequest) call.getArgument(0);
             assertThat(request.messages().toString()).contains(document.getText());
-            return dev.langchain4j.model.chat.response.ChatResponse.builder()
-                    .aiMessage(dev.langchain4j.data.message.AiMessage.from("真实编排的模拟答案")).build();
+            return ChatResponse.builder()
+                    .aiMessage(AiMessage.from("真实编排的模拟答案")).build();
         });
-        OpsAssistant realAssistant = dev.langchain4j.service.AiServices.builder(OpsAssistant.class)
+        OpsAssistant realAssistant = AiServices.builder(OpsAssistant.class)
                 .chatModel(model)
-                .chatMemoryProvider(id -> dev.langchain4j.memory.chat.MessageWindowChatMemory.builder()
+                .chatMemoryProvider(id -> MessageWindowChatMemory.builder()
                         .id(id).maxMessages(20).chatMemoryStore(store).build())
                 .contentRetriever(new LangChain4jKnowledgeContentRetriever(retriever, 5, store))
                 .storeRetrievedContentInChatMemory(false).build();
@@ -229,7 +237,7 @@ class OpsAgentServiceTest {
         when(turns.timeout()).thenReturn(Duration.ofMillis(30));
         StepVerifier.create(service.askStreamWithCitations("session", "问题"))
                 .expectNextMatches(e -> "部分答案".equals(e.data()))
-                .expectError(java.util.concurrent.TimeoutException.class).verify(Duration.ofSeconds(3));
+                .expectError(TimeoutException.class).verify(Duration.ofSeconds(3));
         verify(handle, timeout(1000)).cancel();
         verify(memory, timeout(1000)).closeTurn(turn.memoryId());
     }
@@ -243,7 +251,7 @@ class OpsAgentServiceTest {
     private void stream(boolean complete, boolean fail) {
         var stream = mock(TokenStream.class, RETURNS_SELF);
         AtomicReference<BiConsumer<PartialResponse, PartialResponseContext>> partial = new AtomicReference<>();
-        AtomicReference<Consumer<dev.langchain4j.model.chat.response.ChatResponse>> done = new AtomicReference<>();
+        AtomicReference<Consumer<ChatResponse>> done = new AtomicReference<>();
         AtomicReference<Consumer<Throwable>> error = new AtomicReference<>();
         doAnswer(call -> { partial.set(call.getArgument(0)); return stream; }).when(stream).onPartialResponseWithContext(any());
         doAnswer(call -> { done.set(call.getArgument(0)); return stream; }).when(stream).onCompleteResponse(any());

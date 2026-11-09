@@ -1,5 +1,7 @@
 package com.example.opsaiagent.notification.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.crypto.util.AesGcmUtil;
@@ -303,8 +305,8 @@ public class NotificationCenter {
         }
         // 简单提取 webhookUrl / recipients，失败则返回渠道名
         try {
-            com.fasterxml.jackson.databind.JsonNode node =
-                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(config);
+            JsonNode node =
+                    new ObjectMapper().readTree(config);
             if (node.has("webhookUrl")) {
                 return node.get("webhookUrl").asText();
             }

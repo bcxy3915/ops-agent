@@ -1,5 +1,7 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.event.TransactionalEventListenerFactory;
 import com.example.opsaiagent.chat.event.ConversationDeletedEvent;
 import com.example.opsaiagent.chat.service.ConversationService;
 import dev.langchain4j.data.message.UserMessage;
@@ -24,7 +26,7 @@ class ConversationDeletionTransactionTest {
     @Test
     void clearsMemoryOnlyAfterDeletionCommits() {
         try (var context = new AnnotationConfigApplicationContext()) {
-            context.registerBean(org.springframework.transaction.event.TransactionalEventListenerFactory.class);
+            context.registerBean(TransactionalEventListenerFactory.class);
             context.registerBean(ConversationChatMemoryStore.class,
                     () -> new ConversationChatMemoryStore(mock(ConversationService.class), 20));
             context.refresh();
@@ -61,7 +63,7 @@ class ConversationDeletionTransactionTest {
          * @return 无返回值
          */
         @Override
-        protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) { }
+        protected void doBegin(Object transaction, TransactionDefinition definition) { }
 
         /**
          * 提交测试事务，实际同步回调由父类触发。

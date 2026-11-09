@@ -1,5 +1,8 @@
 package com.example.opsaiagent.audit.aspect;
 
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.InputStream;
+import java.io.OutputStream;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.service.AuditLogService;
@@ -281,9 +284,9 @@ public class AuditLogAspect {
      */
     private boolean isServletObject(Object obj) {
         return obj instanceof HttpServletRequest
-                || obj instanceof jakarta.servlet.http.HttpServletResponse
-                || obj instanceof java.io.InputStream
-                || obj instanceof java.io.OutputStream;
+                || obj instanceof HttpServletResponse
+                || obj instanceof InputStream
+                || obj instanceof OutputStream;
     }
 
     /**

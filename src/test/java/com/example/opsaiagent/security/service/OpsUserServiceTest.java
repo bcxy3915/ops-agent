@@ -1,5 +1,6 @@
 package com.example.opsaiagent.security.service;
 
+import java.util.concurrent.atomic.AtomicReference;
 import com.example.opsaiagent.crypto.util.AesGcmUtil;
 import com.example.opsaiagent.crypto.util.HashUtil;
 import com.example.opsaiagent.common.error.ErrorCode;
@@ -462,8 +463,8 @@ class OpsUserServiceTest {
             when(passwordEncoder.encode("admin123")).thenReturn("bcrypt-hash");
             when(roleMapper.selectBatchIds(any()))
                     .thenReturn(List.of(role(10L, "TENANT_ADMIN")));
-            java.util.concurrent.atomic.AtomicReference<String> roleAtInsert =
-                    new java.util.concurrent.atomic.AtomicReference<>();
+            AtomicReference<String> roleAtInsert =
+                    new AtomicReference<>();
             doAnswer(invocation -> {
                 OpsUserEntity entity = invocation.getArgument(0);
                 roleAtInsert.set(entity.getRole());

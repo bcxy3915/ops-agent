@@ -1,5 +1,7 @@
 package com.example.opsaiagent.security.service;
 
+import io.jsonwebtoken.JwtBuilder;
+import java.util.List;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -37,7 +39,7 @@ public class JwtService {
      */
     public String generateToken(String username, String role) {
         return generateToken(username, role, null, null, null,
-                role == null ? null : java.util.List.of(role));
+                role == null ? null : List.of(role));
     }
 
     /**
@@ -52,11 +54,11 @@ public class JwtService {
      * @return Token
      */
     public String generateToken(String username, String role, String userId,
-                                String tenantId, Long deptId, java.util.List<String> roles) {
+                                String tenantId, Long deptId, List<String> roles) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationSeconds * 1000);
 
-        io.jsonwebtoken.JwtBuilder builder = Jwts.builder()
+        JwtBuilder builder = Jwts.builder()
                 .subject(username)
                 .issuer(issuer)
                 .claim("role", role)

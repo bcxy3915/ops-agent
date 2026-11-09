@@ -1,5 +1,6 @@
 package com.example.opsaiagent.diagnosis.service;
 
+import org.mockito.Mockito;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
 import com.example.opsaiagent.ai.api.ChatRequest;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
@@ -61,8 +62,8 @@ class DiagnosisServiceTest {
         var result = service.diagnose(snapshot);
         assertThat(result.getStatus()).isEqualTo("SUCCESS");
         assertThat(result.getReferencesJson()).contains("one-snapshot.md");
-        org.mockito.Mockito.verify(hybridRetriever, org.mockito.Mockito.times(1)).retrieve(anyString(), eq(3));
-        org.mockito.Mockito.verifyNoMoreInteractions(hybridRetriever);
+        Mockito.verify(hybridRetriever, Mockito.times(1)).retrieve(anyString(), eq(3));
+        Mockito.verifyNoMoreInteractions(hybridRetriever);
     }
 
     /**
@@ -71,7 +72,7 @@ class DiagnosisServiceTest {
      */
     @Test
     void scopeResolutionFailureIsPersistedAsFailedDiagnosis() {
-        var scope = org.mockito.Mockito.mock(DiagnosisScope.class);
+        var scope = Mockito.mock(DiagnosisScope.class);
         when(scope.of(snapshot)).thenThrow(new IllegalStateException("部门范围加载失败"));
         var scopedService = new DiagnosisService(diagnosisMapper, snapshotService, promptTemplate,
                 chatGateway, structuredOutputGateway, objectMapper, hybridRetriever,
@@ -82,7 +83,7 @@ class DiagnosisServiceTest {
         assertThat(result.getStatus()).isEqualTo("FAILED");
         assertThat(result.getErrorMessage()).contains("部门范围加载失败");
         verify(diagnosisMapper).insert(result);
-        org.mockito.Mockito.verifyNoInteractions(structuredOutputGateway, hybridRetriever);
+        Mockito.verifyNoInteractions(structuredOutputGateway, hybridRetriever);
     }
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)

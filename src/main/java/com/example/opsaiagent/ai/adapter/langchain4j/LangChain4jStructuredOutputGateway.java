@@ -1,5 +1,6 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.example.opsaiagent.ai.api.ChatRequest;
 import com.example.opsaiagent.ai.api.StructuredOutputGateway;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,7 +39,7 @@ public class LangChain4jStructuredOutputGateway implements StructuredOutputGatew
         }
         try {
             T result = objectMapper.readerFor(outputType)
-                    .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                     .readValue(content);
             if (result == null) {
                 throw new IllegalStateException("模型返回空结构化结果");

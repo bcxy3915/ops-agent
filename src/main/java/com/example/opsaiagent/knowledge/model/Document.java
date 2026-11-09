@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.model;
 
+import java.util.Objects;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import java.util.HashMap;
@@ -52,7 +53,7 @@ public final class Document {
      * @return 无返回值
      */
     public Document(String id, String text, Map<String, Object> metadata, Double score) {
-        this.id = java.util.Objects.requireNonNull(id);
+        this.id = Objects.requireNonNull(id);
         this.text = text;
         this.metadata = new HashMap<>(metadata == null ? Map.of() : metadata);
         this.score = score;

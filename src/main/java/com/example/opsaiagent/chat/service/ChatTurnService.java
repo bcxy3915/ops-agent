@@ -14,7 +14,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import java.time.Duration;
 import java.util.UUID;
 
-/** PostgreSQL 问答租约：跨实例互斥、会话代次校验及同步持久化，模型调用不占数据库事务。 */
+/** MySQL 问答租约：跨实例互斥、会话代次校验及同步持久化，模型调用不占数据库事务。 */
 @Service
 public class ChatTurnService {
     private final JdbcTemplate jdbc;
@@ -59,13 +59,18 @@ public class ChatTurnService {
         }
         String request = UUID.randomUUID().toString();
         return transactions.execute(status -> {
-            int acquired = jdbc.update("""
+            jdbc.update("""
                     INSERT INTO ops_chat_turn (tenant_id, session_id, request_id, expires_at)
-                    VALUES (?, ?, ?, clock_timestamp() + (? * interval '1 second'))
-                    ON CONFLICT (tenant_id, session_id) DO UPDATE
-                    SET request_id = EXCLUDED.request_id, expires_at = EXCLUDED.expires_at
-                    WHERE ops_chat_turn.expires_at <= clock_timestamp()
-                    """, tenant, sessionId, request, leaseSeconds);
+                    VALUES (?, ?, ?, UTC_TIMESTAMP(6))
+                    ON DUPLICATE KEY UPDATE tenant_id = ops_chat_turn.tenant_id
+                    """, tenant, sessionId, request);
+            jdbc.queryForList("SELECT request_id FROM ops_chat_turn WHERE tenant_id=? AND session_id=? FOR UPDATE",
+                    tenant, sessionId);
+            int acquired = jdbc.update("""
+                    UPDATE ops_chat_turn SET request_id=?, expires_at=TIMESTAMPADD(SECOND, ?, UTC_TIMESTAMP(6)),
+                      conversation_id=NULL
+                    WHERE tenant_id=? AND session_id=? AND expires_at <= UTC_TIMESTAMP(6)
+                    """, request, leaseSeconds, tenant, sessionId);
             if (acquired != 1) {
                 throw new BusinessException(ErrorCode.CHAT_TURN_BUSY, "该会话正在回答，请完成或停止后重试");
             }
@@ -90,7 +95,7 @@ public class ChatTurnService {
                 SELECT EXISTS (SELECT 1 FROM ops_chat_turn t JOIN ops_conversation c
                   ON c.tenant_id=t.tenant_id AND c.session_id=t.session_id AND c.id=t.conversation_id
                 WHERE t.tenant_id=? AND t.session_id=? AND t.request_id=? AND c.id=? AND c.username=?
-                  AND t.expires_at > clock_timestamp())
+                  AND t.expires_at > UTC_TIMESTAMP(6))
                 """, Boolean.class, turn.tenantId(), turn.sessionId(), turn.requestId(),
                 turn.conversationId(), turn.username());
         if (!Boolean.TRUE.equals(active)) {
@@ -168,11 +173,11 @@ public class ChatTurnService {
      * @return 无返回值
      */
     private void insertMessage(ChatTurn turn, String role, String content) {
-        jdbc.update("INSERT INTO ops_message (tenant_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, clock_timestamp())",
+        jdbc.update("INSERT INTO ops_message (tenant_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))",
                 turn.tenantId(), turn.sessionId(), role, content);
         jdbc.update("""
                 UPDATE ops_conversation SET message_count=COALESCE(message_count,0)+1,
-                  last_active_at=clock_timestamp(), updated_at=clock_timestamp()
+                  last_active_at=UTC_TIMESTAMP(6), updated_at=UTC_TIMESTAMP(6)
                 WHERE id=? AND tenant_id=?
                 """, turn.conversationId(), turn.tenantId());
     }

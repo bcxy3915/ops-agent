@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import org.mockito.Mockito;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.entity.KnowledgeIndexTaskEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
@@ -52,13 +53,16 @@ class KnowledgeIndexTaskServiceTest {
     void setUp() {
         service = new KnowledgeIndexTaskService(taskMapper, documentMapper, indexer, transactionManager,
                 eventPublisher);
-        org.mockito.Mockito.lenient().when(transactionManager.getTransaction(any()))
+        Mockito.lenient().when(transactionManager.getTransaction(any()))
                 .thenReturn(new SimpleTransactionStatus());
     }
 
     private KnowledgeIndexTaskEntity task(Integer docVersion, int attempts, int maxAttempts) {
         KnowledgeIndexTaskEntity t = new KnowledgeIndexTaskEntity();
         t.setId(10L);
+        t.setClaimToken("claim");
+        Mockito.lenient().when(taskMapper.lockOwned(10L, "claim")).thenReturn(t);
+        Mockito.lenient().when(taskMapper.finish(anyLong(), anyString(), any(), anyString())).thenReturn(1);
         t.setDocId(1L);
         t.setDocVersion(docVersion);
         t.setVectorSource("upload:1");
@@ -92,17 +96,18 @@ class KnowledgeIndexTaskServiceTest {
     @DisplayName("执行成功：文档版本一致则重建索引并标记 SUCCESS")
     void runTask_success() {
         KnowledgeIndexTaskEntity t = task(1, 1, 3);
-        when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("1"));
+        Mockito.lenient().when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("1"));
+        when(documentMapper.lockById(1L)).thenReturn(verifiedDoc("1"));
 
         service.runTask(t);
 
         verify(indexer).reindex(any(), eq("upload:1"));
-        verify(taskMapper).finish(10L, KnowledgeIndexTaskService.STATUS_SUCCESS, null);
+        verify(taskMapper).finish(10L, KnowledgeIndexTaskService.STATUS_SUCCESS, null, "claim");
         ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
         verify(documentMapper).updateById(captor.capture());
         assertThat(captor.getValue().getPublishStatus())
-                .isEqualTo(KnowledgeDocumentService.PUBLISH_PUBLISHED);
-        assertThat(captor.getValue().getPublishedAt()).isNotNull();
+                .isEqualTo(KnowledgeDocumentService.PUBLISH_BUILDING);
+        assertThat(captor.getValue().getPublishedAt()).isNull();
         assertThat(captor.getValue().getPublishError()).isNull();
         // 入库成功后通知关键词索引刷新
         verify(eventPublisher).publishEvent(any(KnowledgeIndexUpdatedEvent.class));
@@ -112,52 +117,55 @@ class KnowledgeIndexTaskServiceTest {
     @DisplayName("版本已变化：跳过且不重建索引")
     void runTask_versionChanged() {
         KnowledgeIndexTaskEntity t = task(1, 1, 3);
-        when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("2"));
+        Mockito.lenient().when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("2"));
+        when(documentMapper.lockById(1L)).thenReturn(verifiedDoc("2"));
 
         service.runTask(t);
 
         verify(indexer, never()).reindex(any(), anyString());
-        verify(taskMapper).finish(10L, KnowledgeIndexTaskService.STATUS_SKIPPED, null);
+        verify(taskMapper).finish(10L, KnowledgeIndexTaskService.STATUS_SKIPPED, null, "claim");
     }
 
     @Test
     @DisplayName("文档不存在：跳过")
     void runTask_docMissing() {
         KnowledgeIndexTaskEntity t = task(1, 1, 3);
-        when(documentMapper.selectById(1L)).thenReturn(null);
+        when(documentMapper.lockById(1L)).thenReturn(null);
 
         service.runTask(t);
 
         verify(indexer, never()).reindex(any(), anyString());
-        verify(taskMapper).finish(10L, KnowledgeIndexTaskService.STATUS_SKIPPED, null);
+        verify(taskMapper).finish(10L, KnowledgeIndexTaskService.STATUS_SKIPPED, null, "claim");
     }
 
     @Test
     @DisplayName("执行失败未达上限：重置为待执行并保留错误原因")
     void runTask_retry() {
         KnowledgeIndexTaskEntity t = task(1, 1, 3);
-        when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("1"));
+        Mockito.lenient().when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("1"));
+        when(documentMapper.lockById(1L)).thenReturn(verifiedDoc("1"));
         doThrow(new IllegalStateException("embedding 调用失败"))
                 .when(indexer).reindex(any(), anyString());
 
         service.runTask(t);
 
-        verify(taskMapper).retry(eq(10L), anyString(), eq(30));
-        verify(taskMapper, never()).finish(eq(10L), anyString(), any());
+        verify(taskMapper).retry(eq(10L), anyString(), eq(30), eq("claim"));
+        verify(taskMapper, never()).finish(eq(10L), anyString(), any(), anyString());
     }
 
     @Test
     @DisplayName("执行失败已达上限：标记 FAILED")
     void runTask_failedExhausted() {
         KnowledgeIndexTaskEntity t = task(1, 3, 3);
-        when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("1"));
+        Mockito.lenient().when(documentMapper.selectById(1L)).thenReturn(verifiedDoc("1"));
+        when(documentMapper.lockById(1L)).thenReturn(verifiedDoc("1"));
         doThrow(new IllegalStateException("embedding 调用失败"))
                 .when(indexer).reindex(any(), anyString());
 
         service.runTask(t);
 
-        verify(taskMapper).finish(eq(10L), eq(KnowledgeIndexTaskService.STATUS_FAILED), anyString());
-        verify(taskMapper, never()).retry(anyLong(), anyString(), anyInt());
+        verify(taskMapper).finish(eq(10L), eq(KnowledgeIndexTaskService.STATUS_FAILED), anyString(), eq("claim"));
+        verify(taskMapper, never()).retry(anyLong(), anyString(), anyInt(), anyString());
         ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
         verify(documentMapper).updateById(captor.capture());
         assertThat(captor.getValue().getPublishStatus())

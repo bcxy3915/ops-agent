@@ -1,5 +1,15 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import com.example.opsaiagent.knowledge.model.Document;
+import com.example.opsaiagent.rbac.context.TenantContext;
+import dev.langchain4j.data.message.AiMessage;
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import org.assertj.core.api.Assertions;
+import org.mockito.Mockito;
+import org.springframework.security.access.AccessDeniedException;
 import com.example.opsaiagent.chat.entity.MessageEntity;
 import com.example.opsaiagent.chat.service.ConversationService;
 import dev.langchain4j.data.message.ChatMessage;
@@ -31,12 +41,12 @@ class ConversationChatMemoryStoreTest {
         store.openTurn(base + ".one", () -> { });
         assertThat(store.getMessages(base + ".one")).containsExactly(new UserMessage("第一轮"));
         store.closeTurn(base + ".one");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.updateMessages(base + ".one", List.of()))
+        Assertions.assertThatThrownBy(() -> store.updateMessages(base + ".one", List.of()))
                 .isInstanceOf(IllegalStateException.class);
         store.openTurn(base + ".two", () -> { });
         assertThat(store.getMessages(base + ".two")).containsExactly(
-                dev.langchain4j.data.message.AiMessage.from("其他实例的新答案"));
-        org.mockito.Mockito.verify(conversations, org.mockito.Mockito.times(2)).loadRecentMessages("s", "alice", 20);
+                AiMessage.from("其他实例的新答案"));
+        Mockito.verify(conversations, Mockito.times(2)).loadRecentMessages("s", "alice", 20);
     }
 
     /**
@@ -45,9 +55,9 @@ class ConversationChatMemoryStoreTest {
      */
     @Test
     void boundedCacheExpiresAndProtectsActiveTurns() {
-        var time = new java.util.concurrent.atomic.AtomicLong();
+        var time = new AtomicLong();
         var store = new ConversationChatMemoryStore(mock(ConversationService.class), 20, 2,
-                java.time.Duration.ofSeconds(10), time::get);
+                Duration.ofSeconds(10), time::get);
         String a = LangChain4jMemoryId.of("alice", "a");
         String b = LangChain4jMemoryId.of("alice", "b");
         String c = LangChain4jMemoryId.of("alice", "c");
@@ -55,12 +65,12 @@ class ConversationChatMemoryStoreTest {
         store.updateMessages(b, List.of(new UserMessage("可淘汰缓存")));
         store.openTurn(c + ".one", () -> { });
         assertThat(store.size()).isEqualTo(2);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.openTurn(b + ".one", () -> { }))
+        Assertions.assertThatThrownBy(() -> store.openTurn(b + ".one", () -> { }))
                 .hasMessageContaining("容量已满");
         assertThat(store.getMessages(a + ".one")).isEmpty();
-        time.set(java.time.Duration.ofSeconds(10).toNanos());
+        time.set(Duration.ofSeconds(10).toNanos());
         assertThat(store.size()).isZero();
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.getMessages(a + ".one"))
+        Assertions.assertThatThrownBy(() -> store.getMessages(a + ".one"))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -70,20 +80,20 @@ class ConversationChatMemoryStoreTest {
      */
     @Test
     void invalidatedTurnCannotReadMemoryOrSnapshot() {
-        var active = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var active = new AtomicBoolean(true);
         var store = new ConversationChatMemoryStore(mock(ConversationService.class), 20);
         String id = LangChain4jMemoryId.of("alice", "s") + ".request";
         store.openTurn(id, () -> {
             if (!active.get()) { throw new IllegalStateException("远端已删除"); }
         });
-        var original = new com.example.opsaiagent.knowledge.model.Document("正文", java.util.Map.of("source", "原始来源"));
+        var original = new Document("正文", Map.of("source", "原始来源"));
         store.bindDocuments(id, List.of(original));
         original.getMetadata().put("source", "被修改");
         store.documents(id).getFirst().getMetadata().put("source", "调用方修改");
         assertThat(store.documents(id).getFirst().getMetadata()).containsEntry("source", "原始来源");
         active.set(false);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.getMessages(id)).hasMessage("远端已删除");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.documents(id)).hasMessage("远端已删除");
+        Assertions.assertThatThrownBy(() -> store.getMessages(id)).hasMessage("远端已删除");
+        Assertions.assertThatThrownBy(() -> store.documents(id)).hasMessage("远端已删除");
     }
 
     /**
@@ -94,21 +104,21 @@ class ConversationChatMemoryStoreTest {
     void isolatesSameUserAndSessionAcrossTenantsIncludingCacheHits() {
         var store = new ConversationChatMemoryStore(mock(ConversationService.class), 20);
         try {
-            com.example.opsaiagent.rbac.context.TenantContext.set("tenant-a");
+            TenantContext.set("tenant-a");
             String tenantAId = LangChain4jMemoryId.of("alice", "same-session");
             store.updateMessages(tenantAId, List.of(new UserMessage("租户甲历史")));
-            com.example.opsaiagent.rbac.context.TenantContext.set("tenant-b");
+            TenantContext.set("tenant-b");
             String tenantBId = LangChain4jMemoryId.of("alice", "same-session");
             store.updateMessages(tenantBId, List.of(new UserMessage("租户乙历史")));
 
             assertThat(tenantBId).isNotEqualTo(tenantAId);
             assertThat(store.getMessages(tenantBId)).containsExactly(new UserMessage("租户乙历史"));
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> store.getMessages(tenantAId))
-                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
-            com.example.opsaiagent.rbac.context.TenantContext.set("tenant-a");
+            Assertions.assertThatThrownBy(() -> store.getMessages(tenantAId))
+                    .isInstanceOf(AccessDeniedException.class);
+            TenantContext.set("tenant-a");
             assertThat(store.getMessages(tenantAId)).containsExactly(new UserMessage("租户甲历史"));
         } finally {
-            com.example.opsaiagent.rbac.context.TenantContext.clear();
+            TenantContext.clear();
         }
     }
 
@@ -127,7 +137,7 @@ class ConversationChatMemoryStoreTest {
 
         var afterRestart = new ConversationChatMemoryStore(conversationService, 20);
         assertThat(afterRestart.getMessages(id)).containsExactly(new UserMessage("检查订单服务"),
-                dev.langchain4j.data.message.AiMessage.from("服务健康"));
+                AiMessage.from("服务健康"));
         verify(conversationService).loadRecentMessages("session-1", "alice", 20);
     }
 

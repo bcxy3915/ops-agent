@@ -44,7 +44,7 @@ public class KnowledgeChunkEntity {
     @TableField("section")
     private String section;
 
-    /** 关联 vector_store 的向量 ID（如可用） */
+    /** 关联 ES 的向量 ID（如可用） */
     @TableField("vector_id")
     private String vectorId;
 

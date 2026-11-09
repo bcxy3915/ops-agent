@@ -1,5 +1,10 @@
 package com.example.opsaiagent.loader;
 
+import com.example.opsaiagent.knowledge.model.Document;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.stream.Collectors;
+import org.mockito.Mockito;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.ingest.parser.DocumentParserStrategyFactory;
 import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
@@ -85,7 +90,7 @@ class DocumentLoaderTest {
     @BeforeEach
     void setUp() throws IOException {
         vectorIndexer = SplitterTestFixture.vectorIndexer(vectorStore);
-        lenient().when(transactionManager.getTransaction(any())).thenAnswer(inv -> org.mockito.Mockito.mock(TransactionStatus.class));
+        lenient().when(transactionManager.getTransaction(any())).thenAnswer(inv -> Mockito.mock(TransactionStatus.class));
         lenient().when(documentMapper.insert(any(KnowledgeDocumentEntity.class))).thenAnswer(inv -> {
             inv.getArgument(0, KnowledgeDocumentEntity.class).setId(10L);
             return 1;
@@ -96,9 +101,9 @@ class DocumentLoaderTest {
             return chunks.size();
         });
         KnowledgeDocumentIndexer indexer = new KnowledgeDocumentIndexer(documentMapper, chunkMapper,
-                vectorIndexer, jdbcTemplate, new SplitProperties());
+                vectorIndexer, vectorStore, new SplitProperties());
         loader = new DocumentLoader(indexer, chunkMapper, transactionManager, new DocumentParserStrategyFactory(
-                java.util.List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, jdbcTemplate,
+                List.of(new MarkdownDocumentParserStrategy())), resourcePatternResolver, vectorStore,
                 documentMapper);
         lenient().when(mockMdResource.getFilename()).thenReturn("test.md");
         lenient().when(mockNewResource.getFilename()).thenReturn("new.md");
@@ -119,17 +124,15 @@ class DocumentLoaderTest {
         when(resourcePatternResolver.getResources("classpath*:knowledge/*")).thenReturn(all);
     }
 
-    private Map<String, Object> row(String src, String hash) {
-        Map<String, Object> m = new java.util.HashMap<>();
-        m.put("src", src);
-        m.put("hash", hash);
-        return m;
+    private Document row(String src, String hash) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("source", src);
+        if (hash != null) m.put("contentHash", hash);
+        return new Document("夹具", m);
     }
 
-    private Map<String, Object> chunkRow(String src, String hash, Object cnt) {
-        Map<String, Object> m = row(src, hash);
-        m.put("cnt", cnt);
-        return m;
+    private Document chunkRow(String src, String hash, Object cnt) {
+        return row(src, hash);
     }
 
     private String mdHash() throws IOException {
@@ -146,7 +149,7 @@ class DocumentLoaderTest {
         Map<String, Object> result = loader.reload();
 
         assertThat(result).containsEntry("status", "skipped");
-        verify(jdbcTemplate, never()).queryForList(anyString());
+        verify(vectorStore, never()).documents();
         verify(vectorStore, never()).write(any());
     }
 
@@ -156,7 +159,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：全部已加载且指纹一致时跳过加载")
     void reload_allLoadedWithSameHash() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", mdHash())));
+        when(vectorStore.documents()).thenReturn(List.of(row("test.md", mdHash())));
 
         KnowledgeDocumentEntity complete = new KnowledgeDocumentEntity();
         complete.setId(1L);
@@ -170,7 +173,7 @@ class DocumentLoaderTest {
         assertThat(result).containsEntry("status", "success");
         assertThat(result).containsEntry("loaded", 0);
         assertThat(result).containsEntry("targets", 0);
-        verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+        verify(vectorStore, never()).deleteBySources(any());
         verify(vectorStore, never()).write(any());
     }
 
@@ -180,8 +183,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：检测到缺失文档时删除旧向量并增量加载")
     void reload_missingDocuments() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        when(vectorStore.documents()).thenReturn(List.of());
 
         Map<String, Object> result = loader.reload();
 
@@ -189,7 +191,7 @@ class DocumentLoaderTest {
         assertThat(result).containsEntry("targets", 1);
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
         // 缺失文档先删旧向量，再入库
-        verify(jdbcTemplate).update(contains("DELETE FROM vector_store"), any(Object[].class));
+        verify(vectorStore).deleteBySources(List.of("test.md"));
         verify(vectorStore, atLeastOnce()).write(any());
     }
 
@@ -199,14 +201,13 @@ class DocumentLoaderTest {
     @DisplayName("reload：同名文件内容变化（指纹不同）时重新加载")
     void reload_sameNameDifferentHash() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", "old-hash-value")));
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        when(vectorStore.documents()).thenReturn(List.of(row("test.md", "old-hash-value")));
 
         Map<String, Object> result = loader.reload();
 
         assertThat(result).containsEntry("targets", 1);
         assertThat((Integer) result.get("loaded")).isGreaterThan(0);
-        verify(jdbcTemplate).update(contains("DELETE FROM vector_store"), any(Object[].class));
+        verify(vectorStore).deleteBySources(List.of("test.md"));
         verify(vectorStore, atLeastOnce()).write(any());
     }
 
@@ -216,8 +217,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：向量库有记录但无指纹（旧数据）时保守重载")
     void reload_oldDataWithoutHash() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", null)));
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        when(vectorStore.documents()).thenReturn(List.of(row("test.md", null)));
 
         Map<String, Object> result = loader.reload();
 
@@ -233,12 +233,11 @@ class DocumentLoaderTest {
     void reload_cleanStaleSourcesOnlyBuiltin() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockNewResource}, new Resource[0]);
         // 向量库有：old.md（已从目录移除）、upload:5（用户上传）、case:9（案例沉淀）
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(
+        when(vectorStore.documents()).thenReturn(List.of(
                 row("old.md", mdHash()),
                 row("upload:5", mdHash()),
                 row("case:9", mdHash())
         ));
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
 
         Map<String, Object> result = loader.reload();
 
@@ -246,13 +245,13 @@ class DocumentLoaderTest {
         // new.md 缺失需加载，old.md 残留需清理
         assertThat(result).containsEntry("targets", 1);
 
-        ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate, times(2)).update(anyString(), argsCaptor.capture());
+        ArgumentCaptor<Collection> argsCaptor = ArgumentCaptor.forClass(Collection.class);
+        verify(vectorStore, times(2)).deleteBySources(argsCaptor.capture());
 
         // 两次删除：残留 old.md + 待加载 new.md；upload:/case: 不得出现在任何删除参数中
-        List<Object[]> allArgs = argsCaptor.getAllValues();
+        List<Collection> allArgs = argsCaptor.getAllValues();
         assertThat(allArgs).hasSize(2);
-        for (Object[] args : allArgs) {
+        for (Collection args : allArgs) {
             assertThat(args).doesNotContain("upload:5", "case:9");
         }
         verify(vectorStore, atLeastOnce()).write(any());
@@ -264,7 +263,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：向量库查询失败视为首次启动，全量加载")
     void reload_jdbcThrowsFallbackFullLoad() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenThrow(new RuntimeException("table not exists"));
+        when(vectorStore.documents()).thenThrow(new RuntimeException("table not exists"));
 
         Map<String, Object> result = loader.reload();
 
@@ -279,7 +278,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：内置文档写入 knowledge_document 元数据")
     void reload_insertsBuiltinDocumentMetadata() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(chunkRow("test.md", mdHash(), 3L)));
+        when(vectorStore.documents()).thenReturn(List.of(chunkRow("test.md", mdHash(), 3L)));
         when(documentMapper.selectList(any())).thenReturn(List.of());
 
         loader.reload();
@@ -291,7 +290,7 @@ class DocumentLoaderTest {
         assertThat(entity.getTenantId()).isEqualTo("0");
         assertThat(entity.getVisibility()).isEqualTo("PUBLIC");
         assertThat(entity.getReviewStatus()).isEqualTo("APPROVED");
-        assertThat(entity.getPublishStatus()).isEqualTo("PUBLISHED");
+        assertThat(entity.getPublishStatus()).isEqualTo("BUILDING");
         assertThat(entity.getTrustStatus()).isEqualTo("VERIFIED");
         assertThat(entity.getOwner()).isEqualTo("system");
         assertThat(entity.getSource()).isEqualTo("test.md");
@@ -306,8 +305,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：内置文档内容变化时刷新元数据并递增版本")
     void reload_updatesBuiltinDocumentMetadata() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", "old-hash-value")));
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        when(vectorStore.documents()).thenReturn(List.of(row("test.md", "old-hash-value")));
         KnowledgeDocumentEntity old = new KnowledgeDocumentEntity();
         old.setId(1L);
         old.setSource("test.md");
@@ -322,15 +320,14 @@ class DocumentLoaderTest {
         verify(documentMapper).updateById(captor.capture());
         assertThat(captor.getValue().getVersion()).isEqualTo(2);
         assertThat(captor.getValue().getRawContent()).isNotBlank();
-        assertThat(captor.getValue().getPublishStatus()).isEqualTo("PUBLISHED");
+        assertThat(captor.getValue().getPublishStatus()).isEqualTo("BUILDING");
     }
 
     @Test
     @DisplayName("reload：文件已从目录删除时清理内置文档元数据")
     void reload_removesObsoleteBuiltinMetadata() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0);
+        when(vectorStore.documents()).thenReturn(List.of());
         KnowledgeDocumentEntity obsolete = new KnowledgeDocumentEntity();
         obsolete.setId(2L);
         obsolete.setSource("old.md");
@@ -380,7 +377,7 @@ class DocumentLoaderTest {
         verify(vectorStore, atLeastOnce()).write(batchCaptor.capture());
         List<?> docs = batchCaptor.getAllValues().get(0);
         assertThat(docs).isNotEmpty();
-        com.example.opsaiagent.knowledge.model.Document d = (com.example.opsaiagent.knowledge.model.Document) docs.get(0);
+        Document d = (Document) docs.get(0);
         assertThat(d.getMetadata()).containsEntry("source", "test.md");
         assertThat(d.getMetadata()).containsEntry(DocumentLoader.HASH_METADATA_KEY, hash);
         assertThat(d.getMetadata())
@@ -431,9 +428,9 @@ class DocumentLoaderTest {
             assertThat(chunk.getSection()).isNotBlank();
             assertThat(markdown).contains(chunk.getContent());
         });
-        assertThat(chunks.getValue().stream().map(KnowledgeChunkEntity::getContent).collect(java.util.stream.Collectors.joining()))
+        assertThat(chunks.getValue().stream().map(KnowledgeChunkEntity::getContent).collect(Collectors.joining()))
                 .isEqualTo(markdown);
-        ArgumentCaptor<List<com.example.opsaiagent.knowledge.model.Document>> vectors = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<Document>> vectors = ArgumentCaptor.forClass(List.class);
         verify(vectorStore).write(vectors.capture());
         for (int i = 0; i < vectors.getValue().size(); i++) {
             var vector = vectors.getValue().get(i);
@@ -455,7 +452,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：文件指纹相同但保存正文不一致时自动修复")
     void reload_repairsLegacyPlainTextWithUnchangedHash() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", mdHash())));
+        when(vectorStore.documents()).thenReturn(List.of(row("test.md", mdHash())));
         KnowledgeDocumentEntity legacy = new KnowledgeDocumentEntity();
         legacy.setId(1L);
         legacy.setSource("test.md");
@@ -477,7 +474,7 @@ class DocumentLoaderTest {
     @DisplayName("reload：原文正确但分块缺失时修复，文档版本保持不变")
     void reload_repairsMissingChunksWithoutChangingVersion() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(row("test.md", mdHash())));
+        when(vectorStore.documents()).thenReturn(List.of(row("test.md", mdHash())));
         KnowledgeDocumentEntity legacy = new KnowledgeDocumentEntity();
         legacy.setId(1L);
         legacy.setSource("test.md");
@@ -500,8 +497,8 @@ class DocumentLoaderTest {
     @DisplayName("reload：向量写入失败回滚，不误报成功")
     void reload_rollsBackWhenVectorWriteFails() throws IOException {
         stubKnowledgeFiles(new Resource[]{mockMdResource}, new Resource[0]);
-        when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
-        org.mockito.Mockito.doThrow(new IllegalStateException("embedding 暂不可用")).when(vectorStore).write(any());
+        when(vectorStore.documents()).thenReturn(List.of());
+        Mockito.doThrow(new IllegalStateException("embedding 暂不可用")).when(vectorStore).write(any());
 
         assertThat(loader.reload()).containsEntry("status", "failed");
         verify(transactionManager).rollback(any());
@@ -514,18 +511,18 @@ class DocumentLoaderTest {
     void deleteBySources_empty() {
         int deleted = loader.deleteBySources(Set.of());
         assertThat(deleted).isZero();
-        verify(jdbcTemplate, never()).update(anyString(), any(Object[].class));
+        verify(vectorStore, never()).deleteBySources(any());
     }
 
     @Test
     @DisplayName("deleteBySources：按 IN 参数精确删除")
     void deleteBySources_inClause() {
-        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(2);
+        when(vectorStore.deleteBySources(any())).thenReturn(2);
 
         int deleted = loader.deleteBySources(List.of("a.md", "b.md"));
 
         assertThat(deleted).isEqualTo(2);
-        verify(jdbcTemplate).update(contains("IN (?,?)"), any(Object[].class));
+        verify(vectorStore).deleteBySources(List.of("a.md", "b.md"));
     }
 
     // ==================== computeLoadTargets ====================
@@ -539,7 +536,7 @@ class DocumentLoaderTest {
                 "same.md", "h3",
                 "old.md", "h4"
         );
-        Map<String, String> existing = new java.util.HashMap<>();
+        Map<String, String> existing = new HashMap<>();
         existing.put("changed.md", "h2-old");
         existing.put("same.md", "h3");
         existing.put("old.md", null);

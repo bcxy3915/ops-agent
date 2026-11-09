@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval.bm25;
 
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
 import com.example.opsaiagent.retrieval.KnowledgeIndexUpdatedEvent;
@@ -28,7 +29,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class InMemoryBm25Retriever implements KeywordRetriever {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final KnowledgeVectorStore vectorStore;
     private final ObjectMapper objectMapper;
     private final DataScope dataScope;
     /** 只读快照：重建时整体替换引用，避免检索线程读到半成品索引 */
@@ -88,16 +89,7 @@ public class InMemoryBm25Retriever implements KeywordRetriever {
     @Override
     public void rebuild() {
         try {
-            List<Document> docs = jdbcTemplate.query(
-                    "SELECT id, content, metadata FROM vector_store",
-                    (rs, rowNum) -> {
-                        String id = rs.getString("id");
-                        String content = rs.getString("content");
-                        String metadataJson = rs.getString("metadata");
-                        Map<String, Object> metadata = parseMetadata(metadataJson);
-                        return new Document(id, content, metadata);
-                    }
-            );
+            List<Document> docs = vectorStore.documents();
             Bm25Index fresh = new Bm25Index();
             fresh.build(docs);
             index = fresh;

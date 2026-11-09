@@ -1,5 +1,7 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import com.example.opsaiagent.chat.event.ConversationDeletedEvent;
+import org.springframework.transaction.event.TransactionalEventListener;
 import com.example.opsaiagent.chat.service.ConversationService;
 import com.example.opsaiagent.knowledge.model.Document;
 import com.example.opsaiagent.rbac.context.TenantContext;
@@ -157,8 +159,8 @@ public class ConversationChatMemoryStore implements ChatMemoryStore {
      * @param event 会话删除事件
      * @return 无返回值
      */
-    @org.springframework.transaction.event.TransactionalEventListener
-    public synchronized void onConversationDeleted(com.example.opsaiagent.chat.event.ConversationDeletedEvent event) {
+    @TransactionalEventListener
+    public synchronized void onConversationDeleted(ConversationDeletedEvent event) {
         entries.keySet().removeIf(id -> id.equals(event.memoryId()) || id.toString().startsWith(event.memoryId() + "."));
     }
 

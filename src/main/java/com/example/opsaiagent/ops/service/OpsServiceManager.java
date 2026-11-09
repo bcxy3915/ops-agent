@@ -1,5 +1,6 @@
 package com.example.opsaiagent.ops.service;
 
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.ops.mapper.OpsServiceMapper;
@@ -166,7 +167,7 @@ public class OpsServiceManager {
         OpsServiceEntity entity = new OpsServiceEntity();
         entity.setId(id);
         entity.setStatus(status);
-        entity.setLastCheckedAt(java.time.LocalDateTime.now());
+        entity.setLastCheckedAt(LocalDateTime.now());
         mapper.updateById(entity);
     }
 

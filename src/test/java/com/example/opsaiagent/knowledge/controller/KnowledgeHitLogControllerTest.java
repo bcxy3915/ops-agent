@@ -1,5 +1,8 @@
 package com.example.opsaiagent.knowledge.controller;
 
+import java.lang.reflect.Method;
+import org.assertj.core.api.Assertions;
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCaseReferenceResponse;
@@ -92,13 +95,13 @@ class KnowledgeHitLogControllerTest {
     @Test
     @DisplayName("鉴权：两个查询接口均为只读，无写权限注解")
     void readOnly_endpoints() throws Exception {
-        java.lang.reflect.Method m1 = KnowledgeHitLogController.class.getMethod("listDocumentHits", Long.class, int.class, int.class);
-        org.springframework.security.access.prepost.PreAuthorize pa1 =
-                m1.getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class);
-        java.lang.reflect.Method m2 = KnowledgeHitLogController.class.getMethod("listCaseReferences", Long.class);
-        org.springframework.security.access.prepost.PreAuthorize pa2 =
-                m2.getAnnotation(org.springframework.security.access.prepost.PreAuthorize.class);
-        org.assertj.core.api.Assertions.assertThat(pa1).isNull();
-        org.assertj.core.api.Assertions.assertThat(pa2).isNull();
+        Method m1 = KnowledgeHitLogController.class.getMethod("listDocumentHits", Long.class, int.class, int.class);
+        PreAuthorize pa1 =
+                m1.getAnnotation(PreAuthorize.class);
+        Method m2 = KnowledgeHitLogController.class.getMethod("listCaseReferences", Long.class);
+        PreAuthorize pa2 =
+                m2.getAnnotation(PreAuthorize.class);
+        Assertions.assertThat(pa1).isNull();
+        Assertions.assertThat(pa2).isNull();
     }
 }

@@ -1,5 +1,6 @@
 package com.example.opsaiagent.alert.service;
 
+import org.mockito.Mockito;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.alert.entity.AlertRuleEntity;
@@ -78,7 +79,7 @@ class AlertEvaluatorTest {
         // 默认允许产生事件；个别用例单独覆盖（静默 / 节流用例会短路或覆盖该 stub）
         lenient().when(throttle.allowEvent(any(), anyString(), anyLong())).thenReturn(true);
         // 默认无到期维护窗口、服务不在维护窗口内（evaluate() 开头与命中分支会查询）
-        lenient().when(maintenanceWindowService.expireDueWindows(any())).thenReturn(java.util.List.of());
+        lenient().when(maintenanceWindowService.expireDueWindows(any())).thenReturn(List.of());
         lenient().when(maintenanceWindowService.isServiceInWindow(anyString(), any())).thenReturn(false);
     }
 
@@ -397,7 +398,7 @@ class AlertEvaluatorTest {
     @DisplayName("维护窗口到期：仍命中 → 恢复 FIRING 并重新触发闭环")
     void maintenanceWindow_expireStillHitRestoresFiring() {
         when(maintenanceWindowService.expireDueWindows(any()))
-                .thenReturn(java.util.List.of("svc-a"));
+                .thenReturn(List.of("svc-a"));
         AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
         when(ruleMapper.selectById(1L)).thenReturn(rule);
         when(metricSampleStore.queryLatest(eq("svc-a"), eq("cpu"), anyLong()))
@@ -409,19 +410,19 @@ class AlertEvaluatorTest {
         suppressed.setService("svc-a");
         suppressed.setStatus("SILENCED");
         suppressed.setSilencedReason(MaintenanceWindowService.SILENCE_REASON_PREFIX + "维护窗口");
-        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(java.util.List.of(suppressed));
+        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(List.of(suppressed));
 
         evaluator.evaluate();
 
         verify(eventMapper).updateById(argThat((AlertEventEntity e) -> "FIRING".equals(e.getStatus())));
-        verify(notificationCenter, org.mockito.Mockito.atLeastOnce()).sendOnEvent(any(), any());
+        verify(notificationCenter, Mockito.atLeastOnce()).sendOnEvent(any(), any());
     }
 
     @Test
     @DisplayName("维护窗口到期：指标已恢复 → 直接 RESOLVED，不通知")
     void maintenanceWindow_expireRecoveredResolves() {
         when(maintenanceWindowService.expireDueWindows(any()))
-                .thenReturn(java.util.List.of("svc-a"));
+                .thenReturn(List.of("svc-a"));
         AlertRuleEntity rule = rule(1L, "THRESHOLD", "gt", 80, 0);
         when(ruleMapper.selectById(1L)).thenReturn(rule);
         when(metricSampleStore.queryLatest(eq("svc-a"), eq("cpu"), anyLong()))
@@ -433,7 +434,7 @@ class AlertEvaluatorTest {
         suppressed.setService("svc-a");
         suppressed.setStatus("SILENCED");
         suppressed.setSilencedReason(MaintenanceWindowService.SILENCE_REASON_PREFIX + "维护窗口");
-        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(java.util.List.of(suppressed));
+        when(eventMapper.selectList(any(Wrapper.class))).thenReturn(List.of(suppressed));
 
         evaluator.evaluate();
 

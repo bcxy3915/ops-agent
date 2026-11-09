@@ -1,5 +1,6 @@
 package com.example.opsaiagent.snapshot.service;
 
+import java.time.ZoneId;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
@@ -86,7 +87,7 @@ public class FailureSnapshotService {
     public SnapshotData build(AlertEventEntity event) {
         long firedMs = event.getFiredAt() == null
                 ? System.currentTimeMillis()
-                : event.getFiredAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+                : event.getFiredAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
 
         ServiceInfo info = serviceRegistry.getByName(event.getService());
         SnapshotData.ServiceView serviceView = info == null ? null

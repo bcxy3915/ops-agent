@@ -1,5 +1,6 @@
 package com.example.opsaiagent.chat.controller;
 
+import jakarta.validation.Valid;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.chat.dto.AskResponse;
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
@@ -48,7 +49,7 @@ public class ChatController {
     @PostMapping("/knowledge/reload")
     public Map<String, Object> reloadDocument() {
         Map<String, Object> result = documentLoader.reload();
-        // 重建 BM25 内存索引（从 vector_store 全量构建，纳入 upload:/case: 文档与最新向量），
+        // 重建 BM25 内存索引（从检索投影全量构建，纳入 upload:/case: 文档与最新向量），
         // 使"重建索引"真正覆盖关键词检索，避免上传文档 publish 后长期检索不到
         keywordRetriever.rebuild();
         result.put("indexRebuilt", true);
@@ -100,7 +101,7 @@ public class ChatController {
     @RateLimit(key = "askStream", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE + "; charset=utf-8")
     public Flux<ServerSentEvent<String>> askStream(
-            @jakarta.validation.Valid @RequestBody AskStreamRequest request) {
+            @Valid @RequestBody AskStreamRequest request) {
         String sessionId = (request.getSessionId() == null || request.getSessionId().isBlank())
                 ? "default"
                 : request.getSessionId();

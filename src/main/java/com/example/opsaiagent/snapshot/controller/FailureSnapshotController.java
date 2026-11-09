@@ -1,5 +1,6 @@
 package com.example.opsaiagent.snapshot.controller;
 
+import java.util.LinkedHashMap;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.snapshot.dto.SnapshotData;
 import com.example.opsaiagent.snapshot.entity.FailureSnapshotEntity;
@@ -45,7 +46,7 @@ public class FailureSnapshotController {
     @GetMapping("/{id}")
     public ApiResponse<Map<String, Object>> detail(@PathVariable Long id) {
         FailureSnapshotEntity entity = snapshotService.getById(id);
-        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", entity.getId());
         result.put("alertEventId", entity.getAlertEventId());
         result.put("tenantId", entity.getTenantId());

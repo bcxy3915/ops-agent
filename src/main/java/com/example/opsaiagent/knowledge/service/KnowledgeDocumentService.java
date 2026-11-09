@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.common.error.ErrorCode;
@@ -67,7 +68,7 @@ public class KnowledgeDocumentService {
     public static final String TRUST_PENDING = "PENDING";
     /** 复核到期（自动超期判定标记） */
     public static final String TRUST_EXPIRED = "EXPIRED";
-    /** 上传文档向量在 vector_store.metadata.source 的前缀 */
+    /** 上传文档向量在 检索投影 metadata.source 的前缀 */
     public static final String UPLOAD_VECTOR_SOURCE_PREFIX = "upload:";
     /** 在线编写文档 source 前缀 */
     public static final String ONLINE_SOURCE_PREFIX = "online:";
@@ -117,7 +118,7 @@ public class KnowledgeDocumentService {
     private final KnowledgeChunkMapper chunkMapper;
     private final VectorIndexer vectorIndexer;
     private final DocumentParserStrategyFactory parserStrategyFactory;
-    private final JdbcTemplate jdbcTemplate;
+    private final KnowledgeVectorStore vectorStore;
     private final ObjectMapper objectMapper;
     private final KnowledgeVersionService versionService;
     private final TenantService tenantService;
@@ -1010,16 +1011,8 @@ public class KnowledgeDocumentService {
      * @param entity 文档
      */
     private void deleteVectors(KnowledgeDocumentEntity entity) {
-        int deleted = 0;
-        try {
-            deleted = jdbcTemplate.update("DELETE FROM vector_store WHERE metadata->>'source' = ?",
-                    vectorSourceOf(entity));
-        } catch (Exception e) {
-            log.warn("删除文档向量失败（表可能不存在）: docId={}, err={}", entity.getId(), e.getMessage());
-        }
-        if (deleted > 0) {
-            publishIndexRefreshAfterCommit(entity.getId());
-        }
+        int deleted = vectorStore.deleteBySources(List.of(vectorSourceOf(entity)));
+        if (deleted > 0) publishIndexRefreshAfterCommit(entity.getId());
     }
 
     /**

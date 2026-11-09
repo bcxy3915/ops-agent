@@ -1,5 +1,6 @@
 package com.example.opsaiagent.oncall.service;
 
+import java.util.Arrays;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
@@ -108,7 +109,7 @@ public class OncallMemberService {
     public List<String> resolveRecipients(String tenantId, String toUsers, String toRole, Integer levelNo) {
         if (toUsers != null && !toUsers.isBlank()) {
             // 规则显式 toUsers 优先：逗号分隔的用户 ID（VARCHAR）
-            return java.util.Arrays.stream(toUsers.split(","))
+            return Arrays.stream(toUsers.split(","))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
                     .toList();

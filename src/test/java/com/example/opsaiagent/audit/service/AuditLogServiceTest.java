@@ -1,5 +1,6 @@
 package com.example.opsaiagent.audit.service;
 
+import org.mockito.Mockito;
 import com.example.opsaiagent.audit.entity.AuditLogEntity;
 import com.example.opsaiagent.audit.mapper.AuditLogMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -49,7 +50,7 @@ class AuditLogServiceTest {
     @Test
     @DisplayName("save：数据库异常被捕获，不向外抛出")
     void save_exceptionSwallowed() {
-        org.mockito.Mockito.doThrow(new RuntimeException("DB down"))
+        Mockito.doThrow(new RuntimeException("DB down"))
                 .when(auditLogMapper).insert(any(AuditLogEntity.class));
 
         assertThatCode(() -> auditLogService.save(log("admin", "LOGIN")))

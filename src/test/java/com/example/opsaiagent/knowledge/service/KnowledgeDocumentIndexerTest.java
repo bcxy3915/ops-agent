@@ -38,7 +38,7 @@ class KnowledgeDocumentIndexerTest {
      */
     @BeforeEach
     void setUp() {
-        indexer = new KnowledgeDocumentIndexer(documents, chunks, SplitterTestFixture.vectorIndexer(vectors), jdbc, new SplitProperties());
+        indexer = new KnowledgeDocumentIndexer(documents, chunks, SplitterTestFixture.vectorIndexer(vectors), vectors, new SplitProperties());
         when(chunks.insertBatch(any())).thenAnswer(invocation -> {
             List<KnowledgeChunkEntity> batch = invocation.getArgument(0);
             for (int i = 0; i < batch.size(); i++) batch.get(i).setId(100L + i);

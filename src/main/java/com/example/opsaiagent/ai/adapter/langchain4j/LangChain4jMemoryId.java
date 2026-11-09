@@ -1,5 +1,6 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import com.example.opsaiagent.rbac.context.TenantContext;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
@@ -17,7 +18,7 @@ public final class LangChain4jMemoryId {
      * @return 用户隔离的记忆标识
      */
     public static String of(String username, String sessionId) {
-        String tenantId = com.example.opsaiagent.rbac.context.TenantContext.get();
+        String tenantId = TenantContext.get();
         String tenant = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString((tenantId == null ? "" : tenantId).getBytes(StandardCharsets.UTF_8));
         String user = Base64.getUrlEncoder().withoutPadding()

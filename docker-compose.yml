@@ -1,16 +1,53 @@
 services:
+  mysql:
+    image: mysql:8.4
+    container_name: ops-mysql
+    ports:
+      - "127.0.0.1:23306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
+      MYSQL_DATABASE: opsdb
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_bin", "--default-time-zone=+00:00"]
+    volumes:
+      - ops_mysqldata:/var/lib/mysql
+      - ./init-scripts/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h localhost -u root --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.6
+    container_name: ops-elasticsearch
+    ports:
+      - "127.0.0.1:9200:9200"
+    environment:
+      discovery.type: single-node
+      # 仅绑定回环地址的本地开发环境；远程部署须启用认证和 TLS。
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - ops_esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health?wait_for_status=yellow"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
   postgres:
     image: pgvector/pgvector:pg16
     container_name: ops-postgres
+    profiles: [legacy]
     ports:
-      - "${DB_PORT:-5433}:5432"
+      - "${PG_PORT:-5433}:5432"
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME:-opsdb}
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-${DB_PASSWORD}}
+      POSTGRES_DB: ${PG_DATABASE:-opsdb}
     volumes:
       - ops_pgdata:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d
 
 volumes:
   ops_pgdata:
+  ops_mysqldata:
+  ops_esdata:

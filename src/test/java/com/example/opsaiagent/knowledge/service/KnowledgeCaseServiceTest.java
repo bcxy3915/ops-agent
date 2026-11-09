@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import org.mockito.Mockito;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.alert.entity.AlertEventEntity;
@@ -474,7 +475,7 @@ class KnowledgeCaseServiceTest {
 
             assertThat(generated).isEqualTo(2);
             ArgumentCaptor<KnowledgeCaseEntity> captor = ArgumentCaptor.forClass(KnowledgeCaseEntity.class);
-            verify(caseMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
+            verify(caseMapper, Mockito.times(2)).insert(captor.capture());
             KnowledgeCaseEntity first = captor.getAllValues().get(0);
             assertThat(first.getDiagnosisRecordId()).isEqualTo(1L);
             assertThat(first.getSourceAlertId()).isEqualTo(100L);

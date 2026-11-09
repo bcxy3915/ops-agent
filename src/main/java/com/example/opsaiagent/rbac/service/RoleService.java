@@ -1,5 +1,6 @@
 package com.example.opsaiagent.rbac.service;
 
+import java.util.Objects;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
@@ -77,7 +78,7 @@ public class RoleService {
         requireRole(roleId);
         LinkedHashSet<Long> distinct = new LinkedHashSet<>();
         if (permissionIds != null) {
-            if (permissionIds.stream().anyMatch(java.util.Objects::isNull)) {
+            if (permissionIds.stream().anyMatch(Objects::isNull)) {
                 throw new BusinessException(ErrorCode.ROLE_PERMISSION_INVALID, "权限 ID 不能为空");
             }
             distinct.addAll(permissionIds);

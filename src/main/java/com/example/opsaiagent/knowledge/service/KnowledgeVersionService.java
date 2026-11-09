@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import java.util.Objects;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
@@ -111,7 +112,7 @@ public class KnowledgeVersionService {
         if (version == null) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_VERSION_NOT_FOUND, "知识文档版本不存在");
         }
-        if (!java.util.Objects.equals(version.getDocId(), docId)) {
+        if (!Objects.equals(version.getDocId(), docId)) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_VERSION_NOT_FOUND, "版本不属于该文档");
         }
         return version;

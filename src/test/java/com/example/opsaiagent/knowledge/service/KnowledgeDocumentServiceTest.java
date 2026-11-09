@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import org.mockito.Mockito;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.opsaiagent.common.error.ErrorCode;
@@ -106,11 +107,11 @@ class KnowledgeDocumentServiceTest {
         // 审核/发布改为入队异步索引任务，验证任务入队而非同步向量写入
 
         // 使用真实解析策略工厂，覆盖 md/pdf/txt/docx 真实解析路径
-        parserStrategyFactory = new DocumentParserStrategyFactory(java.util.List.of(
+        parserStrategyFactory = new DocumentParserStrategyFactory(List.of(
                 new MarkdownDocumentParserStrategy(), new PdfDocumentParserStrategy(),
                 new TxtDocumentParserStrategy(), new DocxDocumentParserStrategy()));
         service = new KnowledgeDocumentService(documentMapper, chunkMapper, vectorIndexer, parserStrategyFactory,
-                jdbcTemplate, objectMapper, versionService, tenantService, deptService, queryScope,
+                vectorStore, objectMapper, versionService, tenantService, deptService, queryScope,
                 indexTaskService, eventPublisher);
         lenient().when(documentMapper.selectById(anyLong())).thenReturn(null);
     }
@@ -198,7 +199,7 @@ class KnowledgeDocumentServiceTest {
         assertThat(captor.getValue().getSize()).isEqualTo(1);
 
         service.list(null, null, null, null, -5, 999);
-        verify(documentMapper, org.mockito.Mockito.atLeast(2)).selectPage(captor.capture(), any(LambdaQueryWrapper.class));
+        verify(documentMapper, Mockito.atLeast(2)).selectPage(captor.capture(), any(LambdaQueryWrapper.class));
         Page last = captor.getAllValues().get(captor.getAllValues().size() - 1);
         assertThat(last.getCurrent()).isEqualTo(1);
         assertThat(last.getSize()).isEqualTo(100);
@@ -493,7 +494,7 @@ class KnowledgeDocumentServiceTest {
             verify(chunkMapper, never()).delete(any(LambdaQueryWrapper.class));
             verify(indexTaskService).enqueue(anyLong(), anyInt(), anyString());
             ArgumentCaptor<KnowledgeDocumentEntity> updateCaptor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
-            verify(documentMapper, org.mockito.Mockito.atLeast(1)).updateById(updateCaptor.capture());
+            verify(documentMapper, Mockito.atLeast(1)).updateById(updateCaptor.capture());
             assertThat(updateCaptor.getAllValues().get(0).getLastReviewAt()).isNotNull();
             // 索引异步执行，审核返回时分块尚未生成
             assertThat(r.getChunkCount()).isZero();
@@ -509,7 +510,7 @@ class KnowledgeDocumentServiceTest {
         entity.setReviewedBy("dept-reviewer");
         when(documentMapper.selectById(1L)).thenReturn(entity);
         when(tenantService.findById("t1")).thenReturn(Optional.of(tenant("DEPT_AND_TENANT", false)));
-        when(jdbcTemplate.update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1")))
+        when(vectorStore.deleteBySources(List.of("upload:1")))
                 .thenReturn(1);
 
         try (MockedStatic<SecurityUtils> sec = mockStatic(SecurityUtils.class)) {
@@ -525,7 +526,7 @@ class KnowledgeDocumentServiceTest {
             verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
             verify(chunkMapper, never()).insert(any(KnowledgeChunkEntity.class));
             // 驳回必须物理删除旧向量：向量 metadata 是快照，仅改 DB 不足以让内容下线
-            verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), eq("upload:1"));
+            verify(vectorStore).deleteBySources(List.of("upload:1"));
             // 驳回删除向量后必须刷新内存关键词索引，否则旧内容仍可被 BM25 命中
             verify(eventPublisher).publishEvent(any(KnowledgeIndexUpdatedEvent.class));
         }
@@ -766,7 +767,7 @@ class KnowledgeDocumentServiceTest {
         assertThat(r.getRawContent()).startsWith("全新内容");
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
         verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
-        verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
+        verify(vectorStore).deleteBySources(any());
     }
 
     @Test
@@ -857,7 +858,7 @@ class KnowledgeDocumentServiceTest {
         service.delete(1L);
 
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
-        verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
+        verify(vectorStore).deleteBySources(any());
         verify(documentMapper).deleteById(1L);
     }
 
@@ -998,7 +999,7 @@ class KnowledgeDocumentServiceTest {
 
         assertThat(count).isEqualTo(2);
         ArgumentCaptor<KnowledgeDocumentEntity> captor = ArgumentCaptor.forClass(KnowledgeDocumentEntity.class);
-        verify(documentMapper, org.mockito.Mockito.times(2)).updateById(captor.capture());
+        verify(documentMapper, Mockito.times(2)).updateById(captor.capture());
         assertThat(captor.getAllValues()).allMatch(d -> "EXPIRED".equals(d.getTrustStatus()));
     }
 
@@ -1033,7 +1034,7 @@ class KnowledgeDocumentServiceTest {
         verify(versionService).recordSnapshot(eq(1L), eq("当前内容"), any(), eq("ROLLBACK_BACKUP"));
         verify(chunkMapper).delete(any(LambdaQueryWrapper.class));
         verify(indexTaskService, never()).enqueue(anyLong(), anyInt(), anyString());
-        verify(jdbcTemplate).update(eq("DELETE FROM vector_store WHERE metadata->>'source' = ?"), any(String.class));
+        verify(vectorStore).deleteBySources(any());
     }
 
     @Test

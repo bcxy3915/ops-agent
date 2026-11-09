@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import org.mockito.ArgumentMatchers;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.example.opsaiagent.exception.BusinessException;
@@ -236,7 +237,7 @@ class KnowledgeQualityServiceTest {
         assertThat(resp.getDecision()).isEqualTo("MANUAL");
         assertThat(newDoc.getTrustStatus()).isNotEqualTo("EXPIRED");
         assertThat(newDoc.getConflictStatus()).isEqualTo("MANUAL");
-        verify(documentMapper, never()).updateById(org.mockito.ArgumentMatchers.argThat((KnowledgeDocumentEntity e) -> {
+        verify(documentMapper, never()).updateById(ArgumentMatchers.argThat((KnowledgeDocumentEntity e) -> {
             return "EXPIRED".equals(e.getTrustStatus());
         }));
     }

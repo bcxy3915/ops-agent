@@ -1,5 +1,8 @@
 package com.example.opsaiagent.knowledge.controller;
 
+import java.lang.reflect.Method;
+import com.example.opsaiagent.knowledge.dto.ConflictResolveRequest;
+import com.example.opsaiagent.knowledge.dto.QualityCheckRequest;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.ConflictResolveResponse;
@@ -92,8 +95,8 @@ class KnowledgeQualityControllerTest {
     @Test
     @DisplayName("质检接口为写操作：check 要求 knowledge:write，resolve 要求 knowledge:review")
     void writeEndpoints_requirePermission() throws Exception {
-        java.lang.reflect.Method check = KnowledgeQualityController.class.getMethod("check", com.example.opsaiagent.knowledge.dto.QualityCheckRequest.class);
-        java.lang.reflect.Method resolve = KnowledgeQualityController.class.getMethod("resolve", Long.class, com.example.opsaiagent.knowledge.dto.ConflictResolveRequest.class);
+        Method check = KnowledgeQualityController.class.getMethod("check", QualityCheckRequest.class);
+        Method resolve = KnowledgeQualityController.class.getMethod("resolve", Long.class, ConflictResolveRequest.class);
 
         PreAuthorize checkAuth = check.getAnnotation(PreAuthorize.class);
         PreAuthorize resolveAuth = resolve.getAnnotation(PreAuthorize.class);
@@ -106,8 +109,8 @@ class KnowledgeQualityControllerTest {
     @Test
     @DisplayName("质检接口带审计注解：check 与 resolve 均记录操作")
     void writeEndpoints_audited() throws Exception {
-        java.lang.reflect.Method check = KnowledgeQualityController.class.getMethod("check", com.example.opsaiagent.knowledge.dto.QualityCheckRequest.class);
-        java.lang.reflect.Method resolve = KnowledgeQualityController.class.getMethod("resolve", Long.class, com.example.opsaiagent.knowledge.dto.ConflictResolveRequest.class);
+        Method check = KnowledgeQualityController.class.getMethod("check", QualityCheckRequest.class);
+        Method resolve = KnowledgeQualityController.class.getMethod("resolve", Long.class, ConflictResolveRequest.class);
 
         AuditLog checkAudit = check.getAnnotation(AuditLog.class);
         AuditLog resolveAudit = resolve.getAnnotation(AuditLog.class);

@@ -31,15 +31,16 @@ spring:
       mail.smtp.ssl.enable: true
 
   datasource:
-    url: jdbc:postgresql://localhost:5433/opsdb
-    username: postgres
+    url: ${DB_URL:jdbc:mysql://localhost:23306/opsdb?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8}
+    username: ${DB_USER:root}
     password: ${DB_PASSWORD:}     # ← 建议也改成环境变量
-    driver-class-name: org.postgresql.Driver
+    driver-class-name: com.mysql.cj.jdbc.Driver
 
 
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+    local-cache-scope: statement
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     banner: false
@@ -72,19 +73,24 @@ ops-agent:
       base-url: ${OPS_EMBEDDING_BASE_URL:${spring.ai.openai.embedding.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}}
       api-key: ${OPS_EMBEDDING_API_KEY:${spring.ai.openai.embedding.api-key:${DASHSCOPE_API_KEY:}}}
       model: ${OPS_EMBEDDING_MODEL:${spring.ai.openai.embedding.model:text-embedding-v3}}
-      dimensions: ${OPS_EMBEDDING_DIMENSIONS:${spring.ai.vectorstore.pgvector.dimensions:1024}}
+      dimensions: ${OPS_EMBEDDING_DIMENSIONS:1024}
       timeout: ${OPS_EMBEDDING_TIMEOUT:60s}
       max-retries: ${OPS_EMBEDDING_MAX_RETRIES:2}
       metadata-mode: ${OPS_EMBEDDING_METADATA_MODE:${spring.ai.openai.embedding.metadata-mode:EMBED}}
     vector-store:
-      dimensions: ${OPS_VECTOR_DIMENSIONS:${spring.ai.vectorstore.pgvector.dimensions:1024}}
-      schema: ${OPS_VECTOR_SCHEMA:${spring.ai.vectorstore.pgvector.schema-name:public}}
-      table: ${OPS_VECTOR_TABLE:${spring.ai.vectorstore.pgvector.table-name:vector_store}}
-      distance-type: ${OPS_VECTOR_DISTANCE:${spring.ai.vectorstore.pgvector.distance-type:COSINE_DISTANCE}}
-  # 检索方式 type：in-memory / postgres / elasticsearch
+      dimensions: ${OPS_VECTOR_DIMENSIONS:1024}
+    elasticsearch:
+      url: ${ES_URL:http://localhost:9200}
+      username: ${ES_USERNAME:}
+      password: ${ES_PASSWORD:}
+      read-index: ${ES_READ_INDEX:ops-knowledge-read}
+      write-index: ${ES_WRITE_INDEX:ops-knowledge-write}
+      timeout: ${ES_TIMEOUT:15s}
+      sync-batch-size: 30
+      sync-interval-ms: 2000
   retrieval:
     keyword:
-      type: in-memory
+      type: elasticsearch
     rerank:
       enabled: false
       model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank

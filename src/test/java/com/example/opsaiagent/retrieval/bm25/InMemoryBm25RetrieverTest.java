@@ -1,5 +1,7 @@
 package com.example.opsaiagent.retrieval.bm25;
 
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
+import java.util.ArrayList;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.example.opsaiagent.retrieval.RetrievalScope;
@@ -37,14 +39,14 @@ class InMemoryBm25RetrieverTest {
      */
     @Test
     void filtersUnauthorizedCandidatesBeforeTopK() {
-        var documents = new java.util.ArrayList<Document>();
+        var documents = new ArrayList<Document>();
         for (int i = 0; i < 30; i++) {
             documents.add(new Document("foreign-" + i, "线程积压".repeat(5), Map.of(
                     "visibility", "TENANT", "tenantId", "other", "reviewStatus", "APPROVED")));
         }
         documents.add(new Document("owned", "线程积压" + "其他排障背景信息".repeat(30), Map.of(
                 "visibility", "TENANT", "tenantId", "mine", "reviewStatus", "APPROVED")));
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(documents);
+        when(vectorStore.documents()).thenReturn(documents);
         retriever.rebuild();
 
         assertThat(retriever.search("线程积压", 1, new RetrievalScope("mine", Set.of(), "alice")))
@@ -52,7 +54,7 @@ class InMemoryBm25RetrieverTest {
     }
 
     @Mock
-    private JdbcTemplate jdbcTemplate;
+    private KnowledgeVectorStore vectorStore;
 
     @Mock
     private ObjectMapper objectMapper;
@@ -66,7 +68,7 @@ class InMemoryBm25RetrieverTest {
     @Test
     @DisplayName("rebuild + search：索引构建后能检索到中文文档")
     void rebuildThenSearch() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of(
+        when(vectorStore.documents()).thenReturn(List.of(
                 new Document("1", "智能运维服务注册说明", Map.of("source", "a.md")),
                 new Document("2", "健康检查接口文档", Map.of("source", "b.md"))
         ));
@@ -82,7 +84,7 @@ class InMemoryBm25RetrieverTest {
     @Test
     @DisplayName("rebuild：数据库查询异常被捕获，不影响后续调用")
     void rebuild_queryExceptionSwallowed() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class)))
+        when(vectorStore.documents())
                 .thenThrow(new RuntimeException("DB down"));
 
         assertThatCode(retriever::rebuild).doesNotThrowAnyException();
@@ -94,7 +96,7 @@ class InMemoryBm25RetrieverTest {
     @Test
     @DisplayName("search：按租户/部门/个人范围过滤")
     void search_filtersByScope() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of(
+        when(vectorStore.documents()).thenReturn(List.of(
                 new Document("1", "智能运维公开知识",
                         Map.of("source", "public.md", "visibility", "PUBLIC")),
                 new Document("2", "智能运维企业知识",

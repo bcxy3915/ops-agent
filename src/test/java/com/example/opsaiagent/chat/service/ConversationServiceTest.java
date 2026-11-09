@@ -1,5 +1,21 @@
 package com.example.opsaiagent.chat.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
+import com.example.opsaiagent.chat.event.ConversationDeletedEvent;
+import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.context.TenantContext;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.mockito.Mockito;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.chat.dto.ConversationResponse;
 import com.example.opsaiagent.chat.dto.MessageResponse;
@@ -42,12 +58,12 @@ class ConversationServiceTest {
      * 注册实体映射，使回归测试能够检查实际生成的权限查询条件。
      * @return 无返回值
      */
-    @org.junit.jupiter.api.BeforeAll
+    @BeforeAll
     static void initializeTableMappings() {
-        var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(
-                new com.baomidou.mybatisplus.core.MybatisConfiguration(), "");
-        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, ConversationEntity.class);
-        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, MessageEntity.class);
+        var assistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, ConversationEntity.class);
+        TableInfoHelper.initTableInfo(assistant, MessageEntity.class);
     }
 
     /**
@@ -64,12 +80,12 @@ class ConversationServiceTest {
         ArgumentCaptor<Wrapper<ConversationEntity>> conversations = ArgumentCaptor.forClass(Wrapper.class);
         verify(conversationMapper).selectOne(conversations.capture());
         assertThat(conversations.getValue().getSqlSegment()).contains("tenant_id", "session_id");
-        assertThat(((com.baomidou.mybatisplus.core.conditions.AbstractWrapper<?, ?, ?>) conversations.getValue())
+        assertThat(((AbstractWrapper<?, ?, ?>) conversations.getValue())
                 .getParamNameValuePairs()).containsValue("tenant-test").containsValue("shared");
         ArgumentCaptor<Wrapper<MessageEntity>> messages = ArgumentCaptor.forClass(Wrapper.class);
         verify(messageMapper).selectList(messages.capture());
         assertThat(messages.getValue().getSqlSegment()).contains("tenant_id", "session_id", "ORDER BY id DESC");
-        assertThat(((com.baomidou.mybatisplus.core.conditions.AbstractWrapper<?, ?, ?>) messages.getValue())
+        assertThat(((AbstractWrapper<?, ?, ?>) messages.getValue())
                 .getParamNameValuePairs()).containsValue("tenant-test");
     }
 
@@ -79,28 +95,28 @@ class ConversationServiceTest {
      */
     @Test
     void missingTenantCannotReadConversations() {
-        com.example.opsaiagent.rbac.context.TenantContext.clear();
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> conversationService.listConversations("alice"))
-                .isInstanceOf(com.example.opsaiagent.exception.BusinessException.class);
-        org.mockito.Mockito.verifyNoInteractions(conversationMapper, messageMapper);
+        TenantContext.clear();
+        Assertions.assertThatThrownBy(() -> conversationService.listConversations("alice"))
+                .isInstanceOf(BusinessException.class);
+        Mockito.verifyNoInteractions(conversationMapper, messageMapper);
     }
 
     /**
      * 为会话查询和写入建立可信租户上下文。
      * @return 无返回值
      */
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void bindTenant() {
-        com.example.opsaiagent.rbac.context.TenantContext.set("tenant-test");
+        TenantContext.set("tenant-test");
     }
 
     /**
      * 清除测试租户，避免污染其他测试线程。
      * @return 无返回值
      */
-    @org.junit.jupiter.api.AfterEach
+    @AfterEach
     void clearTenant() {
-        com.example.opsaiagent.rbac.context.TenantContext.clear();
+        TenantContext.clear();
     }
 
     @Mock
@@ -110,10 +126,10 @@ class ConversationServiceTest {
     private MessageMapper messageMapper;
 
     @Mock
-    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private JdbcTemplate jdbcTemplate;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -159,11 +175,11 @@ class ConversationServiceTest {
         void rejectsConversationOwnedByAnotherUser() {
             when(conversationMapper.selectOne(any(Wrapper.class)))
                     .thenReturn(conv("sess-1", "alice"));
-            org.assertj.core.api.Assertions.assertThatThrownBy(
+            Assertions.assertThatThrownBy(
                             () -> conversationService.ensureConversation("sess-1", "bob", "你好"))
-                    .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+                    .isInstanceOf(AccessDeniedException.class);
             verify(conversationMapper, never()).insert(any(ConversationEntity.class));
-            org.mockito.Mockito.verifyNoInteractions(messageMapper);
+            Mockito.verifyNoInteractions(messageMapper);
         }
 
         @Test
@@ -533,8 +549,8 @@ class ConversationServiceTest {
             assertThat(result).isTrue();
             verify(conversationMapper).deleteById(c.getId());
             verify(messageMapper).delete(any(Wrapper.class));
-            verify(eventPublisher).publishEvent(new com.example.opsaiagent.chat.event.ConversationDeletedEvent(
-                    com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of("admin", "sess-1")));
+            verify(eventPublisher).publishEvent(new ConversationDeletedEvent(
+                    LangChain4jMemoryId.of("admin", "sess-1")));
         }
 
         @Test

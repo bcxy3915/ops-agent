@@ -36,9 +36,9 @@
 
 ### 🔎 RAG 检索架构
 - 多格式文档加载（Markdown / PDF / Word）
-- **混合检索**：向量检索（Pgvector）+ BM25 关键词检索，增量加载避免重复入库
+- **混合检索**：向量检索（Elasticsearch）+ BM25 关键词检索，增量加载避免重复入库
 - **RRF 融合 + Reranker 精排**：gte-rerank-v2 提升首位命中率
-- **可演进设计**：`KeywordRetriever` 接口支持内存 / PostgreSQL / Elasticsearch 多实现切换
+- **可演进设计**：向量与 BM25 共用 Elasticsearch ACL 预过滤，并通过 MySQL 权威状态复核候选
 
 ### 🛠 服务无关设计
 - 工具签名只接收 `serviceName`，服务地址从注册中心动态获取 —— **加新服务不改代码**
@@ -78,19 +78,19 @@
 | 层级 | 技术 |
 | :--- | :--- |
 | 语言 | Java 21 |
-| 框架 | Spring Boot 3.4.13 |
+| 框架 | Spring Boot 4.1.2 |
 | AI 框架 | LangChain4j 1.23.0 |
 | Chat 模型 | DeepSeek（deepseek-chat，OpenAI 协议） |
 | Embedding | 阿里云百炼 text-embedding-v3（1024 维） |
 | Reranker | 阿里云百炼 gte-rerank-v2 |
-| 向量库 | Pgvector（pg16） |
-| 数据库 | PostgreSQL 16 + MyBatis-Plus 3.5.5 |
+| 向量与关键词检索 | Elasticsearch 8.19.6（dense_vector + BM25） |
+| 业务数据库 | MySQL 8.4 + MyBatis-Plus 3.5.18 |
 | 安全 | Spring Security + JWT（jjwt 0.12.6） |
 | 限流 | Bucket4j 8.10.1 |
 | 容错 | Resilience4j 2.3.0 |
 | 通知 | JavaMail |
 | 文档解析 | Apache POI（docx） |
-| API 文档 | springdoc-openapi 2.9.1 |
+| API 文档 | springdoc-openapi 3.2.0 |
 | 流式输出 | WebFlux + SSE |
 | 测试 | JUnit + JaCoCo（覆盖率） |
 
@@ -106,10 +106,14 @@
 
 ```bash
 cd ops-ai-agent
-docker compose up -d
+cp .env.example .env # 先填入 DB_PASSWORD
+docker compose up -d mysql elasticsearch
+python scripts/initialize-elasticsearch.py
 ```
 
-首次启动会自动执行 `init-scripts/schema.sql` 和 `init-scripts/seed.sql`，完成向量扩展、全部业务表及演示数据初始化。
+首次启动 MySQL 空数据卷时自动执行 `init-scripts/mysql/schema.sql` 和 `seed.sql`。MySQL 映射到 `127.0.0.1:23306`，ES 映射到 `127.0.0.1:9200`。ES 初始化单独执行，不随业务库建表脚本混跑。已有数据卷不会重复初始化；结构升级使用 `init-scripts/mysql/migrations/`。
+
+MySQL 保存原文、分块、权限及持久化投递记录；ES 保存向量与 BM25 检索投影。投递失败自动退避重试，删除保留墓碑；投递向量只在 MySQL 暂存，ES 确认后清空。文档在全部分块同步成功后才标记为已发布。
 
 ### 3. 配置环境变量
 
@@ -121,13 +125,17 @@ cp .env.example .env        # 填入 DB_PASSWORD 等
 
 ```yaml
 spring:
-  ai:
-    openai:
-      api-key: sk-你的DeepSeekKey
-      embedding:
-        api-key: sk-你的百炼Key
   datasource:
-    password: your_db_password
+    url: jdbc:mysql://localhost:23306/opsdb?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
+    username: root
+    password: ${DB_PASSWORD}
+ops-agent:
+  ai:
+    api-key: ${OPS_AI_API_KEY}
+    embedding:
+      api-key: ${OPS_EMBEDDING_API_KEY}
+    elasticsearch:
+      url: http://localhost:9200
 ```
 
 ### 4. 启动应用
@@ -136,7 +144,9 @@ spring:
 mvn spring-boot:run
 ```
 
-启动时自动：加载 `resources/knowledge/` 运维文档 → 向量化入 Pgvector → 构建 BM25 索引 → 开启健康检查调度。
+启动时自动：加载 `resources/knowledge/` 完整原文及分块 → LangChain4j 生成向量 → MySQL 持久化投递 → 同步 ES 向量与 BM25 索引 → 开启健康检查调度。
+
+旧 PostgreSQL 数据可先通过 `python scripts/migrate-local-postgres-to-mysql.py` 预检。工具只接受尚未开展业务的新 MySQL 初始化库，显式 `--execute` 才导入，并先保存源快照和目标备份；不得对已有 MySQL 业务库重复导入。切换前应停写旧应用，核对迁移期间增量。不要删除旧 PostgreSQL 数据卷。
 
 ### 5. 验证
 
@@ -144,7 +154,7 @@ mvn spring-boot:run
 | :--- | :--- |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | 流式测试页 | http://localhost:8080/stream-test.html |
-| 流式问答 | `GET /api/ops/ask/stream?question=xxx&sessionId=xxx` |
+| 流式问答 | `POST /api/ops/ask/stream`（JSON：question / sessionId） |
 
 ## 🔌 API 概览
 
@@ -170,8 +180,8 @@ mvn spring-boot:run
 
 ```
 ops-ai-agent/
-├── docker-compose.yml                 # PostgreSQL + pgvector
-├── init-scripts/                      # schema.sql 全量表结构 + seed.sql 演示数据
+├── docker-compose.yml                 # MySQL + Elasticsearch；legacy profile 保留旧 PG
+├── init-scripts/                      # mysql/ 业务表与数据；elasticsearch/ 检索索引
 ├── .env.example                       # 环境变量模板
 └── src/
     ├── main/java/com/example/opsaiagent/

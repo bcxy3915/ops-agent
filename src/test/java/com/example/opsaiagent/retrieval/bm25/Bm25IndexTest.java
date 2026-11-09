@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval.bm25;
 
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ class Bm25IndexTest {
 
     /** 构造带 id 的 Document 辅助方法 */
     private static Document doc(String id, String text) {
-        return new Document(id, text, java.util.Map.of());
+        return new Document(id, text, Map.of());
     }
 
     // ==================== 构建索引 ====================

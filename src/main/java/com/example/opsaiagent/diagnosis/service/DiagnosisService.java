@@ -1,5 +1,7 @@
 package com.example.opsaiagent.diagnosis.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.UUID;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisReferenceResponse;
 import com.example.opsaiagent.diagnosis.dto.DiagnosisResult;
@@ -422,8 +424,8 @@ public class DiagnosisService {
         }
         StringBuilder sb = new StringBuilder();
         try {
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(snapshotJson);
-            com.fasterxml.jackson.databind.JsonNode event = root.path("event");
+            JsonNode root = objectMapper.readTree(snapshotJson);
+            JsonNode event = root.path("event");
             sb.append(event.path("service").asText(""));
             String metric = event.path("metric").asText("");
             if (!metric.isBlank()) {
@@ -468,7 +470,7 @@ public class DiagnosisService {
             user.append("已有诊断摘要：").append(base.getSummary()).append("\n");
         }
         user.append("追问问题：").append(question);
-        return chatGateway.chat(new ChatRequest("followup-" + java.util.UUID.randomUUID(), user.toString(),
+        return chatGateway.chat(new ChatRequest("followup-" + UUID.randomUUID(), user.toString(),
                 "你是一名资深的 SRE 运维专家，基于给定的故障快照与已有诊断回答用户的追问。直接输出答案，不要输出 JSON。",
                 Map.of())).answer();
     }

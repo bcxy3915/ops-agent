@@ -10,7 +10,7 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 
 - 语言与构建：Java 21、Maven，仓库提供 Maven Wrapper。
 - 核心框架：Spring Boot、LangChain4j。
-- 数据存储：PostgreSQL、Pgvector、MyBatis-Plus。
+- 数据存储：MySQL 8.4、Elasticsearch 8.19、MyBatis-Plus。PostgreSQL/Pgvector 仅用于旧库迁移。
 - 接口与安全：Spring MVC、WebFlux/SSE、Spring Security、JWT、RBAC。
 - 检索：向量检索、BM25、RRF 融合与重排序。
 - 测试：JUnit 5、Mockito、AssertJ、JaCoCo。
@@ -40,7 +40,8 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - `src/main/resources/mapper/`：MyBatis 映射文件。
 - `src/main/resources/knowledge/`：内置知识文档。
 - `src/test/java/com/example/opsaiagent/`：测试，按对应业务包组织。
-- `init-scripts/schema.sql`、`init-scripts/seed.sql`：数据库初始化结构与种子数据。
+- `init-scripts/mysql/schema.sql`、`init-scripts/mysql/seed.sql`：当前业务库结构与种子数据；原根目录 SQL 仅供旧 PostgreSQL 版本使用。
+- `init-scripts/elasticsearch/knowledge-index.http`：ES 独立初始化脚本；`scripts/initialize-elasticsearch.py` 可按脚本创建索引与别名。
 - `docker-compose.yml`：本地依赖服务。
 - `.github/workflows/ci.yml`：后端持续集成。
 - `docs/`：设计及版本相关资料。
@@ -60,6 +61,7 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 ## 4. 编码与接口约定
 
 - 遵循现有 Java 风格，使用 4 空格缩进；文件采用 UTF-8 编码，避免中文乱码。
+- Java 类型无同名冲突时必须通过 import 引入并使用简单类名；仅在存在类名冲突时使用全限定类名，不在方法体、字段或注解中堆叠完整包路径。
 - 按模块现有方式划分 Controller、Service、Mapper、Entity 和 DTO。
 - 优先沿用构造器依赖注入及现有 Lombok 注解习惯。
 - Controller 负责参数校验与接口适配，业务规则放在 Service，持久化逻辑放在 Mapper。
@@ -99,7 +101,7 @@ Ops Agent 是一个 AI 运维诊断后端，包含自然语言问答、流式响
 - 同一租户、会话的同步与流式请求共用 `ops_chat_turn` 租约，重叠请求返回 `CHAT_TURN_BUSY`。答案在释放租约前同步落库；保存时按租约、会话顺序加锁，并校验请求令牌、租约期限、会话实体 ID 和用户名。删除使用相同锁顺序，防止删除重建及过期接管后的旧请求回写。
 - 删除通过 `ConversationDeletedEvent` 在提交后清理本进程缓存，回滚不清缓存；其他实例通过数据库令牌校验拒绝读取旧轮次和保存答案，流式请求每秒检查失效。已经发出的远端模型请求只能尽力取消，不能撤回已输出的 token。
 - 生产记忆按请求令牌隔离，每轮重新回填，结束清理同步/流式框架记忆和项目缓存。容量与过期由 `ops-agent.chat.memory.max-entries/ttl` 控制；满额时优先淘汰非活动项，全部活动时拒绝新请求。过期惰性清理，晚到回调不得复活已关闭轮次。
-- 问答先检索一次并绑定轮次快照，LangChain4j RAG、引用与命中记录复用同组文档；诊断的模型上下文和引用也复用同组结果，禁止单独为引用再检索。已有数据库升级前手动执行 `init-scripts/migrations/20261108-chat-turn.sql`。
+- 问答先检索一次并绑定轮次快照，LangChain4j RAG、引用与命中记录复用同组文档；诊断的模型上下文和引用也复用同组结果，禁止单独为引用再检索。MySQL 新环境使用当前建表脚本；旧 PostgreSQL 的升级脚本不得对 MySQL 执行。
 - 回填历史按自增 `id` 正序排列，不按 `createdAt`：助手消息是异步落库的，时间戳可能与用户消息乱序。
 - 禁止只依赖进程内记忆实现多轮能力；多实例部署下使用数据库租约、轮次代次校验和每轮 DB 回填，不依赖节点间缓存广播。
 - 不伪造模型响应、检索命中、外部指标或诊断结论；测试中的模拟数据应明确为测试夹具。
@@ -125,26 +127,23 @@ SSE 空格保护：Spring MVC 编码器直接输出 `data:`，标准客户端会
 - 切分配置唯一来源 `ops-agent.knowledge.split.*`（`application.yml`）。回退旧 TokenTextSplitter 口径：`default-strategy: token` + `markdown.strategy: token`，不要通过改代码回退。
 - 每个向量块自动打 `splitStrategy`（策略名）与 `splitVersion`（算法代次，当前 2）标记，供 A/B 评测隔离、检索排查与存量重索引识别；调整算法代次时同步更新 `TextChunkStrategy.CURRENT_SPLIT_VERSION`。
 - 展示与检索文本分离：`knowledge_chunk.content` 存原始块文本（前端展示）；embedding 文本在 `KnowledgeDocumentIndexer` 处加「【标题｜章节路径】」上下文头（`keep-heading-path` 控制），两者不得混用。
-- 新旧策略 A/B 评测入口 `SplitEvalIT`（`.\mvnw.cmd -Dtest=SplitEvalIT test`，surefire 默认不含 *IT）：评测数据集放 `src/test/resources/splitter/eval/`（documents/ + qa-golden.json），缺失时自动跳过；需本地 PG + `DASHSCOPE_API_KEY`，报告输出至 `docs/design/text-split/eval/`，gate 判定见设计文档 §10.3。
+- 新旧策略 A/B 评测入口 `SplitEvalIT`（`.\mvnw.cmd -Dtest=SplitEvalIT test`，surefire 默认不含 *IT）：评测数据集放 `src/test/resources/splitter/eval/`（documents/ + qa-golden.json），缺失时自动跳过；需本地 Elasticsearch + `DASHSCOPE_API_KEY`，评测使用随机专用索引并只清理该索引，报告输出至 `docs/design/text-split/eval/`，gate 判定见设计文档 §10.3。
 - chunk 落库使用 `KnowledgeChunkMapper.insertBatch`（500 条/批），禁止逐条 `insert`；索引编排（清旧数据 → 切分 → 写分块 → 写向量）统一由 `KnowledgeDocumentIndexer` 完成，底层向量写入走 `VectorIndexer`。
 - 索引必须异步执行：审核通过、案例确认等业务事务只调用 `KnowledgeIndexTaskService.enqueue()` 写入 `knowledge_index_task`，**禁止在业务事务内直接调用切分/embedding/向量写入**。分块与向量化由 `KnowledgeIndexTaskService` 的定时 worker 在独立事务中完成。
-- 任务表并发约定：worker 用 `FOR UPDATE SKIP LOCKED` + 租约（默认 30 分钟，需覆盖大文档完整索引耗时）领取任务，多实例安全；同一文档只保留一条未完成任务（部分唯一索引 + UPSERT）；执行前校验文档 `reviewStatus=APPROVED` 且 `docVersion` 与入队时一致，否则跳过，执行后再次复核并回滚过期写入。
-- 索引对同一 `vector_source` 幂等：每次执行先清空该文档旧分块与旧向量再重建；失败自动重试，默认 3 次后标记 FAILED，可通过任务表 `error_msg` 排查。
+- 任务表并发约定：worker 用 `FOR UPDATE SKIP LOCKED` + 租约（默认 30 分钟，需覆盖大文档完整索引耗时）领取任务，多实例安全；同一文档只保留一条未完成任务（生成列 active_doc_id 唯一索引 + UPSERT）；执行前校验文档 `reviewStatus=APPROVED` 且 `docVersion` 与入队时一致，否则跳过，执行后再次复核并回滚过期写入。
+- 索引对同一 `vector_source` 幂等：每次执行在 MySQL 事务内替换分块和检索投影，旧投影登记删除墓碑，再异步同步 ES；失败自动重试，默认 3 次后标记 FAILED，可通过任务表 `error_msg` 排查。
 - 索引调度配置位于 `ops-agent.knowledge.index.poll-interval-ms`（默认 5000）与 `max-per-round`（默认 3）。
 - 向量 source 口径：上传文档为 `upload:<docId>`，案例文档为 `case:<docId>`，内置文档为文件名；`DocumentLoader` 只清理内置文档，不得触碰 `upload:` / `case:` 前缀。
-- 内置知识必须同时保存源码、展示分块（`knowledge_chunk`）和向量（`vector_store`）；文档元数据位于 `knowledge_document`（`layer=BUILTIN`、`tenant_id=0`、`visibility=PUBLIC`、`review_status=APPROVED`、`publish_status=PUBLISHED`、`trust_status=VERIFIED`、`owner=system`、`source=文件名`、`file_path=classpath:knowledge/<文件名>`）。`DocumentLoader.loadAndIndex()` 按文件开启事务，委托 `KnowledgeDocumentIndexer.reindexBuiltin()` 统一保存分块和向量，向量保留文件名 source/contentHash 并带 docId/chunkId/ordinal。每次 reload 除比对文件指纹，还检查源码一致性及真实分块数量，自动修复旧内置记录；正文不变时不增加版本。失败回滚并返回 failed，不能只写向量或伪造分块数量。该启动同步入口不改变用户文档的异步索引流程。
-- 审核结论与索引可用性分离：`review_status` 只记录审核结论（DRAFT/PENDING_DEPT/PENDING_TENANT/APPROVED/REJECTED），`publish_status` 记录索引是否生效（UNPUBLISHED/BUILDING/FAILED/PUBLISHED）。审核通过仅置 `APPROVED + BUILDING` 并立即返回，worker 成功回写 `PUBLISHED + published_at`，重试耗尽置 `FAILED + publish_error`；索引失败不得回退 `review_status`。
+- 内置知识必须同时保存源码、展示分块（`knowledge_chunk`）和检索投影（`knowledge_search_projection`，向量异步投递至 ES）；文档元数据位于 `knowledge_document`（`layer=BUILTIN`、`tenant_id=0`、`visibility=PUBLIC`、`review_status=APPROVED`、`publish_status=BUILDING`（同步完成后为 PUBLISHED）、`trust_status=VERIFIED`、`owner=system`、`source=文件名`、`file_path=classpath:knowledge/<文件名>`）。`DocumentLoader.loadAndIndex()` 按文件开启事务，委托 `KnowledgeDocumentIndexer.reindexBuiltin()` 统一保存分块和投递记录，向量保留文件名 source/contentHash 并带 docId/chunkId/ordinal。每次 reload 除比对文件指纹，还检查源码一致性及真实分块数量，自动修复旧内置记录；正文不变时不增加版本。失败回滚并返回 failed，不能只写向量或伪造分块数量。该启动同步入口不改变用户文档的异步索引流程。
+- 审核结论与索引可用性分离：`review_status` 只记录审核结论（DRAFT/PENDING_DEPT/PENDING_TENANT/APPROVED/REJECTED），`publish_status` 记录索引是否生效（UNPUBLISHED/BUILDING/FAILED/PUBLISHED）。审核通过仅置 `APPROVED + BUILDING` 并立即返回，分块任务完成且 ES 投递全部确认后回写 `PUBLISHED + published_at`，重试耗尽置 `FAILED + publish_error`；索引失败不得回退 `review_status`。
 - 审核通过 / 驳回事务内不再预删旧分块与旧向量；索引替换由 worker 的 `reindex` 整体幂等"先删后建"完成，避免失败后不可恢复。
-- 检索过滤必须同时带 `reviewStatus == 'APPROVED'`（由 `RetrievalScope.filterExpression()` 统一追加），未通过 / 驳回文档即使存在残留向量也不可被命中。
+- 检索过滤必须同时带 `reviewStatus == 'APPROVED'`（由 ES 存储适配器统一构建 ACL 预过滤，并经 MySQL 投影复核），未通过 / 驳回文档即使存在残留向量也不可被命中。
 - 索引状态运维接口：`GET /api/knowledge/documents/{id}/index-status` 轻量返回 publishStatus / publishError / 任务尝试次数供前端轮询；`POST /api/knowledge/documents/{id}/reindex` 仅对 `APPROVED` 且 `publish_status ∈ {FAILED, PUBLISHED}` 的文档重建索引，不改变审核结论。
 - 上传「直接发布」走独立接口 `POST /api/knowledge/documents/{id}/publish-direct`（需 `knowledge:publish` 或 `knowledge:admin`，且限作者或知识管理员）：仅接受 `review_status ∈ {DRAFT, REJECTED}`，跳过审核直接置 `APPROVED + BUILDING` 并入队。旧 `/publish` 只接受 `PENDING_DEPT / PENDING_TENANT`，不得用于草稿，否则会报"当前文档不处于待审核状态"并让文档停留在待审核。
 - 前端展示须以 `publishStatus` 为准：审核通过后 `trustStatus` 立即变为 `VERIFIED`，但索引可能仍为 `BUILDING` 或 `FAILED`；列表必须展示索引状态，`FAILED` 时提供「重试入库」入口，存在 `BUILDING` 行时按 4s 轮询 `index-status`，全部落定后停止。
 - `publishStatus = BUILDING` 期间文档只读：服务端 `update / rollback / delete` 统一经 `ensureNotBuilding` 拒绝（错误码 `KNOWLEDGE_DOCUMENT_INVALID`），前端操作列只保留查看 / 检索命中 / 更新日志；不要为了"元数据不影响索引"放开编辑，版本并发会让索引任务回滚或产生新旧向量重叠。
-- 任务领取 `KnowledgeIndexTaskMapper.claimOne` 使用 `@Select` 而非 `@Update`：MyBatis 的 `@Update` 只允许 `int/void` 返回类型，而该语句通过 `UPDATE ... RETURNING t.*` 返回整行实体；改成 `@Update` 会让调度每轮报 "unsupported return type" 且任务永远停留在 PENDING。
-
-  注意该异常的抛出点在 SQL 执行之后：旧的 `@Update` 版本会先把任务置为 `RUNNING` 提交，再抛异常，留下没有 worker 处理的孤儿任务。`claimOne` 只领取 `PENDING`，孤儿任务要等租约（默认 30 分钟，`ops-agent.knowledge.index.lease-minutes`）到期后由 `recoverStale` 置回 `PENDING`；排查"任务没被执行"时先看 `status` 是否卡在 `RUNNING`、`lease_until` 是否未到期，必要时手工回收。
-- 新增环境需执行 `init-scripts/schema.sql` 中的 `knowledge_index_task` 建表语句；已运行环境升级时需单独执行该段增量 DDL（含部分唯一索引）。
-- 已运行环境升级 `publish_status`：执行 `schema.sql` 中的幂等 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（publish_status / publish_error / published_at）、存量 `publish_status='PUBLISHED'` 回填，以及 `vector_store.metadata.reviewStatus` 回填段（`DO $$` + `to_regclass('vector_store')` 保护，新库初始化时可安全执行）。
+- 任务领取 `KnowledgeIndexTaskMapper.claimOne` 在事务内先 `SELECT ... FOR UPDATE SKIP LOCKED`，再更新状态、租约和 claim_token。完成及重试必须校验令牌，禁止使用 PostgreSQL `UPDATE ... RETURNING`。过期 RUNNING 任务由 recoverStale 回收；索引执行按文档、任务顺序加锁。
+- 新环境执行 `init-scripts/mysql/schema.sql` 与 `seed.sql`；已有 MySQL 环境按实际版本执行 `init-scripts/mysql/migrations/`。旧 PG 数据使用 `scripts/migrate-local-postgres-to-mysql.py` 预检后迁移，不执行旧 PG 增量 SQL。
 - 解析健壮性：PDF 先落地临时文件再用 PDFBox 按页读取（不整份载入堆内存，临时文件必须 finally 删除）；TXT 按 UTF-8 BOM → UTF-16 BOM → 严格 UTF-8 → GB18030 的顺序探测编码；DOCX 解析已启用 zip bomb 防护（`ZipSecureFile.setMinInflateRatio`），调整 POI 相关配置时不得移除。
 - 大文件演进方向：文件上限扩大到 100MB+ 前，需先将 `DocumentParserStrategy.parse(Resource): List<Document>` 升级为流式签名（产出端逐段产出、消费端逐段切分入库），趁实现与调用方较少时改造成本最低。
 
@@ -193,8 +192,8 @@ SSE 空格保护：Spring MVC 编码器直接输出 `data:`，标准客户端会
 
 - 应用默认启用 `local` profile；本地覆盖文件应放在 `src/main/resources/application-local.yml`。只读取完成任务所需的配置，不在工具输出或交付说明中展开真实密钥。
 - `.env.example` 是 Docker Compose 的数据库变量模板，`.env` 由 Compose 读取；Spring Boot 不会自动把该文件加载为进程环境变量。启动 Java 时需通过 IDE、当前终端环境变量或本地 YAML 单独提供配置。
-- 默认 PostgreSQL 为 `localhost:5433/opsdb`，用户 `postgres`；应用端口为 `8080`。Compose 的 `DB_PORT`、`DB_NAME`、`DB_USER` 仅改变容器配置，修改后还须同步应用的 `spring.datasource.*`，不能假设自动联动。
-- Compose 只启动 PostgreSQL（含 Pgvector），不启动后端、前端或示例业务服务。`init-scripts/` 挂载到 PostgreSQL 初始化目录，仅在数据目录首次初始化时自动执行；已有 `ops_pgdata` 数据卷不会因修改 SQL 或重启容器而重跑脚本。
+- 默认 MySQL 为 `localhost:23306/opsdb`，用户 `root`，Elasticsearch 为 `localhost:9200`；应用端口为 `8080`。Compose 的 `DB_PORT`、`DB_NAME`、`DB_USER` 仅改变容器配置，修改后还须同步应用的 `spring.datasource.*`，不能假设自动联动。
+- Compose 默认启动 MySQL 和 Elasticsearch，不启动应用或前端；MySQL 仅在空数据卷初始化时执行 `init-scripts/mysql/`。旧 PostgreSQL 保留在 legacy profile，不得删除其数据卷；ES 使用独立初始化脚本创建索引与别名。
 
 | 环境变量 | 对应配置 / 用途 |
 | --- | --- |
@@ -207,7 +206,7 @@ SSE 空格保护：Spring MVC 编码器直接输出 `data:`，标准客户端会
 | `OPS_CORS_ALLOWED_ORIGINS` | 逗号分隔的前端来源白名单 |
 | `LOG_LEVEL` | 根日志及业务包默认日志级别（默认 INFO） |
 
-模型、embedding、向量维度与 Pgvector 索引需保持一致；切换 embedding 模型前评估已有向量的兼容与重建方案。默认重排序关闭（`ops-agent.retrieval.rerank.enabled: false`），不可仅凭 README 假设已启用。
+模型、embedding、向量维度与 Elasticsearch dense_vector 索引维度需保持一致；切换 embedding 模型前评估已有向量的兼容与重建方案。默认重排序关闭（`ops-agent.retrieval.rerank.enabled: false`），不可仅凭 README 假设已启用。
 
 ### 8.2 开发与验证命令
 
@@ -263,9 +262,9 @@ docker compose up -d
 - `migration/langchain4j` 按 v4 周计划推进；实际进度与验证边界见 `docs/migration/langchain4j/01-baseline-and-poc.md`。
 - Maven profile `langchain4j-poc` 只引入 `src/poc/java` 兼容测试；生产固定使用 LangChain4j，`ops-agent.ai.provider` 已移除，历史值不再选择框架。
 - LangChain4j 同步与流式 Agent 共用按租户、用户、会话及请求令牌隔离的记忆仓库、检索快照与只读工具。流式模型回调通过 `ContextAwareStreamingChatModel` 恢复权限上下文；当前用户问题落库前，必须刷新本轮 LangChain4j 记忆，避免重复回填当前问题。并发、失效、缓存治理及升级脚本见 `docs/migration/langchain4j/04-chat-consistency-and-retrieval.md`。
-- `chat/config/LangChain4jConfig` 固定注册同步/流式模型、诊断网关、记忆和只读 Agent；所有依赖强制注入，不因 Bean 缺失回退到其他框架。`knowledge/config/LangChain4jEmbeddingConfig` 固定注册向量模型与 JDBC 存储。Spring AI 的 starter、BOM、适配层、记忆配置与工具注解均已删除，测试也不依赖旧 SDK。配置统一为 `ops-agent.ai.*`，其中 `spring.ai.*` 仅作旧本地配置的取值兼容，不代表加载旧框架；不要输出或自动改写本地密钥。
-- 向量读写生产入口统一为 `KnowledgeVectorStore` → `LangChain4jPgVectorStore`，通过 JDBC 复用 `public.vector_store`，不再自动建表或索引；新环境使用 `init-scripts/schema.sql`，已有环境不得自动重建。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；迁移前解析、切分和格式化输出存入 `src/test/resources/migration/ingest-legacy-golden.json` 固定夹具，已删除框架文档转换器。Markdown 解析直接使用 CommonMark；token 兜底直接使用 JTokkit；JDBC 向量写入使用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，必须保持存量向量输入格式。CommonMark/JTokkit/PDFBox 均为显式通用库依赖。SQL 权限过滤必须先于 topK；不允许通过查询后过滤代替租户/部门约束。
-- 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Pgvector 过滤验收。
+- `chat/config/LangChain4jConfig` 固定注册同步/流式模型、诊断网关、记忆和只读 Agent；所有依赖强制注入，不因 Bean 缺失回退到其他框架。`knowledge/config/LangChain4jEmbeddingConfig` 固定注册向量模型与 Elasticsearch 投影存储适配器。Spring AI 的 starter、BOM、适配层、记忆配置与工具注解均已删除，测试也不依赖旧 SDK。配置统一为 `ops-agent.ai.*`，其中 `spring.ai.*` 仅作旧本地配置的取值兼容，不代表加载旧框架；不要输出或自动改写本地密钥。
+- 向量读写生产入口统一为 `KnowledgeVectorStore` → `LangChain4jElasticsearchStore`，通过 MySQL 持久化投影投递至 ES；新环境使用 `init-scripts/mysql/schema.sql` 和 ES 独立脚本，已有环境不得自动重建。知识入库、检索、融合、重排、引用和诊断统一使用项目 `knowledge/model/Document`，保留 ID、正文、可变 metadata 与可空评分；迁移前解析、切分和格式化输出存入 `src/test/resources/migration/ingest-legacy-golden.json` 固定夹具，已删除框架文档转换器。Markdown 解析直接使用 CommonMark；token 兜底直接使用 JTokkit；向量生成输入使用项目 `EmbeddingContentFormatter/EmbeddingMetadataMode`，必须保持存量向量输入格式。CommonMark/JTokkit/PDFBox 均为显式通用库依赖。ES ACL 权限过滤必须先于 topK，返回结果还需 MySQL 权威状态复核；不允许通过查询后过滤代替租户/部门约束。
+- 共享只读与权限夹具位于 `src/test/resources/migration/readonly-golden.json`。脚本模型通过不等于真实模型规划通过，内存权限断言不替代 Elasticsearch ACL 预过滤和 MySQL 权威复核验收。
 - SSE 保留实际顺序“答案 → citations → DONE”；原周计划的引用先发描述须以代码与回归测试为准。
 
 项目结构、常用命令或开发约定变化时，同步更新本文。涉及依赖版本、API 与配置的描述，应以仓库当前文件为依据，避免复制过时说明。

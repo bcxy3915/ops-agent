@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
+import java.lang.reflect.Method;
 import com.example.opsaiagent.common.api.PageResult;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.CaseFlowStep;
@@ -220,7 +221,7 @@ class KnowledgeCaseControllerTest {
 
     private void assertAuthority(String methodName, String authority, Class<?>... params)
             throws NoSuchMethodException {
-        java.lang.reflect.Method m = KnowledgeCaseController.class.getMethod(methodName, params);
+        Method m = KnowledgeCaseController.class.getMethod(methodName, params);
         PreAuthorize pa = m.getAnnotation(PreAuthorize.class);
         assertThat(pa).isNotNull();
         assertThat(pa.value()).contains("hasAuthority('" + authority + "')");

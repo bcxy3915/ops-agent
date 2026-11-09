@@ -11,31 +11,52 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 
-/**
- * PostgreSQL JSONB 类型处理器
- * 实体中以 String 存放 JSON、数据库列为 jsonb 时使用，
- * 通过 @TableField(typeHandler = JsonbTypeHandler.class) 按字段指定
- */
+/** MySQL JSON 字符串处理器；保留原类名以兼容已有实体映射。 */
 @MappedTypes(String.class)
-@MappedJdbcTypes(JdbcType.OTHER)
+@MappedJdbcTypes(JdbcType.VARCHAR)
 public class JsonbTypeHandler extends BaseTypeHandler<String> {
 
+    /**
+     * 绑定 JSON 字符串。
+     * @param ps 预编译语句
+     * @param i 参数位置
+     * @param parameter JSON 内容
+     * @param jdbcType JDBC 类型
+     * @return 无返回值
+     */
     @Override
     public void setNonNullParameter(PreparedStatement ps, int i, String parameter, JdbcType jdbcType) throws SQLException {
-        // 以 JDBC 标准的 OTHER 类型发送，由 PG 服务端按 jsonb 列隐式转换，不依赖驱动实现类
-        ps.setObject(i, parameter, Types.OTHER);
+        ps.setString(i, parameter);
     }
 
+    /**
+     * 读取 JSON 字符串。
+     * @param rs 结果集
+     * @param columnName 列名
+     * @return JSON 内容，可为空
+     */
     @Override
     public String getNullableResult(ResultSet rs, String columnName) throws SQLException {
         return rs.getString(columnName);
     }
 
+    /**
+     * 读取 JSON 字符串。
+     * @param rs 结果集
+     * @param columnIndex 列序号
+     * @return JSON 内容，可为空
+     */
     @Override
     public String getNullableResult(ResultSet rs, int columnIndex) throws SQLException {
         return rs.getString(columnIndex);
     }
 
+    /**
+     * 读取 JSON 字符串。
+     * @param cs 存储过程语句
+     * @param columnIndex 列序号
+     * @return JSON 内容，可为空
+     */
     @Override
     public String getNullableResult(CallableStatement cs, int columnIndex) throws SQLException {
         return cs.getString(columnIndex);

@@ -1,5 +1,6 @@
 package com.example.opsaiagent.crypto.task;
 
+import org.mockito.Mockito;
 import com.example.opsaiagent.crypto.config.CryptoProperties;
 import com.example.opsaiagent.crypto.util.AesGcmUtil;
 import com.example.opsaiagent.crypto.util.HashUtil;
@@ -78,7 +79,7 @@ class SensitiveDataMigrationTest {
 
         assertThatCode(() -> migration.run(null)).doesNotThrowAnyException();
 
-        verify(opsUserMapper, org.mockito.Mockito.never()).updateById(any(OpsUserEntity.class));
+        verify(opsUserMapper, Mockito.never()).updateById(any(OpsUserEntity.class));
     }
 
     @Test

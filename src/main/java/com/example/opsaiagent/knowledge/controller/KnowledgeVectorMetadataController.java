@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 知识库向量 metadata 校验接口（迁移验收）。
  */
-@Tag(name = "知识库-向量校验", description = "校验 vector_store metadata 的租户/可见性/审核字段")
+@Tag(name = "知识库-向量校验", description = "校验 检索投影 metadata 的租户/可见性/审核字段")
 @RestController
 @RequestMapping("/api/knowledge/vector-metadata")
 @RequiredArgsConstructor

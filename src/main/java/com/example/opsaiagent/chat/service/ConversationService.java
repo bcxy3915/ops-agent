@@ -1,5 +1,13 @@
 package com.example.opsaiagent.chat.service;
 
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
+import com.example.opsaiagent.chat.event.ConversationDeletedEvent;
+import com.example.opsaiagent.common.error.ErrorCode;
+import com.example.opsaiagent.exception.BusinessException;
+import com.example.opsaiagent.rbac.context.TenantContext;
+import java.util.Objects;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.example.opsaiagent.chat.dto.ConversationResponse;
@@ -33,8 +41,8 @@ public class ConversationService {
     private final ConversationMapper conversationMapper;
     private final MessageMapper messageMapper;
     private final ObjectMapper objectMapper;
-    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
-    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private final ApplicationEventPublisher eventPublisher;
+    private final JdbcTemplate jdbcTemplate;
 
     /**
      * 确保会话存在（首次提问时创建）
@@ -47,7 +55,7 @@ public class ConversationService {
     public void ensureConversation(String sessionId, String username, String firstQuestion) {
         ConversationEntity existing = findBySessionId(sessionId);
         if (existing != null) {
-            if (!java.util.Objects.equals(existing.getUsername(), username)) {
+            if (!Objects.equals(existing.getUsername(), username)) {
                 throw new AccessDeniedException("无权向该会话发送消息");
             }
             return;
@@ -305,8 +313,8 @@ public class ConversationService {
                 .eq(MessageEntity::getSessionId, sessionId));
         jdbcTemplate.update("DELETE FROM ops_chat_turn WHERE tenant_id=? AND session_id=? AND conversation_id=?",
                 currentTenant(), sessionId, conv.getId());
-        eventPublisher.publishEvent(new com.example.opsaiagent.chat.event.ConversationDeletedEvent(
-                com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId.of(username, sessionId)));
+        eventPublisher.publishEvent(new ConversationDeletedEvent(
+                LangChain4jMemoryId.of(username, sessionId)));
         log.info("删除会话: sessionId={}, username={}", sessionId, username);
         return true;
     }
@@ -348,10 +356,10 @@ public class ConversationService {
      * @return 当前租户 ID
      */
     private String currentTenant() {
-        String tenantId = com.example.opsaiagent.rbac.context.TenantContext.get();
+        String tenantId = TenantContext.get();
         if (tenantId == null || tenantId.isBlank()) {
-            throw new com.example.opsaiagent.exception.BusinessException(
-                    com.example.opsaiagent.common.error.ErrorCode.TENANT_REQUIRED, "缺少会话租户上下文");
+            throw new BusinessException(
+                    ErrorCode.TENANT_REQUIRED, "缺少会话租户上下文");
         }
         return tenantId;
     }

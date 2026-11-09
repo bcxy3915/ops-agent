@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.controller;
 
+import java.lang.reflect.Method;
 import com.example.opsaiagent.exception.GlobalExceptionHandler;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCoverageResponse;
 import com.example.opsaiagent.knowledge.dto.KnowledgeHealthResponse;
@@ -117,10 +118,10 @@ class KnowledgeStatsControllerTest {
     @Test
     @DisplayName("统计接口为只读：方法上无 @PreAuthorize（登录用户均可访问）")
     void readEndpoints_openToAllRoles() throws Exception {
-        java.lang.reflect.Method stats = KnowledgeStatsController.class.getMethod("stats");
-        java.lang.reflect.Method coverage = KnowledgeStatsController.class.getMethod("coverage");
-        java.lang.reflect.Method todos = KnowledgeStatsController.class.getMethod("todos");
-        java.lang.reflect.Method health = KnowledgeStatsController.class.getMethod("health");
+        Method stats = KnowledgeStatsController.class.getMethod("stats");
+        Method coverage = KnowledgeStatsController.class.getMethod("coverage");
+        Method todos = KnowledgeStatsController.class.getMethod("todos");
+        Method health = KnowledgeStatsController.class.getMethod("health");
         assertThat(stats.getAnnotation(PreAuthorize.class)).isNull();
         assertThat(coverage.getAnnotation(PreAuthorize.class)).isNull();
         assertThat(todos.getAnnotation(PreAuthorize.class)).isNull();

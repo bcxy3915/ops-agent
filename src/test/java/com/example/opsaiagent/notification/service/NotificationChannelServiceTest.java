@@ -1,5 +1,6 @@
 package com.example.opsaiagent.notification.service;
 
+import org.mockito.Mockito;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
@@ -86,7 +87,7 @@ class NotificationChannelServiceTest {
         when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         assertThat(channelService.list("EMAIL", true)).isEmpty();
         assertThat(channelService.list("", null)).isEmpty();
-        verify(channelMapper, org.mockito.Mockito.times(2)).selectList(any(Wrapper.class));
+        verify(channelMapper, Mockito.times(2)).selectList(any(Wrapper.class));
     }
 
     // ==================== create ====================

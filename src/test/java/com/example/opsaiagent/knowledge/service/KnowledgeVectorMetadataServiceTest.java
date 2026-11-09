@@ -1,5 +1,10 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.knowledge.model.Document;
+import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
+import com.fasterxml.jackson.core.type.TypeReference;
+import java.util.Arrays;
+import java.util.Map;
 import com.example.opsaiagent.knowledge.dto.VectorMetadataValidationResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -25,14 +30,26 @@ import static org.mockito.Mockito.when;
 class KnowledgeVectorMetadataServiceTest {
 
     @Mock
-    private JdbcTemplate jdbcTemplate;
+    private KnowledgeVectorStore vectorStore;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 构造元数据测试夹具。
+     * @param values JSON 文本
+     * @return 文档
+     */
+    private List<Document> documents(String... values) {
+        return Arrays.stream(values).map(value -> {
+            try { return new Document("测试", objectMapper.readValue(value, new TypeReference<Map<String,Object>>() {})); }
+            catch (Exception e) { throw new IllegalStateException(e); }
+        }).toList();
+    }
 
     @Test
     @DisplayName("validate：统计缺失字段与内置/案例约定")
     void validate_counts() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of(
+        when(vectorStore.documents()).thenReturn(documents(
                 "{\"source\":\"manual.md\",\"tenantId\":\"0\",\"visibility\":\"PUBLIC\",\"reviewStatus\":\"APPROVED\",\"owner\":\"system\"}",
                 "{\"source\":\"upload:1\",\"tenantId\":\"t1\",\"visibility\":\"TENANT\",\"reviewStatus\":\"APPROVED\",\"owner\":\"u1\"}",
                 "{\"source\":\"upload:2\",\"visibility\":\"PERSONAL\",\"reviewStatus\":\"DRAFT\"}",
@@ -41,7 +58,7 @@ class KnowledgeVectorMetadataServiceTest {
                 "{\"source\":\"upload:3\",\"tenantId\":\"t1\",\"visibility\":\"BAD\",\"reviewStatus\":\"APPROVED\",\"owner\":\"u\"}"
         ));
         KnowledgeVectorMetadataService service =
-                new KnowledgeVectorMetadataService(jdbcTemplate, objectMapper);
+                new KnowledgeVectorMetadataService(vectorStore, objectMapper);
 
         VectorMetadataValidationResponse response = service.validate();
 
@@ -57,11 +74,11 @@ class KnowledgeVectorMetadataServiceTest {
     }
 
     @Test
-    @DisplayName("validate：空 vector_store 返回全零")
+    @DisplayName("validate：空检索投影返回全零")
     void validate_empty() {
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of());
+        when(vectorStore.documents()).thenReturn(documents());
         KnowledgeVectorMetadataService service =
-                new KnowledgeVectorMetadataService(jdbcTemplate, objectMapper);
+                new KnowledgeVectorMetadataService(vectorStore, objectMapper);
 
         VectorMetadataValidationResponse response = service.validate();
 

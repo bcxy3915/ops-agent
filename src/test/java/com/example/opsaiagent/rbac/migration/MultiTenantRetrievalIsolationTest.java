@@ -1,5 +1,6 @@
 package com.example.opsaiagent.rbac.migration;
 
+import java.util.HashMap;
 import com.example.opsaiagent.retrieval.RetrievalScope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -66,7 +67,7 @@ class MultiTenantRetrievalIsolationTest {
 
     private Map<String, Object> metadata(String visibility, String tenantId, String deptId,
                                          String reviewStatus, String owner) {
-        Map<String, Object> md = new java.util.HashMap<>();
+        Map<String, Object> md = new HashMap<>();
         md.put("visibility", visibility);
         md.put("tenantId", tenantId);
         md.put("deptId", deptId);

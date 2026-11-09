@@ -1,5 +1,6 @@
 package com.example.opsaiagent.notification.controller;
 
+import org.mockito.Mockito;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationRecordResponse;
@@ -59,7 +60,7 @@ class NotificationRecordControllerTest {
         when(recordMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         controller.list(null, null, null, 9999);
         controller.list(null, null, null, 0);
-        org.mockito.Mockito.verify(recordMapper, org.mockito.Mockito.times(2)).selectList(any(Wrapper.class));
+        Mockito.verify(recordMapper, Mockito.times(2)).selectList(any(Wrapper.class));
     }
 
     @Test

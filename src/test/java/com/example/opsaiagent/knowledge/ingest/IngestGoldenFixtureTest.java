@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.ingest;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.example.opsaiagent.knowledge.ingest.parser.MarkdownDocumentParserStrategy;
 import com.example.opsaiagent.knowledge.ingest.splitter.TokenFallbackSplitter;
 import com.example.opsaiagent.knowledge.model.Document;
@@ -75,7 +76,7 @@ class IngestGoldenFixtureTest {
     void embeddingInputMatchesRecordedResults() throws Exception {
         for (JsonNode sample : fixture().path("format")) {
             Map<String, Object> metadata = mapper.convertValue(sample.path("metadata"),
-                    new com.fasterxml.jackson.core.type.TypeReference<HashMap<String, Object>>() { });
+                    new TypeReference<HashMap<String, Object>>() { });
             var doc = new Document(sample.path("input").asText(), metadata);
             // 夹具采集于 Windows，仅元数据行分隔符随运行平台转换。
             String expected = sample.path("expected").asText().replace("\r\n", System.lineSeparator());

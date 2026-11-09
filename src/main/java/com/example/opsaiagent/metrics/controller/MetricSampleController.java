@@ -1,5 +1,7 @@
 package com.example.opsaiagent.metrics.controller;
 
+import com.example.opsaiagent.registry.ServiceInfo;
+import org.springframework.util.StringUtils;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
@@ -42,7 +44,7 @@ public class MetricSampleController {
             @RequestParam(required = false) String metric,
             @RequestParam(defaultValue = "1h") String range) {
 
-        com.example.opsaiagent.registry.ServiceInfo serviceInfo = serviceRegistry.getByName(service);
+        ServiceInfo serviceInfo = serviceRegistry.getByName(service);
         if (serviceInfo == null) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + service);
         }
@@ -75,9 +77,9 @@ public class MetricSampleController {
      *
      * @param service 服务信息
      */
-    private void checkServiceTenant(com.example.opsaiagent.registry.ServiceInfo service) {
+    private void checkServiceTenant(ServiceInfo service) {
         String tenantId = SecurityUtils.getCurrentTenantId();
-        if (org.springframework.util.StringUtils.hasText(tenantId) && !"0".equals(tenantId)
+        if (StringUtils.hasText(tenantId) && !"0".equals(tenantId)
                 && !tenantId.equals(service.getTenantId())) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND, "服务不存在: " + service.getName());
         }

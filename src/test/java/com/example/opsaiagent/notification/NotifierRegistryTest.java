@@ -1,5 +1,7 @@
 package com.example.opsaiagent.notification;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.mockito.Mockito;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.notification.notifier.FeishuWebhookNotifier;
@@ -34,8 +36,8 @@ class NotifierRegistryTest {
     @DisplayName("已注册类型：supports true，get 返回对应适配器")
     void registeredType() {
         NotifierRegistry registry = new NotifierRegistry(List.of(
-                new FeishuWebhookNotifier(RestClient.builder(), new com.fasterxml.jackson.databind.ObjectMapper()),
-                new GenericWebhookNotifier(RestClient.builder(), new com.fasterxml.jackson.databind.ObjectMapper())));
+                new FeishuWebhookNotifier(RestClient.builder(), new ObjectMapper()),
+                new GenericWebhookNotifier(RestClient.builder(), new ObjectMapper())));
         assertThat(registry.supports(NotificationChannelType.FEISHU_WEBHOOK)).isTrue();
         assertThat(registry.get(NotificationChannelType.FEISHU_WEBHOOK))
                 .isInstanceOf(FeishuWebhookNotifier.class);
@@ -46,8 +48,8 @@ class NotifierRegistryTest {
     void duplicateType_lastWins() {
         Notifier first = mock(Notifier.class);
         Notifier second = mock(Notifier.class);
-        org.mockito.Mockito.when(first.type()).thenReturn(NotificationChannelType.EMAIL);
-        org.mockito.Mockito.when(second.type()).thenReturn(NotificationChannelType.EMAIL);
+        Mockito.when(first.type()).thenReturn(NotificationChannelType.EMAIL);
+        Mockito.when(second.type()).thenReturn(NotificationChannelType.EMAIL);
         NotifierRegistry registry = new NotifierRegistry(List.of(first, second));
         assertThat(registry.get(NotificationChannelType.EMAIL)).isSameAs(second);
     }

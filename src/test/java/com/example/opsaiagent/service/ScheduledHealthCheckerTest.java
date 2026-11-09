@@ -1,5 +1,6 @@
 package com.example.opsaiagent.service;
 
+import org.mockito.ArgumentMatchers;
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.ops.service.OpsServiceManager;
 import com.example.opsaiagent.ops.service.ScheduledHealthChecker;
@@ -62,7 +63,7 @@ class ScheduledHealthCheckerTest {
 
         checker.checkAllServices();
 
-        verify(healthChecker, times(3)).checkNow(org.mockito.ArgumentMatchers.anyString());
+        verify(healthChecker, times(3)).checkNow(ArgumentMatchers.anyString());
     }
 
     @Test
@@ -74,6 +75,6 @@ class ScheduledHealthCheckerTest {
 
         checker.checkAllServices();
 
-        verify(healthChecker, times(2)).checkNow(org.mockito.ArgumentMatchers.anyString());
+        verify(healthChecker, times(2)).checkNow(ArgumentMatchers.anyString());
     }
 }

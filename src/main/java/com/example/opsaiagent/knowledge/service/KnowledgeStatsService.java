@@ -1,5 +1,6 @@
 package com.example.opsaiagent.knowledge.service;
 
+import com.example.opsaiagent.knowledge.entity.KnowledgeHitLogEntity;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.ops.entity.OpsServiceEntity;
 import com.example.opsaiagent.knowledge.dto.KnowledgeCoverageResponse;
@@ -70,7 +71,7 @@ public class KnowledgeStatsService {
         long confirmedCases = caseMapper.selectCount(caseStatus(scope, "CONFIRMED"));
         long pendingConflicts = conflictMapper.selectCount(conflictPending(scope));
         long monthHits = hitLogMapper.selectCount(scope.hitLogs()
-                .ge(com.example.opsaiagent.knowledge.entity.KnowledgeHitLogEntity::getCreatedAt, monthStart));
+                .ge(KnowledgeHitLogEntity::getCreatedAt, monthStart));
 
         return KnowledgeStatsResponse.builder()
                 .totalDocs(totalDocs)

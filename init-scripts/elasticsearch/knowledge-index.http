@@ -1,0 +1,97 @@
+# Elasticsearch Kibana Dev Tools 脚本；逐段执行，不是 SQL，也不是通用 HTTP 客户端文件。
+# 基线：Elasticsearch 8.x，具体补丁版本须与选定 LangChain4j/ES Java Client 联调后锁定。
+# 1024 必须与真实 Embedding 模型输出维度一致；不同模型即使同维也不能混用。
+# 以下为本项目目标映射，不假设 LangChain4j 内置存储默认映射与它兼容。
+# 标准分词器不依赖插件；中文分词质量必须回归评估，需要 IK 时另行安装匹配版本插件。
+# 初次创建前确认索引/别名不存在；已有环境不要重复创建或覆盖模板。
+
+PUT _index_template/ops-knowledge-template-v1
+{
+  "index_patterns": ["ops-knowledge-v1-*"],
+  "priority": 200,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "1s"
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "content": {"type": "text", "analyzer": "standard"},
+        "embedding": {"type": "dense_vector", "dims": 1024, "index": true, "similarity": "cosine"},
+        "metadata": {
+          "dynamic": "strict",
+          "properties": {
+            "docId": {"type": "keyword"},
+            "chunkId": {"type": "keyword"},
+            "ordinal": {"type": "integer"},
+            "indexVersion": {"type": "keyword"},
+            "tenantId": {"type": "keyword"},
+            "deptId": {"type": "keyword"},
+            "owner": {"type": "keyword"},
+            "visibility": {"type": "keyword"},
+            "reviewStatus": {"type": "keyword"},
+            "trustStatus": {"type": "keyword"},
+            "layer": {"type": "keyword"},
+            "source": {"type": "keyword", "ignore_above": 2048},
+            "contentHash": {"type": "keyword"},
+            "title": {"type": "text"},
+            "section": {"type": "text"},
+            "splitStrategy": {"type": "keyword"},
+            "splitVersion": {"type": "keyword"},
+            "embeddingModel": {"type": "keyword"},
+            "active": {"type": "boolean"}
+          }
+        }
+      }
+    }
+  }
+}
+
+# 单节点开发环境副本数为 0；生产至少按节点数和容灾目标配置副本。
+PUT ops-knowledge-v1-000001
+{}
+
+# 仅供初次部署。重建切换时同一 _aliases 请求内 remove 旧索引、add 新索引。
+POST _aliases
+{
+  "actions": [
+    {"add": {"index": "ops-knowledge-v1-000001", "alias": "ops-knowledge-read"}},
+    {"add": {"index": "ops-knowledge-v1-000001", "alias": "ops-knowledge-write", "is_write_index": true}}
+  ]
+}
+
+GET ops-knowledge-read/_mapping
+
+GET _cluster/health/ops-knowledge-v1-000001
+
+# BM25 最小示例：仅查询当前用户自己的个人知识；不是完整生产 ACL。
+# 生产由服务端构造 PERSONAL/DEPT/TENANT/PUBLIC 的 should 分支，禁止客户端传 ACL。
+POST ops-knowledge-read/_search
+{
+  "size": 5,
+  "_source": {"excludes": ["embedding"]},
+  "query": {
+    "bool": {
+      "must": [{"match": {"content": "线程池积压 排查"}}],
+      "filter": [
+        {"term": {"metadata.tenantId": "t-xinghai"}},
+        {"term": {"metadata.visibility": "PERSONAL"}},
+        {"term": {"metadata.owner": "zhangwei"}},
+        {"term": {"metadata.reviewStatus": "APPROVED"}},
+        {"term": {"metadata.active": true}}
+      ]
+    }
+  }
+}
+
+# kNN 请求结构说明（不提供伪造向量，以免误当成可验证语义检索的真实数据）：
+# POST ops-knowledge-read/_search
+# {"size":5,"knn":{"field":"embedding","query_vector":[模型生成的1024个浮点数],
+# "k":5,"num_candidates":100,"filter":{"bool":{"filter":[与BM25相同的服务端ACL条件]}}},
+# "_source":{"excludes":["embedding"]}}
+# 必须在 knn.filter 内预过滤，不能只用 post_filter。
+# 文档 _id 使用 docId:indexVersion:ordinal（或其稳定哈希），Bulk 后逐条检查错误。
+# 发布时 refresh=wait_for 后校验数量，再 CAS 更新 MySQL 当前版本；检索结果再复核 MySQL。
+# 删除仅允许服务端按 tenantId + docId + 指定旧 indexVersion 精确删除；不提供全库清空语句。

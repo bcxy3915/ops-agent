@@ -281,7 +281,7 @@ class KnowledgeStatsServiceTest {
         expired.setTitle("过期手册");
         expired.setTrustStatus("VERIFIED");
         expired.setHitCount(2L);
-        expired.setReviewAt(java.time.LocalDateTime.now().minusDays(1));
+        expired.setReviewAt(LocalDateTime.now().minusDays(1));
 
         KnowledgeDocumentEntity zeroHit = new KnowledgeDocumentEntity();
         zeroHit.setId(2L);

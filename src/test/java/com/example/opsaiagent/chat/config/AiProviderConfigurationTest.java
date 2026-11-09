@@ -1,5 +1,10 @@
 package com.example.opsaiagent.chat.config;
 
+import com.example.opsaiagent.chat.service.ChatTurnService;
+import com.example.opsaiagent.chat.service.OpsAgentService;
+import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import com.example.opsaiagent.ai.adapter.langchain4j.*;
 import com.example.opsaiagent.ai.api.ChatGateway;
 import com.example.opsaiagent.ai.api.StreamingChatGateway;
@@ -23,11 +28,11 @@ class AiProviderConfigurationTest {
             .withInitializer(context -> context.getBeanFactory()
                     .setConversionService(ApplicationConversionService.getSharedInstance()))
             .withUserConfiguration(LangChain4jConfig.class,
-                    com.example.opsaiagent.chat.service.OpsAgentService.class)
+                    OpsAgentService.class)
             .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(ConversationService.class, () -> mock(ConversationService.class))
-            .withBean(com.example.opsaiagent.chat.service.ChatTurnService.class,
-                    () -> mock(com.example.opsaiagent.chat.service.ChatTurnService.class))
+            .withBean(ChatTurnService.class,
+                    () -> mock(ChatTurnService.class))
             .withBean(KnowledgeRetrievalService.class, () -> mock(KnowledgeRetrievalService.class))
             .withBean(KnowledgeHitLogService.class, () -> mock(KnowledgeHitLogService.class))
             .withBean(HybridRetriever.class, () -> mock(HybridRetriever.class))
@@ -64,8 +69,8 @@ class AiProviderConfigurationTest {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(OpsAssistant.class);
             assertThat(context).hasSingleBean(OpsStreamingAssistant.class);
-            assertThat(context).hasSingleBean(com.example.opsaiagent.chat.service.OpsAgentService.class);
-            assertThat(context).hasSingleBean(dev.langchain4j.store.memory.chat.ChatMemoryStore.class);
+            assertThat(context).hasSingleBean(OpsAgentService.class);
+            assertThat(context).hasSingleBean(ChatMemoryStore.class);
         });
     }
 
@@ -77,9 +82,9 @@ class AiProviderConfigurationTest {
     void syncAndStreamShareModelAndTemperature() {
         runner.withPropertyValues("ops-agent.ai.model=audit-model", "ops-agent.ai.temperature=0.25")
                 .run(context -> {
-                    var sync = context.getBean(dev.langchain4j.model.openai.OpenAiChatModel.class)
+                    var sync = context.getBean(OpenAiChatModel.class)
                             .defaultRequestParameters();
-                    var stream = context.getBean(dev.langchain4j.model.openai.OpenAiStreamingChatModel.class)
+                    var stream = context.getBean(OpenAiStreamingChatModel.class)
                             .defaultRequestParameters();
                     assertThat(sync.modelName()).isEqualTo("audit-model");
                     assertThat(stream.modelName()).isEqualTo(sync.modelName());
@@ -97,9 +102,9 @@ class AiProviderConfigurationTest {
         runner.withPropertyValues("spring.ai.openai.chat.model=legacy-model",
                         "spring.ai.openai.chat.temperature=0.15")
                 .run(context -> {
-                    assertThat(context.getBean(dev.langchain4j.model.openai.OpenAiChatModel.class)
+                    assertThat(context.getBean(OpenAiChatModel.class)
                             .defaultRequestParameters().modelName()).isEqualTo("legacy-model");
-                    assertThat(context.getBean(dev.langchain4j.model.openai.OpenAiStreamingChatModel.class)
+                    assertThat(context.getBean(OpenAiStreamingChatModel.class)
                             .defaultRequestParameters().temperature()).isEqualTo(0.15);
                 });
     }

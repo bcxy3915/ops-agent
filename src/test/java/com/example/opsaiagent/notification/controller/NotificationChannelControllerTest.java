@@ -1,5 +1,6 @@
 package com.example.opsaiagent.notification.controller;
 
+import com.example.opsaiagent.notification.dto.NotificationRecordResponse;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.notification.dto.NotificationChannelRequest;
 import com.example.opsaiagent.notification.dto.NotificationChannelResponse;
@@ -102,7 +103,7 @@ class NotificationChannelControllerTest {
         NotificationRecordEntity record = new NotificationRecordEntity();
         record.setStatus("SUCCESS");
         when(notificationChannelService.testSend(1L)).thenReturn(record);
-        ApiResponse<com.example.opsaiagent.notification.dto.NotificationRecordResponse> resp = controller.test(1L);
+        ApiResponse<NotificationRecordResponse> resp = controller.test(1L);
         assertThat(resp.getData().getStatus()).isEqualTo("SUCCESS");
     }
 }

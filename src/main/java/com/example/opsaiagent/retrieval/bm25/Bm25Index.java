@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval.bm25;
 
+import java.util.function.Predicate;
 import lombok.Getter;
 import com.example.opsaiagent.knowledge.model.Document;
 
@@ -83,7 +84,7 @@ public class Bm25Index {
      * @param visible 服务端可见性判断
      * @return 仅包含可见文档的检索结果
      */
-    public List<ScoredDocument> search(String query, int topK, java.util.function.Predicate<Document> visible) {
+    public List<ScoredDocument> search(String query, int topK, Predicate<Document> visible) {
         if (topK <= 0) {
             return List.of();
         }

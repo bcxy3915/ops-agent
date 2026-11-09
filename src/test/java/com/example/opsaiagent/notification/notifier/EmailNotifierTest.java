@@ -1,5 +1,6 @@
 package com.example.opsaiagent.notification.notifier;
 
+import org.mockito.Mockito;
 import com.example.opsaiagent.notification.NotificationChannelType;
 import com.example.opsaiagent.notification.NotificationContent;
 import com.example.opsaiagent.notification.entity.NotificationChannelConfigEntity;
@@ -150,7 +151,7 @@ class EmailNotifierTest {
         newNotifier().send(channel("a@x.com"), content());
         verify(mailSender).send(any(MimeMessage.class));
         // 不会使用 SimpleMailMessage（MimeMessageHelper 走 createMimeMessage 路径）
-        org.mockito.Mockito.verify(mailSender, org.mockito.Mockito.never())
+        Mockito.verify(mailSender, Mockito.never())
                 .send(any(SimpleMailMessage.class));
     }
 }

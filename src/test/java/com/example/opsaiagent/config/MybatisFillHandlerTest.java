@@ -1,5 +1,6 @@
 package com.example.opsaiagent.config;
 
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.example.opsaiagent.common.config.MybatisFillHandler;
@@ -57,7 +58,7 @@ class MybatisFillHandlerTest {
     @DisplayName("insertFill：已存在的值不会被覆盖")
     void insertFill_doesNotOverrideExistingValue() {
         OpsServiceEntity entity = new OpsServiceEntity();
-        java.time.LocalDateTime fixed = java.time.LocalDateTime.of(2020, 1, 1, 0, 0);
+        LocalDateTime fixed = LocalDateTime.of(2020, 1, 1, 0, 0);
         entity.setRegisteredAt(fixed);
         MetaObject metaObject = SystemMetaObject.forObject(entity);
 

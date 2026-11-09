@@ -1,5 +1,9 @@
 package com.example.opsaiagent.chat.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
@@ -126,7 +130,7 @@ public class OpsAgentService {
                             });
                     return tokens(round, question)
                             .takeUntilOther(invalidation)
-                            .takeUntilOther(Mono.delay(turns.timeout()).flatMap(tick -> Mono.error(new java.util.concurrent.TimeoutException("本轮问答超过最长时间"))))
+                            .takeUntilOther(Mono.delay(turns.timeout()).flatMap(tick -> Mono.error(new TimeoutException("本轮问答超过最长时间"))))
                             .doOnNext(round.answer::append)
                             .map(token -> ServerSentEvent.builder(token).build())
                             .concatWith(Flux.defer(() -> withContext(snapshot, () -> {
@@ -203,7 +207,7 @@ public class OpsAgentService {
                                 if (sink.isCancelled()) { round.cancelModel(); }
                             })
                             .beforeToolExecution(tool -> {
-                                if (sink.isCancelled()) { throw new java.util.concurrent.CancellationException("客户端已取消问答"); }
+                                if (sink.isCancelled()) { throw new CancellationException("客户端已取消问答"); }
                                 turns.assertActive(round.turn);
                             })
                             .onCompleteResponse(response -> sink.complete()).onError(sink::error).start();
@@ -221,7 +225,7 @@ public class OpsAgentService {
     private String toJson(List<RetrievalHitResponse> citations) {
         try {
             return objectMapper.writeValueAsString(citations);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+        } catch (JsonProcessingException failure) {
             throw new IllegalStateException("引用序列化失败", failure);
         }
     }
@@ -233,7 +237,7 @@ public class OpsAgentService {
      * @param <T> 返回类型
      * @return 任务结果
      */
-    private static <T> T withContext(RbacContextSnapshot snapshot, java.util.function.Supplier<T> action) {
+    private static <T> T withContext(RbacContextSnapshot snapshot, Supplier<T> action) {
         var previous = RbacContextSnapshot.capture();
         snapshot.restore();
         try {

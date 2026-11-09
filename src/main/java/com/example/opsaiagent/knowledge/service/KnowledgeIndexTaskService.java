@@ -123,7 +123,7 @@ public class KnowledgeIndexTaskService {
         for (int i = 0; i < maxPerRound; i++) {
             KnowledgeIndexTaskEntity task;
             try {
-                task = taskMapper.claimOne(leaseMinutes);
+                task = new TransactionTemplate(transactionManager).execute(status -> taskMapper.claimOne(leaseMinutes));
             } catch (Exception e) {
                 log.warn("领取知识索引任务失败: {}", e.getMessage());
                 return;
@@ -148,7 +148,7 @@ public class KnowledgeIndexTaskService {
             handleFailure(task, e);
             return;
         }
-        taskMapper.finish(task.getId(), result, null);
+        // 任务终态已与业务投影一起提交，避免执行后被重新领取。
         log.info("知识索引任务{}: id={}, docId={}, source={}", result, task.getId(),
                 task.getDocId(), task.getVectorSource());
         if (STATUS_SUCCESS.equals(result)) {
@@ -165,8 +165,10 @@ public class KnowledgeIndexTaskService {
      * @return 任务终态 SUCCESS / SKIPPED
      */
     private String execute(KnowledgeIndexTaskEntity task, TransactionStatus txStatus) {
-        KnowledgeDocumentEntity doc = documentMapper.selectById(task.getDocId());
+        KnowledgeDocumentEntity doc = documentMapper.lockById(task.getDocId());
+        if (taskMapper.lockOwned(task.getId(), task.getClaimToken()) == null) return STATUS_SKIPPED;
         if (!isIndexable(doc, task)) {
+            taskMapper.finish(task.getId(), STATUS_SKIPPED, null, task.getClaimToken());
             return STATUS_SKIPPED;
         }
         indexer.reindex(doc, task.getVectorSource());
@@ -177,11 +179,12 @@ public class KnowledgeIndexTaskService {
             log.info("索引任务执行期间文档已变更，回滚本次写入: docId={}", task.getDocId());
             return STATUS_SKIPPED;
         }
-        // 与分块、向量写入同一事务：置 PUBLISHED 才算真正可检索，页面与检索能力保持一致
-        latest.setPublishStatus(KnowledgeDocumentService.PUBLISH_PUBLISHED);
+        // 事务提交后等待 ES 同步器确认，不能在投影尚未可见时标记已发布。
+        latest.setPublishStatus(KnowledgeDocumentService.PUBLISH_BUILDING);
         latest.setPublishError(null);
-        latest.setPublishedAt(LocalDateTime.now());
+        latest.setPublishedAt(null);
         documentMapper.updateById(latest);
+        taskMapper.finish(task.getId(), STATUS_SUCCESS, null, task.getClaimToken());
         return STATUS_SUCCESS;
     }
 
@@ -197,21 +200,31 @@ public class KnowledgeIndexTaskService {
                 && Objects.equals(task.getDocVersion(), doc.getVersion());
     }
 
+    /**
+     * 按文档、任务顺序加锁并记录失败，禁止旧领取者覆盖新任务状态。
+     * @param task 本次领取任务
+     * @param e 执行异常
+     * @return 无返回值
+     */
     private void handleFailure(KnowledgeIndexTaskEntity task, Exception e) {
-        String errorMsg = truncate(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-        int attempts = task.getAttempts() == null ? 1 : task.getAttempts();
-        int maxAttempts = task.getMaxAttempts() == null ? DEFAULT_MAX_ATTEMPTS : task.getMaxAttempts();
-        if (attempts >= maxAttempts) {
-            taskMapper.finish(task.getId(), STATUS_FAILED, errorMsg);
-            markPublishFailed(task, errorMsg);
-            log.error("知识索引任务失败（已达最大重试 {} 次）: id={}, docId={}", maxAttempts,
-                    task.getId(), task.getDocId(), e);
-        } else {
-            int delaySeconds = backoffSeconds(attempts);
-            taskMapper.retry(task.getId(), errorMsg, delaySeconds);
-            log.warn("知识索引任务失败，{}s 后重试: id={}, docId={}, attempts={}/{}", delaySeconds,
-                    task.getId(), task.getDocId(), attempts, maxAttempts, e);
-        }
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            documentMapper.lockById(task.getDocId());
+            String errorMsg = truncate(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            int attempts = task.getAttempts() == null ? 1 : task.getAttempts();
+            int maxAttempts = task.getMaxAttempts() == null ? DEFAULT_MAX_ATTEMPTS : task.getMaxAttempts();
+            if (attempts >= maxAttempts) {
+                if (taskMapper.finish(task.getId(), STATUS_FAILED, errorMsg, task.getClaimToken()) > 0) {
+                    markPublishFailed(task, errorMsg);
+                }
+                log.error("知识索引任务失败（已达最大重试 {} 次）: id={}, docId={}", maxAttempts,
+                        task.getId(), task.getDocId(), e);
+            } else {
+                int delaySeconds = backoffSeconds(attempts);
+                taskMapper.retry(task.getId(), errorMsg, delaySeconds, task.getClaimToken());
+                log.warn("知识索引任务失败，{}s 后重试: id={}, docId={}, attempts={}/{}", delaySeconds,
+                        task.getId(), task.getDocId(), attempts, maxAttempts, e);
+            }
+        });
     }
 
     /**

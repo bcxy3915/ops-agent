@@ -1,5 +1,14 @@
 package com.example.opsaiagent.migration;
 
+import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
+import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever;
+import com.example.opsaiagent.chat.config.LangChain4jConfig;
+import com.example.opsaiagent.chat.service.ConversationService;
+import com.example.opsaiagent.knowledge.model.Document;
+import com.example.opsaiagent.rbac.context.TenantContext;
+import com.example.opsaiagent.retrieval.HybridRetriever;
+import java.util.Map;
+import org.assertj.core.api.Assertions;
 import com.example.opsaiagent.ai.api.ChatRequest;
 import com.example.opsaiagent.ai.api.ChatStreamEvent;
 import com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jMemoryId;
@@ -128,7 +137,7 @@ class LangChain4jCompatibilityPocTest {
     void structuredOutputMapsToBusinessDtoWithExistingJacksonDependencies() throws Exception {
         String dto = json.writeValueAsString(new HealthSummary("fixture-service", "DOWN"));
         responses.add(completion(json.writeValueAsString(
-                java.util.Map.of("role", "assistant", "content", dto)), "stop"));
+                Map.of("role", "assistant", "content", dto)), "stop"));
 
         DiagnosisAssistant assistant = AiServices.create(DiagnosisAssistant.class, model());
 
@@ -141,14 +150,14 @@ class LangChain4jCompatibilityPocTest {
     void structuredOutputGatewayMapsJsonAndRejectsMalformedOutput() throws Exception {
         String dto = json.writeValueAsString(new HealthSummary("fixture-service", "DOWN"));
         responses.add(completion(json.writeValueAsString(
-                java.util.Map.of("role", "assistant", "content", dto)), "stop"));
+                Map.of("role", "assistant", "content", dto)), "stop"));
         LangChain4jStructuredOutputGateway gateway = new LangChain4jStructuredOutputGateway(model(), json);
 
         assertThat(gateway.generate(new ChatRequest("diag-1", "诊断故障", "输出 JSON", null),
                 HealthSummary.class)).isEqualTo(new HealthSummary("fixture-service", "DOWN"));
 
         responses.add(completion("{\"role\":\"assistant\",\"content\":\"not-json\"}", "stop"));
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> gateway.generate(
+        Assertions.assertThatThrownBy(() -> gateway.generate(
                         new ChatRequest("diag-2", "诊断故障", "输出 JSON", null), HealthSummary.class))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("模型返回的结构化结果格式非法");
@@ -308,36 +317,36 @@ class LangChain4jCompatibilityPocTest {
         var health = mock(HealthCheckTools.class);
         var metric = mock(MetricQueryTools.class);
         when(health.queryServiceHealth("fixture-service")).thenAnswer(call -> {
-            assertThat(com.example.opsaiagent.rbac.context.TenantContext.get()).isEqualTo("fixture-tenant");
+            assertThat(TenantContext.get()).isEqualTo("fixture-tenant");
             return "DOWN";
         });
         when(metric.queryMetric("fixture-service", "cpu")).thenAnswer(call -> {
-            assertThat(com.example.opsaiagent.rbac.context.TenantContext.get()).isEqualTo("fixture-tenant");
+            assertThat(TenantContext.get()).isEqualTo("fixture-tenant");
             return "0.91";
         });
         var model = OpenAiStreamingChatModel.builder().baseUrl(baseUrl).apiKey("test-key")
                 .modelName("poc-scripted-model").timeout(Duration.ofSeconds(5)).build();
-        var retriever = mock(com.example.opsaiagent.retrieval.HybridRetriever.class);
+        var retriever = mock(HybridRetriever.class);
         when(retriever.retrieve("检查测试服务", 5)).thenReturn(List.of(
-                new com.example.opsaiagent.knowledge.model.Document("测试运维知识")));
-        var assistant = new com.example.opsaiagent.chat.config.LangChain4jConfig()
+                new Document("测试运维知识")));
+        var assistant = new LangChain4jConfig()
                 .langChain4jOpsStreamingAssistant(model,
-                        new com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore(
-                                mock(com.example.opsaiagent.chat.service.ConversationService.class), 20),
+                        new ConversationChatMemoryStore(
+                                mock(ConversationService.class), 20),
                         new LangChain4jReadOnlyToolBindings(health, metric,
                                 mock(MetricDiscoveryTools.class), mock(ServiceDiscoveryTools.class)),
-                        new com.example.opsaiagent.ai.adapter.langchain4j.LangChain4jKnowledgeContentRetriever(
+                        new LangChain4jKnowledgeContentRetriever(
                                 retriever, 5));
         CompletableFuture<String> result = new CompletableFuture<>();
         var tokens = new StringBuilder();
-        com.example.opsaiagent.rbac.context.TenantContext.set("fixture-tenant");
+        TenantContext.set("fixture-tenant");
         try {
             assistant.askStream(LangChain4jMemoryId.of("alice", "stream-session"), "检查测试服务", "运维助手")
                     .onPartialResponseWithContext((response, context) -> tokens.append(response.text()))
                     .onCompleteResponse(response -> result.complete(response.aiMessage().text()))
                     .onError(result::completeExceptionally).start();
         } finally {
-            com.example.opsaiagent.rbac.context.TenantContext.clear();
+            TenantContext.clear();
         }
         assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo("只读诊断完成");
         assertThat(tokens.toString()).isEqualTo("只读诊断完成");
@@ -356,9 +365,9 @@ class LangChain4jCompatibilityPocTest {
      * @throws Exception JSON 序列化异常
      */
     private String streamingToolCall(String id, String name, String arguments) throws Exception {
-        String delta = json.writeValueAsString(java.util.Map.of("role", "assistant", "tool_calls",
-                List.of(java.util.Map.of("index", 0, "id", id, "type", "function", "function",
-                        java.util.Map.of("name", name, "arguments", arguments)))));
+        String delta = json.writeValueAsString(Map.of("role", "assistant", "tool_calls",
+                List.of(Map.of("index", 0, "id", id, "type", "function", "function",
+                        Map.of("name", name, "arguments", arguments)))));
         return "data: " + chunk(delta, null) + "\n\ndata: " + chunk("{}", "tool_calls")
                 + "\n\ndata: [DONE]\n\n";
     }
@@ -372,9 +381,9 @@ class LangChain4jCompatibilityPocTest {
     }
 
     private String toolCall(String id, String name, String arguments) throws Exception {
-        return completion(json.writeValueAsString(java.util.Map.of(
-                "role", "assistant", "tool_calls", List.of(java.util.Map.of(
-                        "id", id, "type", "function", "function", java.util.Map.of(
+        return completion(json.writeValueAsString(Map.of(
+                "role", "assistant", "tool_calls", List.of(Map.of(
+                        "id", id, "type", "function", "function", Map.of(
                                 "name", name, "arguments", arguments))))), "tool_calls");
     }
 

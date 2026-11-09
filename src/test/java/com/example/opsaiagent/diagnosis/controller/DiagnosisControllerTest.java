@@ -1,5 +1,6 @@
 package com.example.opsaiagent.diagnosis.controller;
 
+import java.util.Map;
 import com.example.opsaiagent.diagnosis.entity.DiagnosisRecordEntity;
 import com.example.opsaiagent.diagnosis.service.DiagnosisService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -129,7 +130,7 @@ class DiagnosisControllerTest {
         mvc.perform(post("/api/diagnoses/1/follow-up")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                java.util.Map.of("question", "怎么止损？"))))
+                                Map.of("question", "怎么止损？"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.question").value("怎么止损？"))
                 .andExpect(jsonPath("$.data.answer").value("回滚变更"));
@@ -141,7 +142,7 @@ class DiagnosisControllerTest {
         mvc.perform(post("/api/diagnoses/1/follow-up")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                java.util.Map.of("question", ""))))
+                                Map.of("question", ""))))
                 .andExpect(status().isBadRequest());
     }
 }

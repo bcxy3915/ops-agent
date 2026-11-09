@@ -1,5 +1,6 @@
 package com.example.opsaiagent.retrieval.fusion;
 
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ class RrfFuserTest {
     }
 
     private static Document doc(String id, String text) {
-        return new Document(id, text, java.util.Map.of());
+        return new Document(id, text, Map.of());
     }
 
     // ==================== 双路融合 ====================

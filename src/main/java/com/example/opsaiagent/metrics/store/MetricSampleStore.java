@@ -1,5 +1,6 @@
 package com.example.opsaiagent.metrics.store;
 
+import java.util.Map;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.entity.MetricSampleEntity;
@@ -68,7 +69,7 @@ public class MetricSampleStore {
      * @param points  指标名 -> 值（时间戳统一用同一采样时刻）
      * @param timestampMs 采样时间戳（毫秒）
      */
-    public void saveBatch(String service, long timestampMs, java.util.Map<String, Double> points) {
+    public void saveBatch(String service, long timestampMs, Map<String, Double> points) {
         saveBatch(null, service, timestampMs, points);
     }
 
@@ -81,7 +82,7 @@ public class MetricSampleStore {
      * @param timestampMs 采样时间戳（毫秒）
      */
     public void saveBatch(String tenantId, String service, long timestampMs,
-                          java.util.Map<String, Double> points) {
+                          Map<String, Double> points) {
         if (points == null || points.isEmpty()) {
             return;
         }
