@@ -243,6 +243,47 @@ class OpsAgentServiceTest {
     }
 
     /**
+     * 验证创建事件流时不提前领取租约，每次订阅都独立打开和关闭轮次。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void streamAcquiresResourcesOnlyOnSubscription() {
+        stream(true, false);
+        var events = service.askStreamWithCitations("session", "问题");
+        verifyNoInteractions(turns, memory, retriever);
+
+        for (int i = 0; i < 2; i++) {
+            StepVerifier.create(events).expectNextCount(3).verifyComplete();
+        }
+
+        verify(turns, times(2)).begin("session", "问题");
+        verify(turns, times(2)).finish(turn, "部分答案");
+        verify(turns, times(2)).release(turn);
+        verify(memory, times(2)).closeTurn(turn.memoryId());
+    }
+
+    /**
+     * 验证首片段后模型停滞时，独立监测仍能发现删除并取消模型，不输出成功尾事件。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void invalidationMonitorCancelsStalledModel() {
+        stream(false, false);
+        StepVerifier.create(service.askStreamWithCitations("session", "问题"))
+                .expectNextMatches(event -> "部分答案".equals(event.data()))
+                .then(() -> doThrow(new IllegalStateException("会话已删除"))
+                        .when(turns).assertActive(turn))
+                .expectErrorMessage("会话已删除")
+                .verify(Duration.ofSeconds(5));
+
+        verify(handle, timeout(1000)).cancel();
+        verify(turns, timeout(1000)).finish(turn, "部分答案");
+        verify(memory, timeout(1000)).closeTurn(turn.memoryId());
+    }
+
+    /**
      * 创建可控回调夹具，不访问真实模型。
      * @param complete 是否正常结束
      * @param fail 是否在首片段后失败

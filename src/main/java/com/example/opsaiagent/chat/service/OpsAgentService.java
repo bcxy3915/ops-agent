@@ -121,27 +121,63 @@ public class OpsAgentService {
         RbacContextSnapshot snapshot = RbacContextSnapshot.capture();
         return Flux.defer(() -> withContext(snapshot, () -> Flux.using(
                 () -> begin(sessionId, question),
-                round -> {
-                    List<RetrievalHitResponse> citations = retrieve(round, question);
-                    Flux<String> invalidation = Flux.interval(Duration.ofSeconds(1))
-                            .publishOn(Schedulers.boundedElastic())
-                            .handle((tick, sink) -> {
-                                try { turns.assertActive(round.turn); }
-                                catch (Exception failure) { sink.error(failure); }
-                            });
-                    return tokens(round, question)
-                            .takeUntilOther(invalidation)
-                            .takeUntilOther(Mono.delay(turns.timeout()).flatMap(tick -> Mono.error(new TimeoutException("本轮问答超过最长时间"))))
-                            .doOnNext(round.answer::append)
-                            .map(token -> ServerSentEvent.builder(token).build())
-                            .concatWith(Flux.defer(() -> withContext(snapshot, () -> {
-                                round.finish();
-                                return Flux.just(ServerSentEvent.builder(toJson(citations)).event("citations").build(),
-                                        ServerSentEvent.builder("[DONE]").build());
-                            })));
-                },
-                round -> withContext(snapshot, () -> { round.close(); return null; }), true))
-        );
+                round -> streamRound(round, question, snapshot),
+                round -> withContext(snapshot, () -> {
+                    round.close();
+                    return null;
+                }),
+                true)));
+    }
+
+    /**
+     * 编排一轮流式问答：检索、输出答案，成功落库后输出引用和结束标记。
+     * @param round 当前订阅独占的轮次
+     * @param question 用户问题
+     * @param snapshot 请求权限快照，供异步完成时恢复上下文
+     * @return 受失效检查与整轮超时保护的 SSE 事件流
+     */
+    private Flux<ServerSentEvent<String>> streamRound(Round round, String question, RbacContextSnapshot snapshot) {
+        List<RetrievalHitResponse> citations = retrieve(round, question);
+
+        Flux<ServerSentEvent<String>> answerEvents = tokens(round, question)
+                .takeUntilOther(watchTurnInvalidation(round))
+                .takeUntilOther(Mono.delay(turns.timeout()).then(Mono.error(new TimeoutException("本轮问答超过最长时间"))))
+                .doOnNext(round.answer::append)
+                .map(token -> ServerSentEvent.builder(token).build());
+
+        // 仅正常完成时进入尾事件；错误、超时和取消由外层 using 关闭轮次并保存部分答案。
+        return answerEvents.concatWith(Flux.defer(() -> withContext(snapshot,
+                () -> finishStream(round, citations))));
+    }
+
+    /**
+     * 每秒检查持久化令牌，使不再输出内容的模型也能在会话删除或租约失效时被取消。
+     * @param round 当前轮次
+     * @return 正常时不发送元素，轮次失效时以错误终止的监测流
+     */
+    private Flux<Long> watchTurnInvalidation(Round round) {
+        return Flux.interval(Duration.ofSeconds(1))
+                .publishOn(Schedulers.boundedElastic())
+                .handle((tick, sink) -> {
+                    try {
+                        turns.assertActive(round.turn);
+                    } catch (Exception failure) {
+                        sink.error(failure);
+                    }
+                });
+    }
+
+    /**
+     * 先提交完整答案，再构造成功尾事件；提交失败不得向客户端报告成功。
+     * @param round 已正常完成模型输出的轮次
+     * @param citations 本轮引用
+     * @return 依次包含 citations 和 DONE 的尾事件流
+     */
+    private Flux<ServerSentEvent<String>> finishStream(Round round, List<RetrievalHitResponse> citations) {
+        round.finish();
+        return Flux.just(
+                ServerSentEvent.builder(toJson(citations)).event("citations").build(),
+                ServerSentEvent.builder("[DONE]").build());
     }
 
     /**
