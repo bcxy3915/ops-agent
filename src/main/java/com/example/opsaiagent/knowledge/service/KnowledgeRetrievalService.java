@@ -9,10 +9,14 @@ import com.example.opsaiagent.knowledge.dto.RetrievalTestResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.example.opsaiagent.knowledge.model.Document;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -40,6 +44,10 @@ public class KnowledgeRetrievalService {
 
     private final HybridRetriever hybridRetriever;
     private final KnowledgeDocumentMapper documentMapper;
+    private final EmbeddingModel embeddingModel;
+
+    @Value("${ops-agent.retrieval.citations.min-similarity:0.7}")
+    private double citationMinSimilarity = 0.7;
 
     /**
      * 检索测试
@@ -82,21 +90,87 @@ public class KnowledgeRetrievalService {
      * 将检索命中的 Document 列表转换为结构化引用（供问答 citations 使用）
      * @param docs 检索命中的文档列表
      * @param query 用户查询
-     * @param topK 检索条数（用于计算位置相关度分数）
-     * @return 引用列表；无命中时返回空列表
+     * @param topK 引用数量上限
+     * @return 通过语义相关性校验的引用；无相关结果或校验失败时返回空列表
      */
     public List<RetrievalHitResponse> toHits(List<Document> docs, String query, int topK) {
-        if (docs == null || docs.isEmpty()) {
+        if (docs == null || docs.isEmpty() || !StringUtils.hasText(query) || topK <= 0) {
             return List.of();
         }
+        List<Document> relevant = relevantCitations(docs, query, topK);
         List<RetrievalHitResponse> hits = new ArrayList<>();
-        for (int i = 0; i < docs.size(); i++) {
-            RetrievalHitResponse hit = toHit(docs.get(i), query, i, topK);
+        for (int i = 0; i < relevant.size(); i++) {
+            Document doc = relevant.get(i);
+            RetrievalHitResponse hit = toHit(doc, query, i, topK);
             if (hit != null) {
+                hit.setScore(doc.getScore());
                 hits.add(hit);
             }
         }
         return hits;
+    }
+
+    /**
+     * 仅校验引用候选，不重新检索、不修改本轮模型上下文或原始文档评分。
+     * 对正文重新计算同尺度的余弦相似度，避免将 BM25 分数误当作语义相关度。
+     * @param docs 本轮已召回的候选
+     * @param query 用户问题
+     * @param topK 引用数量上限
+     * @return 保留原顺序、带语义评分的引用候选；校验不可用时不展示来源
+     */
+    private List<Document> relevantCitations(List<Document> docs, String query, int topK) {
+        List<Document> candidates = docs.stream()
+                .filter(doc -> doc != null && StringUtils.hasText(doc.getText())).toList();
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+        try {
+            if (!Double.isFinite(citationMinSimilarity)
+                    || citationMinSimilarity < 0 || citationMinSimilarity > 1) {
+                throw new IllegalStateException("引用相似度阈值必须在 0 到 1 之间");
+            }
+            List<TextSegment> segments = new ArrayList<>();
+            segments.add(TextSegment.from(query));
+            candidates.forEach(doc -> segments.add(TextSegment.from(doc.getText())));
+            List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+            if (embeddings == null || embeddings.size() != segments.size()) {
+                throw new IllegalStateException("引用校验向量数量不匹配");
+            }
+            List<Document> accepted = new ArrayList<>();
+            for (int i = 0; i < candidates.size(); i++) {
+                double similarity = cosineSimilarity(embeddings.get(0), embeddings.get(i + 1));
+                if (similarity >= citationMinSimilarity && accepted.size() < topK) {
+                    Document doc = candidates.get(i);
+                    accepted.add(new Document(doc.getId(), doc.getText(), doc.getMetadata(), similarity));
+                }
+            }
+            return accepted;
+        } catch (Exception failure) {
+            log.warn("引用相关性校验失败，本轮不展示文档来源", failure);
+            return List.of();
+        }
+    }
+
+    /**
+     * 计算问题与候选正文的余弦相似度，异常向量不作为引用依据。
+     * @param query 问题向量
+     * @param document 正文向量
+     * @return 余弦相似度；向量无效时返回负一
+     */
+    private double cosineSimilarity(Embedding query, Embedding document) {
+        if (query == null || document == null) return -1;
+        float[] left = query.vector();
+        float[] right = document.vector();
+        if (left.length == 0 || left.length != right.length) return -1;
+        double dot = 0, leftNorm = 0, rightNorm = 0;
+        for (int i = 0; i < left.length; i++) {
+            if (!Float.isFinite(left[i]) || !Float.isFinite(right[i])) return -1;
+            dot += (double) left[i] * right[i];
+            leftNorm += (double) left[i] * left[i];
+            rightNorm += (double) right[i] * right[i];
+        }
+        if (leftNorm == 0 || rightNorm == 0) return -1;
+        return Math.max(-1, Math.min(1, dot / Math.sqrt(leftNorm * rightNorm)));
     }
 
     /**

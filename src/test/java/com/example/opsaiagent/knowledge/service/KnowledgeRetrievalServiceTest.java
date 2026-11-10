@@ -1,6 +1,7 @@
 package com.example.opsaiagent.knowledge.service;
 
 import org.mockito.ArgumentMatchers;
+import org.assertj.core.data.Offset;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.knowledge.dto.RetrievalHitResponse;
@@ -9,6 +10,9 @@ import com.example.opsaiagent.knowledge.dto.RetrievalTestResponse;
 import com.example.opsaiagent.knowledge.entity.KnowledgeDocumentEntity;
 import com.example.opsaiagent.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.opsaiagent.retrieval.HybridRetriever;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,13 +23,16 @@ import com.example.opsaiagent.knowledge.model.Document;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * 检索测试服务单元测试（T18）
@@ -38,13 +45,22 @@ class KnowledgeRetrievalServiceTest {
     private HybridRetriever hybridRetriever;
     @Mock
     private KnowledgeDocumentMapper documentMapper;
+    @Mock
+    private EmbeddingModel embeddingModel;
 
     private KnowledgeRetrievalService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeRetrievalService(hybridRetriever, documentMapper);
+        service = new KnowledgeRetrievalService(hybridRetriever, documentMapper, embeddingModel);
         lenient().when(hybridRetriever.retrieve(anyString(), anyInt())).thenReturn(List.of());
+        // 默认夹具模拟相关正文，具体误召回用例单独覆盖向量响应。
+        lenient().when(embeddingModel.embedAll(anyList())).thenAnswer(invocation -> {
+            List<?> segments = invocation.getArgument(0);
+            return Response.from(IntStream.range(0, segments.size())
+                    .mapToObj(index -> Embedding.from(index == 2
+                            ? new float[]{0.8f, 0.6f} : new float[]{1, 0})).toList());
+        });
     }
 
     private Document doc(String id, String text, Map<String, Object> metadata) {
@@ -294,7 +310,7 @@ class KnowledgeRetrievalServiceTest {
         assertThat(hit1.getLayer()).isEqualTo("BUILTIN");
         assertThat(hit1.getTrustStatus()).isEqualTo("VERIFIED");
         assertThat(hit1.getVersion()).isEqualTo(1);
-        assertThat(hit1.getScore()).isEqualTo(0.8);
+        assertThat(hit1.getScore()).isCloseTo(0.8, Offset.offset(0.000001));
     }
 
     @Test
@@ -337,6 +353,88 @@ class KnowledgeRetrievalServiceTest {
 
         assertThat(hits).hasSize(1);
         assertThat(hits.get(0).getSnippet()).contains("有效<mark>内容</mark>");
+    }
+
+    /**
+     * 验证跨领域问题即使被 BM25 排到首位，也不生成文档来源。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void toHits_unrelatedQuestionHasNoSources() {
+        Document candidate = new Document("weak", "MySQL 连接池排查", Map.of(), 15.0);
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(
+                Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0.3f, 0.95f}))));
+
+        assertThat(service.toHits(List.of(candidate), "如何制作红烧肉", 5)).isEmpty();
+        assertThat(candidate.getScore()).isEqualTo(15.0);
+        verifyNoInteractions(documentMapper, hybridRetriever);
+    }
+
+    /**
+     * 验证混合候选仅展示相关来源，且分数不因排名靠前而变成满分。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void toHits_filtersMixedCandidatesAndUsesSemanticScore() {
+        List<Document> docs = List.of(doc("unrelated", "天气预报", Map.of()),
+                doc("relevant", "数据库连接池耗尽排查", Map.of()));
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(
+                Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0, 1}),
+                Embedding.from(new float[]{0.8f, 0.6f}))));
+
+        List<RetrievalHitResponse> hits = service.toHits(docs, "连接池满了怎么办", 5);
+
+        assertThat(hits).hasSize(1);
+        assertThat(hits.getFirst().getSnippet()).contains("连接池");
+        assertThat(hits.getFirst().getScore()).isCloseTo(0.8, Offset.offset(0.000001));
+        assertThat(docs.get(1).getScore()).isNull();
+        verifyNoInteractions(hybridRetriever);
+    }
+
+    /**
+     * 验证外部校验失败时隐藏来源，不抛异常阻断问答。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void toHits_embeddingFailureHasNoSources() {
+        when(embeddingModel.embedAll(anyList())).thenThrow(new IllegalStateException("模拟模型不可用"));
+        assertThat(service.toHits(List.of(doc("a", "数据库排查", Map.of())), "排查数据库", 5)).isEmpty();
+        verifyNoInteractions(documentMapper);
+    }
+
+    /**
+     * 验证缺失、零向量或维度不一致的评分不会产生来源。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void toHits_invalidEmbeddingsHaveNoSources() {
+        List<Document> docs = List.of(doc("a", "正文", Map.of()));
+        when(embeddingModel.embedAll(anyList())).thenReturn(
+                Response.from(List.of(Embedding.from(new float[]{1, 0}))),
+                Response.from(List.of(Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0, 0}))),
+                Response.from(List.of(Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{1}))));
+        for (int i = 0; i < 3; i++) {
+            assertThat(service.toHits(docs, "查询", 5)).isEmpty();
+        }
+        verifyNoInteractions(documentMapper);
+    }
+
+    /**
+     * 验证空问题或无效数量不调用模型，且有效引用不超过数量上限。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void toHits_checksInputAndLimitsSources() {
+        List<Document> docs = List.of(doc("a", "正文一", Map.of()), doc("b", "正文二", Map.of()));
+        assertThat(service.toHits(docs, " ", 5)).isEmpty();
+        assertThat(service.toHits(docs, "查询", 0)).isEmpty();
+        verifyNoInteractions(embeddingModel);
+        assertThat(service.toHits(docs, "查询", 1)).hasSize(1);
     }
 
     private RetrievalTestRequest req(String query, int topK, String layer) {

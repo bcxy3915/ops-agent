@@ -91,6 +91,9 @@ ops-agent:
   retrieval:
     keyword:
       type: elasticsearch
+    citations:
+      # 仅控制问答文档来源，不影响模型上下文；余弦阈值需结合本库样本校准。
+      min-similarity: 0.7
     rerank:
       enabled: false
       model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank

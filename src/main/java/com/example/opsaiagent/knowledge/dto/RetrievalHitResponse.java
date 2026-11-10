@@ -32,6 +32,6 @@ public class RetrievalHitResponse {
     private Long chunkId;
     /** 片段（命中关键词 <mark> 高亮） */
     private String snippet;
-    /** 展示相关度（0~1，相对排序权重） */
+    /** 问答引用为正文余弦相似度（0~1），检索测试为相对排序权重；均非正确概率。 */
     private Double score;
 }
