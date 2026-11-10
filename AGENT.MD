@@ -194,7 +194,7 @@ SSE 空格保护：Spring MVC 编码器直接输出 `data:`，标准客户端会
 
 - 应用默认启用 `local` profile；本地覆盖文件应放在 `src/main/resources/application-local.yml`。只读取完成任务所需的配置，不在工具输出或交付说明中展开真实密钥。
 - `.env.example` 是 Docker Compose 的数据库变量模板，`.env` 由 Compose 读取；Spring Boot 不会自动把该文件加载为进程环境变量。启动 Java 时需通过 IDE、当前终端环境变量或本地 YAML 单独提供配置。
-- 默认 MySQL 为 `localhost:23306/opsdb`，用户 `root`，Elasticsearch 为 `localhost:9200`；应用端口为 `8080`。Compose 的 `DB_PORT`、`DB_NAME`、`DB_USER` 仅改变容器配置，修改后还须同步应用的 `spring.datasource.*`，不能假设自动联动。
+- 默认 MySQL 为 `localhost:23306/opsdb`，用户 `root`，Elasticsearch 为 `localhost:9200`；应用端口为 `18080`。Compose 的 `DB_PORT`、`DB_NAME`、`DB_USER` 仅改变容器配置，修改后还须同步应用的 `spring.datasource.*`，不能假设自动联动。
 - Compose 默认启动 MySQL 和 Elasticsearch，不启动应用或前端；MySQL 仅在空数据卷初始化时执行 `init-scripts/mysql/`。旧 PostgreSQL 保留在 legacy profile，不得删除其数据卷；ES 使用独立初始化脚本创建索引与别名。
 
 | 环境变量 | 对应配置 / 用途 |

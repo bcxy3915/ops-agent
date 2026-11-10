@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 18080
 
 spring:
   profiles:
@@ -92,7 +92,7 @@ ops-agent:
     keyword:
       type: elasticsearch
     citations:
-      # 仅控制问答文档来源，不影响模型上下文；余弦阈值需结合本库样本校准。
+      # 控制问答文档来源和检索测试的有效命中，不影响模型上下文；余弦阈值需结合本库样本校准。
       min-similarity: 0.7
     rerank:
       enabled: false
@@ -111,7 +111,7 @@ ops-agent:
 
   # 跨域来源白名单（逗号分隔）
   cors:
-    allowed-origins: "${OPS_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173}"
+    allowed-origins: "${OPS_CORS_ALLOWED_ORIGINS:http://localhost:8888,http://127.0.0.1:8888}"
 
   # 知识库
   knowledge:

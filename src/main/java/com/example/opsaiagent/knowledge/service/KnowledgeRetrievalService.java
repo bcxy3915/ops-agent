@@ -62,22 +62,12 @@ public class KnowledgeRetrievalService {
         int topK = request.getTopK() == null ? 5 : Math.min(Math.max(request.getTopK(), 1), 20);
 
         List<Document> docs = hybridRetriever.retrieve(query, topK);
-        log.info("检索测试: query={}, topK={}, 命中 {}", query, topK, docs.size());
-
-        List<RetrievalHitResponse> hits = new ArrayList<>();
-        for (int i = 0; i < docs.size(); i++) {
-            Document doc = docs.get(i);
-            RetrievalHitResponse hit = toHit(doc, query, i, topK);
-            if (hit == null) {
-                continue;
-            }
-            // 层级过滤（按展示层级的真实值过滤）
-            if (StringUtils.hasText(request.getLayer())
-                    && !request.getLayer().equalsIgnoreCase(hit.getLayer())) {
-                continue;
-            }
-            hits.add(hit);
-        }
+        // 与问答引用复用相同的语义准入规则，避免把弱召回直接当作有效命中。
+        List<RetrievalHitResponse> hits = toHits(docs, query, topK).stream()
+                .filter(hit -> !StringUtils.hasText(request.getLayer())
+                        || request.getLayer().equalsIgnoreCase(hit.getLayer()))
+                .toList();
+        log.info("检索测试: query={}, topK={}, 候选 {}，有效命中 {}", query, topK, docs.size(), hits.size());
         return RetrievalTestResponse.builder()
                 .query(query)
                 .topK(topK)
@@ -101,9 +91,8 @@ public class KnowledgeRetrievalService {
         List<RetrievalHitResponse> hits = new ArrayList<>();
         for (int i = 0; i < relevant.size(); i++) {
             Document doc = relevant.get(i);
-            RetrievalHitResponse hit = toHit(doc, query, i, topK);
+            RetrievalHitResponse hit = toHit(doc, query);
             if (hit != null) {
-                hit.setScore(doc.getScore());
                 hits.add(hit);
             }
         }
@@ -111,7 +100,7 @@ public class KnowledgeRetrievalService {
     }
 
     /**
-     * 仅校验引用候选，不重新检索、不修改本轮模型上下文或原始文档评分。
+     * 校验问答引用与检索测试的候选，不重新检索、不修改模型上下文或原始文档评分。
      * 对正文重新计算同尺度的余弦相似度，避免将 BM25 分数误当作语义相关度。
      * @param docs 本轮已召回的候选
      * @param query 用户问题
@@ -175,8 +164,11 @@ public class KnowledgeRetrievalService {
 
     /**
      * Document 转命中项：优先使用 DB 文档元数据（真实治理状态），缺失时回退 metadata
+     * @param doc 已通过相关性校验的候选，评分为正文余弦相似度
+     * @param query 用户问题
+     * @return 结构化命中项；正文为空时返回空值
      */
-    private RetrievalHitResponse toHit(Document doc, String query, int index, int topK) {
+    private RetrievalHitResponse toHit(Document doc, String query) {
         if (doc == null || !StringUtils.hasText(doc.getText())) {
             return null;
         }
@@ -208,7 +200,6 @@ public class KnowledgeRetrievalService {
         Long chunkId = parseLong(metadataChunkId);
 
         String snippet = highlight(doc.getText(), query);
-        double score = Math.round((topK - index) / (double) topK * 100.0) / 100.0;
 
         return RetrievalHitResponse.builder()
                 .docId(docId)
@@ -220,7 +211,7 @@ public class KnowledgeRetrievalService {
                 .section(StringUtils.hasText(metadataSection) ? metadataSection : null)
                 .chunkId(chunkId)
                 .snippet(snippet)
-                .score(score)
+                .score(doc.getScore())
                 .build();
     }
 

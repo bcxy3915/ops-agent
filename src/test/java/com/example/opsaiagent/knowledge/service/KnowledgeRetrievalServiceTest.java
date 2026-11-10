@@ -117,7 +117,7 @@ class KnowledgeRetrievalServiceTest {
         RetrievalHitResponse hit1 = r.getHits().get(1);
         assertThat(hit1.getSource()).isEqualTo("01-服务清单.md");
         assertThat(hit1.getTitle()).isEqualTo("内置手册");
-        assertThat(hit1.getScore()).isEqualTo(0.8);
+        assertThat(hit1.getScore()).isCloseTo(0.8, Offset.offset(0.000001));
     }
 
     @Test
@@ -192,6 +192,49 @@ class KnowledgeRetrievalServiceTest {
         RetrievalTestResponse r = service.test(req("不存在的东西", 5, null));
         assertThat(r.getCount()).isZero();
         assertThat(r.getHits()).isEmpty();
+    }
+
+    /**
+     * 复现截图：仅提到 ES 或工具的候选不能冒充可视化工具的有效知识来源。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void test_uncoveredQuestionRejectsWeakCandidates() {
+        when(hybridRetriever.retrieve("es可视化工具", 5)).thenReturn(List.of(
+                new Document("deployment", "ES 使用脚本创建索引和别名", Map.of(), 20.0),
+                new Document("oncall", "值班工具账号状态检查", Map.of(), 10.0)));
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(
+                Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0.4f, 0.9f}),
+                Embedding.from(new float[]{0.2f, 0.98f}))));
+
+        RetrievalTestResponse result = service.test(req("es可视化工具", 5, null));
+
+        assertThat(result.getCount()).isZero();
+        assertThat(result.getHits()).isEmpty();
+        verifyNoInteractions(documentMapper);
+    }
+
+    /**
+     * 验证部分候选被过滤后的数量、来源与评分一致，不按名次重置成满分。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void test_countsOnlyRelevantCandidates() {
+        when(hybridRetriever.retrieve("连接池排查", 5)).thenReturn(List.of(
+                doc("unrelated", "值班工具账号", Map.of()),
+                doc("relevant", "连接池排查方法", Map.of("title", "数据库手册"))));
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(
+                Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0, 1}),
+                Embedding.from(new float[]{0.8f, 0.6f}))));
+
+        RetrievalTestResponse result = service.test(req("连接池排查", 5, null));
+
+        assertThat(result.getCount()).isEqualTo(1);
+        assertThat(result.getHits()).hasSize(1);
+        assertThat(result.getHits().getFirst().getTitle()).isEqualTo("数据库手册");
+        assertThat(result.getHits().getFirst().getScore()).isCloseTo(0.8, Offset.offset(0.000001));
     }
 
     @Test

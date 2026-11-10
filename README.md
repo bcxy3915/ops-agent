@@ -146,14 +146,16 @@ mvn spring-boot:run
 
 启动时自动：加载 `resources/knowledge/` 完整原文及分块 → LangChain4j 生成向量 → MySQL 持久化投递 → 同步 ES 向量与 BM25 索引 → 开启健康检查调度。
 
+本地后端默认端口为 `18080`，前端开发地址为 `http://localhost:8888`，前端 `/api` 代理至 `http://localhost:18080`。默认跨域白名单允许 `http://localhost:8888` 和 `http://127.0.0.1:8888`；自定义部署地址通过 `OPS_CORS_ALLOWED_ORIGINS` 配置。
+
 旧 PostgreSQL 数据可先通过 `python scripts/migrate-local-postgres-to-mysql.py` 预检。工具只接受尚未开展业务的新 MySQL 初始化库，显式 `--execute` 才导入，并先保存源快照和目标备份；不得对已有 MySQL 业务库重复导入。切换前应停写旧应用，核对迁移期间增量。不要删除旧 PostgreSQL 数据卷。
 
 ### 5. 验证
 
 | 用途 | 地址 |
 | :--- | :--- |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
-| 流式测试页 | http://localhost:8080/stream-test.html |
+| Swagger UI | http://localhost:18080/swagger-ui.html |
+| 流式测试页 | http://localhost:18080/stream-test.html |
 | 流式问答 | `POST /api/ops/ask/stream`（JSON：question / sessionId） |
 
 ## 🔌 API 概览
