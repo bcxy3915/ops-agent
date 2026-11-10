@@ -39,23 +39,38 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class LangChain4jConfig {
 
+    @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:${AI_API_KEY:}}}")
+    private String apiKey;
+
+    @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}")
+    private String modelName;
+
+    @Value("${ops-agent.ai.timeout:${spring.ai.openai.chat.timeout:60s}}")
+    private String timeout;
+
+    @Value("${ops-agent.ai.temperature:${spring.ai.openai.chat.temperature:0.7}}")
+    private double temperature;
+
+    @Value("${ops-agent.chat.memory.max-entries:1000}")
+    private int capacity;
+
+    @Value("${ops-agent.chat.memory.ttl:600s}")
+    private Duration ttl;
+
+    @Value("${ops-agent.chat.turn.timeout:300s}")
+    private Duration turnTimeout;
+
+    @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}")
+    private String baseUrl;
+
     /**
      * 创建 LangChain4j OpenAI 协议模型客户端。
      *
-     * @param baseUrl 模型服务地址
-     * @param apiKey 模型服务密钥
-     * @param modelName 模型名称
-     * @param timeout 超时时间
-     * @param temperature 采样温度
+     * 无入参。
      * @return LangChain4j 聊天模型
      */
     @Bean
-    public ChatModel langChain4jChatModel(
-            @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}") String baseUrl,
-            @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:${AI_API_KEY:}}}") String apiKey,
-            @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}") String modelName,
-            @Value("${ops-agent.ai.timeout:${spring.ai.openai.chat.timeout:60s}}") String timeout,
-            @Value("${ops-agent.ai.temperature:${spring.ai.openai.chat.temperature:0.7}}") double temperature) {
+    public ChatModel langChain4jChatModel() {
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
@@ -91,20 +106,11 @@ public class LangChain4jConfig {
     /**
      * 创建 LangChain4j OpenAI 协议流式模型客户端。
      *
-     * @param baseUrl 模型服务地址
-     * @param apiKey 模型服务密钥
-     * @param modelName 模型名称
-     * @param timeout 超时时间
-     * @param temperature 与同步模型一致的采样温度
+     * 无入参。
      * @return LangChain4j 流式聊天模型
      */
     @Bean
-    public OpenAiStreamingChatModel langChain4jStreamingChatModel(
-            @Value("${ops-agent.ai.base-url:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}") String baseUrl,
-            @Value("${ops-agent.ai.api-key:${spring.ai.openai.api-key:${AI_API_KEY:}}}") String apiKey,
-            @Value("${ops-agent.ai.model:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}") String modelName,
-            @Value("${ops-agent.ai.timeout:${spring.ai.openai.chat.timeout:60s}}") String timeout,
-            @Value("${ops-agent.ai.temperature:${spring.ai.openai.chat.temperature:0.7}}") double temperature) {
+    public OpenAiStreamingChatModel langChain4jStreamingChatModel() {
         return OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
@@ -129,16 +135,10 @@ public class LangChain4jConfig {
      * 注册基于现有会话历史的 LangChain4j 记忆仓库。
      *
      * @param conversationService 现有会话历史服务
-     * @param capacity 缓存最大项数
-     * @param ttl 缓存过期时间
-     * @param turnTimeout 整轮超时，必须小于缓存过期时间
      * @return 会话记忆仓库
      */
     @Bean
-    public ConversationChatMemoryStore langChain4jChatMemoryStore(ConversationService conversationService,
-            @Value("${ops-agent.chat.memory.max-entries:1000}") int capacity,
-            @Value("${ops-agent.chat.memory.ttl:600s}") Duration ttl,
-            @Value("${ops-agent.chat.turn.timeout:300s}") Duration turnTimeout) {
+    public ConversationChatMemoryStore langChain4jChatMemoryStore(ConversationService conversationService) {
         if (ttl.compareTo(turnTimeout) <= 0) {
             throw new IllegalArgumentException("记忆过期时间必须大于整轮超时");
         }
@@ -246,7 +246,6 @@ public class LangChain4jConfig {
             MetricQueryTools metricQueryTools,
             MetricDiscoveryTools metricDiscoveryTools,
             ServiceDiscoveryTools serviceDiscoveryTools) {
-        return new LangChain4jReadOnlyToolBindings(
-                healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools);
+        return new LangChain4jReadOnlyToolBindings(healthCheckTools, metricQueryTools, metricDiscoveryTools, serviceDiscoveryTools);
     }
 }

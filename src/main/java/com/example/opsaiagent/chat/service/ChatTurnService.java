@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -20,8 +22,38 @@ public class ChatTurnService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final ConversationService conversations;
-    private final int leaseSeconds;
-    private final Duration timeout;
+
+    @Value("${ops-agent.chat.turn.lease-seconds:360}")
+    private int leaseSeconds;
+
+    @Value("${ops-agent.chat.turn.timeout:300s}")
+    private Duration timeout;
+
+    /**
+     * 创建由 Spring 注入配置的问答服务。
+     * @param jdbc 数据库客户端
+     * @param manager 事务管理器
+     * @param conversations 会话服务
+     * @return 无返回值
+     */
+    @Autowired
+    public ChatTurnService(JdbcTemplate jdbc, PlatformTransactionManager manager, ConversationService conversations) {
+        this.jdbc = jdbc;
+        this.transactions = new TransactionTemplate(manager);
+        this.conversations = conversations;
+    }
+
+    /**
+     * 校验字段注入后的租约与超时配置。
+     * 无入参。
+     * @return 无返回值
+     */
+    @PostConstruct
+    public void validateConfiguration() {
+        if (timeout.isNegative() || timeout.isZero() || leaseSeconds <= timeout.toSeconds()) {
+            throw new IllegalArgumentException("问答租约必须大于整轮超时且超时大于零");
+        }
+    }
 
     /**
      * 创建分布式问答轮次服务。
@@ -33,8 +65,7 @@ public class ChatTurnService {
      * @return 无返回值
      */
     public ChatTurnService(JdbcTemplate jdbc, PlatformTransactionManager manager, ConversationService conversations,
-                           @Value("${ops-agent.chat.turn.lease-seconds:360}") int leaseSeconds,
-                           @Value("${ops-agent.chat.turn.timeout:300s}") Duration timeout) {
+                           int leaseSeconds, Duration timeout) {
         if (timeout.isNegative() || timeout.isZero() || leaseSeconds <= timeout.toSeconds()) {
             throw new IllegalArgumentException("问答租约必须大于整轮超时且超时大于零");
         }

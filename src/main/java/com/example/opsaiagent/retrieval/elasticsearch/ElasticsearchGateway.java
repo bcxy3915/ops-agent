@@ -1,5 +1,7 @@
 package com.example.opsaiagent.retrieval.elasticsearch;
 
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.IOException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,13 +19,53 @@ import java.util.Base64;
 /** ES 请求边界：统一超时、认证及失败处理，不隐式创建索引。 */
 @Component
 public class ElasticsearchGateway {
-    private final HttpClient client;
+    private HttpClient client;
     private final ObjectMapper mapper;
-    private final String url;
-    private final String authorization;
-    private final Duration timeout;
-    private final String readIndex;
-    private final String writeIndex;
+
+    @Value("${ops-agent.ai.elasticsearch.url:http://localhost:9200}")
+    private String url;
+
+    @Value("${ops-agent.ai.elasticsearch.username:}")
+    private String username;
+
+    @Value("${ops-agent.ai.elasticsearch.password:}")
+    private String password;
+
+    private String authorization;
+
+    @Value("${ops-agent.ai.elasticsearch.timeout:15s}")
+    private Duration timeout;
+
+    @Value("${ops-agent.ai.elasticsearch.read-index:ops-knowledge-read}")
+    private String readIndex;
+
+    @Value("${ops-agent.ai.elasticsearch.write-index:ops-knowledge-write}")
+    private String writeIndex;
+
+    /**
+     * 创建由 Spring 注入连接配置的 ES 网关。
+     * @param mapper JSON 映射器
+     * @return 无返回值
+     */
+    @Autowired
+    public ElasticsearchGateway(ObjectMapper mapper) {
+        this.mapper = mapper;
+    }
+
+    /**
+     * 在字段配置注入后初始化客户端及认证信息。
+     * 无入参。
+     * @return 无返回值
+     */
+    @PostConstruct
+    public void initialize() {
+        url = url.replaceAll("/+$", "");
+        readIndex = indexName(readIndex);
+        writeIndex = indexName(writeIndex);
+        client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        authorization = username.isBlank() ? null : "Basic " + Base64.getEncoder().encodeToString(
+                (username + ":" + password).getBytes(StandardCharsets.UTF_8));
+    }
 
     /**
      * 创建 ES 请求客户端。
@@ -36,13 +78,8 @@ public class ElasticsearchGateway {
      * @param writeIndex 写入别名
      * @return 无返回值
      */
-    public ElasticsearchGateway(ObjectMapper mapper,
-            @Value("${ops-agent.ai.elasticsearch.url:http://localhost:9200}") String url,
-            @Value("${ops-agent.ai.elasticsearch.username:}") String username,
-            @Value("${ops-agent.ai.elasticsearch.password:}") String password,
-            @Value("${ops-agent.ai.elasticsearch.timeout:15s}") Duration timeout,
-            @Value("${ops-agent.ai.elasticsearch.read-index:ops-knowledge-read}") String readIndex,
-            @Value("${ops-agent.ai.elasticsearch.write-index:ops-knowledge-write}") String writeIndex) {
+    public ElasticsearchGateway(ObjectMapper mapper, String url, String username,
+            String password, Duration timeout, String readIndex, String writeIndex) {
         this.mapper = mapper;
         this.url = url.replaceAll("/+$", "");
         this.timeout = timeout;

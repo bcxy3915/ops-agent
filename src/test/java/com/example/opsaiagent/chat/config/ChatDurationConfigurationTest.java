@@ -23,7 +23,13 @@ class ChatDurationConfigurationTest {
                 var factory = context.getBeanFactory();
                 factory.setConversionService(ApplicationConversionService.getSharedInstance());
                 // 只注册实际记忆工厂方法，避免其他模型 Bean 的网络资源影响配置绑定验证。
-                factory.registerSingleton("memoryFactory", new LangChain4jConfig());
+                var factoryDefinition = new RootBeanDefinition(Object.class);
+                factoryDefinition.setInstanceSupplier(() -> {
+                    var memoryFactory = new LangChain4jConfig();
+                    factory.autowireBean(memoryFactory);
+                    return memoryFactory;
+                });
+                ((BeanDefinitionRegistry) factory).registerBeanDefinition("memoryFactory", factoryDefinition);
                 var definition = new RootBeanDefinition();
                 definition.setAutowireMode(RootBeanDefinition.AUTOWIRE_CONSTRUCTOR);
                 definition.setFactoryBeanName("memoryFactory");

@@ -7,6 +7,7 @@ import com.example.opsaiagent.retrieval.KnowledgeVectorStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -15,6 +16,8 @@ import static org.mockito.Mockito.mock;
 /** 验证向量配置独立于聊天 provider，不连接真实模型和数据库。 */
 class LangChain4jEmbeddingConfigTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withInitializer(context -> context.getBeanFactory().setConversionService(
+                    ApplicationConversionService.getSharedInstance()))
             .withUserConfiguration(LangChain4jEmbeddingConfig.class)
             .withBean(ElasticsearchGateway.class, () -> mock(ElasticsearchGateway.class))
             .withBean(SearchProjectionService.class, () -> mock(SearchProjectionService.class))

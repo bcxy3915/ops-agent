@@ -172,10 +172,14 @@ public class RecursiveBoundarySplitter implements TextChunkStrategy {
         List<String> sentences = new ArrayList<>();
         int start = 0;
         for (int i = 0; i < text.length(); i++) {
-            if (isSentenceEnder(text.charAt(i)) && i + 1 < text.length()
-                    && Character.isWhitespace(text.charAt(i + 1))) {
-                sentences.add(text.substring(start, i + 1));
-                start = i + 1;
+            char c = text.charAt(i);
+            if (isSentenceEnder(c)) {
+                boolean isChineseEnder = "。！？；".indexOf(c) >= 0;
+                // 第二道防线：中文标点直接过；英文标点要求后面有空格
+                if (isChineseEnder || i + 1 == text.length() || Character.isWhitespace(text.charAt(i + 1))) {
+                    sentences.add(text.substring(start, i + 1));
+                    start = i + 1;
+                }
             }
         }
         if (start < text.length()) {

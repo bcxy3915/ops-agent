@@ -1,5 +1,6 @@
 package com.example.opsaiagent.ai.adapter.langchain4j;
 
+import org.springframework.test.util.ReflectionTestUtils;
 import com.example.opsaiagent.retrieval.elasticsearch.ElasticsearchGateway;
 import com.example.opsaiagent.retrieval.elasticsearch.SearchProjectionService;
 import com.example.opsaiagent.knowledge.config.LangChain4jEmbeddingConfig;
@@ -11,9 +12,6 @@ import org.junit.jupiter.api.Test;
 import com.example.opsaiagent.knowledge.model.Document;
 import com.example.opsaiagent.knowledge.model.EmbeddingMetadataMode;
 import dev.langchain4j.data.segment.TextSegment;
-
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -63,8 +61,15 @@ class LangChain4jEmbeddingProtocolTest {
         server.start();
         try {
             String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
-            var model = new LangChain4jEmbeddingConfig().langChain4jEmbeddingModel(
-                    baseUrl, "test-key", "test-embedding", 3, 3, "5s", 0);
+            var configuration = new LangChain4jEmbeddingConfig();
+            ReflectionTestUtils.setField(configuration, "baseUrl", baseUrl);
+            ReflectionTestUtils.setField(configuration, "apiKey", "test-key");
+            ReflectionTestUtils.setField(configuration, "modelName", "test-embedding");
+            ReflectionTestUtils.setField(configuration, "dimensions", 3);
+            ReflectionTestUtils.setField(configuration, "storeDimensions", 3);
+            ReflectionTestUtils.setField(configuration, "timeout", "5s");
+            ReflectionTestUtils.setField(configuration, "maxRetries", 0);
+            var model = configuration.langChain4jEmbeddingModel();
 
             List<String> texts = IntStream.range(0, 11).mapToObj(i -> "条目" + i).toList();
             var batch = model.embedAll(texts.stream().map(TextSegment::from).toList()).content();

@@ -51,7 +51,7 @@ public class ConversationService {
      * @param firstQuestion 首次提问内容
      * @return 无返回值
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void ensureConversation(String sessionId, String username, String firstQuestion) {
         ConversationEntity existing = findBySessionId(sessionId);
         if (existing != null) {

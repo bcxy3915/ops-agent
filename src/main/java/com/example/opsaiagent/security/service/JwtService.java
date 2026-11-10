@@ -1,5 +1,6 @@
 package com.example.opsaiagent.security.service;
 
+import jakarta.annotation.PostConstruct;
 import io.jsonwebtoken.JwtBuilder;
 import java.util.List;
 import io.jsonwebtoken.Claims;
@@ -17,14 +18,44 @@ import java.util.Date;
 @Service
 public class JwtService {
 
-    private final SecretKey secretKey;
-    private final long expirationSeconds;
-    private final String issuer;
+    private SecretKey secretKey;
 
-    public JwtService(
-            @Value("${ops-agent.security.jwt.secret}") String secret,
-            @Value("${ops-agent.security.jwt.expiration:7200}") long expirationSeconds,
-            @Value("${ops-agent.security.jwt.issuer:ops-agent}") String issuer) {
+    @Value("${ops-agent.security.jwt.secret}")
+    private String secret;
+
+    @Value("${ops-agent.security.jwt.expiration:7200}")
+    private long expirationSeconds;
+
+    @Value("${ops-agent.security.jwt.issuer:ops-agent}")
+    private String issuer;
+
+    /**
+     * 创建由 Spring 注入配置的令牌服务。
+     * 无入参。
+     * @return 无返回值
+     */
+    public JwtService() {
+    }
+
+    /**
+     * 根据字段配置初始化签名密钥。
+     * 无入参。
+     * @return 无返回值
+     */
+    @PostConstruct
+    public void initialize() {
+        secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * 创建使用显式配置的令牌服务。
+     * @param secret 签名密钥
+     * @param expirationSeconds 有效秒数
+     * @param issuer 签发者
+     * @return 无返回值
+     */
+    public JwtService(String secret, long expirationSeconds, String issuer) {
+        this.secret = secret;
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationSeconds = expirationSeconds;
         this.issuer = issuer;
