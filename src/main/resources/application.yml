@@ -52,6 +52,10 @@ mybatis-plus:
 
 
 ops-agent:
+  # 首版只读巡检规则：比例范围为 0～1，连接池等待数大于零即记录异常
+  inspection:
+    cpu-threshold: 0.9
+    pool-threshold: 0.9
   chat:
     turn:
       # 租约必须大于整轮超时；实例崩溃后到期可由新请求接管
@@ -61,22 +65,22 @@ ops-agent:
       # 活动项满额时拒绝新请求，避免淘汰仍在使用的工具消息
       max-entries: 1000
       ttl: 600s
-  # 统一使用 LangChain4j；旧本地配置键暂作取值兼容，不再加载旧框架
+  # 统一使用 LangChain4j，模型配置由本地配置或环境变量提供
   ai:
-    base-url: ${OPS_AI_BASE_URL:${spring.ai.openai.base-url:https://api.deepseek.com/v1}}
-    api-key: ${OPS_AI_API_KEY:${spring.ai.openai.api-key:${AI_API_KEY:}}}
-    model: ${OPS_AI_MODEL:${spring.ai.openai.chat.options.model:${spring.ai.openai.chat.model:deepseek-chat}}}
-    timeout: ${OPS_AI_TIMEOUT:${spring.ai.openai.chat.timeout:60s}}
-    temperature: ${OPS_AI_TEMPERATURE:${spring.ai.openai.chat.temperature:0.7}}
+    base-url: ${OPS_AI_BASE_URL:https://api.deepseek.com/v1}
+    api-key: ${OPS_AI_API_KEY:${AI_API_KEY:}}
+    model: ${OPS_AI_MODEL:deepseek-chat}
+    timeout: ${OPS_AI_TIMEOUT:60s}
+    temperature: ${OPS_AI_TEMPERATURE:0.7}
     # 知识向量模型使用 LangChain4j，与聊天模型配置独立；保持存量模型与维度一致
     embedding:
-      base-url: ${OPS_EMBEDDING_BASE_URL:${spring.ai.openai.embedding.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}}
-      api-key: ${OPS_EMBEDDING_API_KEY:${spring.ai.openai.embedding.api-key:${DASHSCOPE_API_KEY:}}}
-      model: ${OPS_EMBEDDING_MODEL:${spring.ai.openai.embedding.model:text-embedding-v3}}
+      base-url: ${OPS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      api-key: ${OPS_EMBEDDING_API_KEY:${DASHSCOPE_API_KEY:}}
+      model: ${OPS_EMBEDDING_MODEL:text-embedding-v3}
       dimensions: ${OPS_EMBEDDING_DIMENSIONS:1024}
       timeout: ${OPS_EMBEDDING_TIMEOUT:60s}
       max-retries: ${OPS_EMBEDDING_MAX_RETRIES:2}
-      metadata-mode: ${OPS_EMBEDDING_METADATA_MODE:${spring.ai.openai.embedding.metadata-mode:EMBED}}
+      metadata-mode: ${OPS_EMBEDDING_METADATA_MODE:EMBED}
     vector-store:
       dimensions: ${OPS_VECTOR_DIMENSIONS:1024}
     elasticsearch:
