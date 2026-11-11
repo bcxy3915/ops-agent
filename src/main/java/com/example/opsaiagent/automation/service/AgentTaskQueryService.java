@@ -12,6 +12,7 @@ import com.example.opsaiagent.automation.mapper.AgentTaskMapper;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.exception.BusinessException;
 import com.example.opsaiagent.inspection.dto.InspectionReport;
+import com.example.opsaiagent.automation.diagnosis.AutonomousDiagnosisReport;
 import com.example.opsaiagent.inspection.service.InspectionService;
 import com.example.opsaiagent.rbac.service.DataScope;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -103,11 +104,15 @@ public class AgentTaskQueryService {
      */
     private AgentTaskDetail.Evidence toEvidence(AgentEvidenceEntity item) {
         try {
+            if ("DIAGNOSIS_REPORT".equals(item.getEvidenceType())) {
+                return new AgentTaskDetail.Evidence(item.getId(), item.getStepId(), item.getEvidenceType(),
+                        item.getObservedAt(), null, mapper.readValue(item.getPayload(), AutonomousDiagnosisReport.class));
+            }
             if (!"INSPECTION_REPORT".equals(item.getEvidenceType())) {
                 throw new BusinessException(ErrorCode.AGENT_TASK_STATE_INVALID);
             }
             return new AgentTaskDetail.Evidence(item.getId(), item.getStepId(), item.getEvidenceType(),
-                    item.getObservedAt(), mapper.readValue(item.getPayload(), InspectionReport.class));
+                    item.getObservedAt(), mapper.readValue(item.getPayload(), InspectionReport.class), null);
         } catch (JsonProcessingException invalidEvidence) {
             throw new BusinessException(ErrorCode.AGENT_TASK_STATE_INVALID, "任务证据格式无效");
         }

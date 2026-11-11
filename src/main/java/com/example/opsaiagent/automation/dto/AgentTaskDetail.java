@@ -1,6 +1,7 @@
 package com.example.opsaiagent.automation.dto;
 
 import com.example.opsaiagent.inspection.dto.InspectionReport;
+import com.example.opsaiagent.automation.diagnosis.AutonomousDiagnosisReport;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -43,8 +44,10 @@ public record AgentTaskDetail(String id, String serviceId, String taskType, Stri
      * @param evidenceType 证据类型
      * @param observedAt 采集时间，UTC
      * @param report 原结构化巡检报告
+     * @param diagnosisReport 独立诊断报告，非诊断证据时为空
      */
     public record Evidence(String id, String stepId, String evidenceType,
-                           LocalDateTime observedAt, InspectionReport report) {
+                           LocalDateTime observedAt, InspectionReport report,
+                           AutonomousDiagnosisReport diagnosisReport) {
     }
 }

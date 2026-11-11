@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.example.opsaiagent.automation.entity.AgentEvidenceEntity;
 import com.example.opsaiagent.automation.entity.AgentStepEntity;
 import com.example.opsaiagent.automation.entity.AgentTaskEntity;
+import com.example.opsaiagent.automation.diagnosis.AutonomousDiagnosisReport;
 import com.example.opsaiagent.automation.mapper.AgentEvidenceMapper;
 import com.example.opsaiagent.automation.mapper.AgentStepMapper;
 import com.example.opsaiagent.automation.mapper.AgentTaskMapper;
@@ -26,6 +27,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,6 +37,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -187,6 +190,32 @@ class InspectionTaskPersistenceTest {
         verify(tasks).update(isNull(), any(LambdaUpdateWrapper.class));
         verify(steps).update(isNull(), any(LambdaUpdateWrapper.class));
         verifyNoInteractions(evidence);
+        verify(transactions).commit(any());
+    }
+
+    /**
+     * 诊断人工接管结果与已执行工具步骤必须在同一事务保存。
+     * 无入参。
+     * @return 无返回值
+     * @throws Exception 序列化失败
+     */
+    @Test
+    void persistsDynamicStepsAndManualOutcomeAtomically() throws Exception {
+        when(steps.insert(any(AgentStepEntity.class))).thenReturn(1);
+        var observation = new AutonomousDiagnosisReport.Evidence("e1", "LOGS", 3000,
+                mapper.valueToTree(Map.of("status", "UNAVAILABLE")));
+        var diagnosis = new AutonomousDiagnosisReport("NEEDS_MANUAL", "ROUND_BUDGET_EXHAUSTED", "需人工排查",
+                "证据不足", List.of(), List.of(new AutonomousDiagnosisReport.Step(2, "LOGS", "main", "e1", "SUCCEEDED")),
+                List.of(observation));
+        persistence.completeDiagnosis(task, report, diagnosis);
+        ArgumentCaptor<AgentStepEntity> step = ArgumentCaptor.forClass(AgentStepEntity.class);
+        verify(steps).insert(step.capture());
+        assertThat(step.getValue().getStepNo()).isEqualTo(2);
+        assertThat(step.getValue().getSkill()).isEqualTo("LOGS");
+        ArgumentCaptor<AgentEvidenceEntity> items = ArgumentCaptor.forClass(AgentEvidenceEntity.class);
+        verify(evidence, times(2)).insert(items.capture());
+        assertThat(items.getAllValues()).extracting(AgentEvidenceEntity::getEvidenceType)
+                .containsExactly("INSPECTION_REPORT", "DIAGNOSIS_REPORT");
         verify(transactions).commit(any());
     }
 }

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.example.opsaiagent.automation.entity.AgentEvidenceEntity;
 import com.example.opsaiagent.automation.entity.AgentStepEntity;
 import com.example.opsaiagent.automation.entity.AgentTaskEntity;
+import com.example.opsaiagent.automation.diagnosis.AutonomousDiagnosisReport;
 import com.example.opsaiagent.automation.mapper.AgentEvidenceMapper;
 import com.example.opsaiagent.automation.mapper.AgentStepMapper;
 import com.example.opsaiagent.automation.mapper.AgentTaskMapper;
@@ -63,6 +64,72 @@ public class InspectionTaskPersistence {
         step.setStartedAt(task.getCreatedAt());
         requireOne(steps.insert(step));
         return task;
+    }
+
+    /**
+     * 原子创建独立诊断任务与初始巡检步骤。
+     * @param service 已授权服务
+     * @param requesterTenant 可信发起租户
+     * @param username 可信用户名
+     * @return 当前诊断任务
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public AgentTaskEntity beginDiagnosis(OpsServiceEntity service, String requesterTenant, String username) {
+        var task = begin(service, requesterTenant, username);
+        requireOne(tasks.update(null, new LambdaUpdateWrapper<AgentTaskEntity>()
+                .eq(AgentTaskEntity::getId, task.getId()).eq(AgentTaskEntity::getTenantId, task.getTenantId())
+                .set(AgentTaskEntity::getTaskType, "DIAGNOSIS")));
+        task.setTaskType("DIAGNOSIS");
+        return task;
+    }
+
+    /**
+     * 原子保存初始巡检、实际取证步骤和完整诊断证据，人工接管不冒充成功。
+     * @param task 本轮诊断任务
+     * @param baseline 实际巡检报告
+     * @param diagnosis 实际有界循环结果
+     * @return 无返回值
+     * @throws JsonProcessingException 序列化失败，事务回滚
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void completeDiagnosis(AgentTaskEntity task, InspectionReport baseline,
+                                  AutonomousDiagnosisReport diagnosis) throws JsonProcessingException {
+        complete(task, baseline);
+        var first = steps.selectOne(new LambdaQueryWrapper<AgentStepEntity>()
+                .eq(AgentStepEntity::getTenantId, task.getTenantId()).eq(AgentStepEntity::getTaskId, task.getId())
+                .eq(AgentStepEntity::getStepNo, 1));
+        if (first == null) throw new BusinessException(ErrorCode.AGENT_TASK_STATE_INVALID);
+        for (var observed : diagnosis.steps()) {
+            AgentStepEntity step = new AgentStepEntity();
+            step.setId(id());
+            step.setTenantId(task.getTenantId());
+            step.setTaskId(task.getId());
+            step.setStepNo(observed.number());
+            step.setSkill(observed.action());
+            step.setStatus(observed.status());
+            // 工具时间使用证据的实际采集完成时间，不伪造持久化时刻为采集开始。
+            var collected = diagnosis.evidence().stream().filter(item -> item.id().equals(observed.evidenceId()))
+                    .findFirst().orElseThrow(() -> new BusinessException(ErrorCode.AGENT_TASK_STATE_INVALID));
+            LocalDateTime time = LocalDateTime.ofInstant(Instant.ofEpochMilli(collected.collectedAt()), ZoneOffset.UTC);
+            step.setStartedAt(time);
+            step.setCompletedAt(time);
+            requireOne(steps.insert(step));
+        }
+        AgentEvidenceEntity item = new AgentEvidenceEntity();
+        item.setId(id());
+        item.setTenantId(task.getTenantId());
+        item.setTaskId(task.getId());
+        item.setStepId(first.getId());
+        item.setEvidenceType("DIAGNOSIS_REPORT");
+        item.setPayload(mapper.writeValueAsString(diagnosis));
+        item.setObservedAt(LocalDateTime.now(ZoneOffset.UTC));
+        requireOne(evidence.insert(item));
+        if ("NEEDS_MANUAL".equals(diagnosis.status())) {
+            requireOne(tasks.update(null, new LambdaUpdateWrapper<AgentTaskEntity>()
+                    .eq(AgentTaskEntity::getId, task.getId()).eq(AgentTaskEntity::getTenantId, task.getTenantId())
+                    .eq(AgentTaskEntity::getExecutionToken, task.getExecutionToken()).eq(AgentTaskEntity::getStatus, "SUCCEEDED")
+                    .set(AgentTaskEntity::getStatus, "NEEDS_MANUAL").set(AgentTaskEntity::getErrorCode, diagnosis.reason())));
+        }
     }
 
     /**

@@ -62,6 +62,10 @@ ops-agent:
     # 仅绑定本机专用日志目录与固定文件；不允许请求或模型指定路径
     logs:
       sources: {}
+    # 独立诊断 Agent 的模型决策预算；时间预算在调用边界检查，不保证撤销在途调用
+    diagnosis:
+      max-rounds: 8
+      timeout-seconds: 120
   chat:
     turn:
       # 租约必须大于整轮超时；实例崩溃后到期可由新请求接管

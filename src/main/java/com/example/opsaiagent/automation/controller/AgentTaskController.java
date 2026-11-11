@@ -5,6 +5,7 @@ import com.example.opsaiagent.automation.dto.AgentTaskDetail;
 import com.example.opsaiagent.automation.dto.AgentTaskSummary;
 import com.example.opsaiagent.automation.service.AgentTaskQueryService;
 import com.example.opsaiagent.automation.service.InspectionTaskService;
+import com.example.opsaiagent.automation.diagnosis.AutonomousDiagnosisService;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,6 +27,21 @@ import java.util.List;
 public class AgentTaskController {
     private final InspectionTaskService inspections;
     private final AgentTaskQueryService queries;
+    private final AutonomousDiagnosisService diagnoses;
+
+    /**
+     * 创建持久化有界自主诊断任务，不允许部署或修改目标。
+     * @param serviceId 已登记服务 ID
+     * @return 任务、动态步骤与诊断证据
+     */
+    @Operation(summary = "创建并执行只读自主诊断")
+    @PreAuthorize("hasAuthority('service:read') and hasAuthority('diagnosis:trigger')")
+    @RateLimit(key = "autonomousDiagnosis", limit = 5, period = 60, dimension = RateLimit.Dimension.USER)
+    @AuditLog(operation = "AUTONOMOUS_DIAGNOSIS", description = "执行有界只读自主诊断")
+    @PostMapping("/services/{serviceId}/diagnosis")
+    public ApiResponse<AgentTaskDetail> diagnose(@PathVariable String serviceId) {
+        return ApiResponse.success(diagnoses.diagnose(serviceId));
+    }
 
     /**
      * 同步执行一次具有持久化记录的只读巡检。
