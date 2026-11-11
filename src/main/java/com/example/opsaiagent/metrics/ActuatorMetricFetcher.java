@@ -49,18 +49,30 @@ public class ActuatorMetricFetcher {
             double count = 0;
             double totalTime = 0;
             double max = 0;
+            boolean hasValue = false;
 
             for (JsonNode m : measurements) {
                 String stat = m.path("statistic").asText();
-                double v = m.path("value").asDouble();
+                JsonNode rawValue = m.path("value");
+                if (!rawValue.isNumber() || !Double.isFinite(rawValue.asDouble())) {
+                    return null;
+                }
+                double v = rawValue.asDouble();
                 switch (stat) {
-                    case "VALUE" -> value = v;
+                    case "VALUE" -> {
+                        value = v;
+                        hasValue = true;
+                    }
                     case "COUNT" -> count = v;
                     case "TOTAL_TIME" -> totalTime = v;
                     case "MAX" -> max = v;
                 }
             }
 
+            if (("process.cpu.usage".equals(metricName) || metricName.startsWith("hikaricp.connections."))
+                    && !hasValue) {
+                return null;
+            }
             return new MetricValue(value, count, totalTime, max);
         } catch (Exception e) {
             log.debug("拉取指标失败: {} - {} ({})", baseUrl, metricName, e.getMessage());

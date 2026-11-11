@@ -10,9 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -65,7 +67,7 @@ class MetricSamplerTest {
     }
 
     @Test
-    @DisplayName("sample：采样成功生成快照与时序点，并落库 5 个指标")
+    @DisplayName("sample：采样成功生成快照与时序点，并保存连接池历史")
     void sample_success() {
         ServiceInfo service = svc("svc-a");
         when(serviceRegistry.listAll()).thenReturn(List.of(service));
@@ -82,6 +84,7 @@ class MetricSamplerTest {
                 case "http.server.requests" -> new ActuatorMetricFetcher.MetricValue(0, 100, 0, 0);
                 case "hikaricp.connections.active" -> new ActuatorMetricFetcher.MetricValue(3, 0, 0, 0);
                 case "hikaricp.connections.pending" -> new ActuatorMetricFetcher.MetricValue(1, 0, 0, 0);
+                case "hikaricp.connections.max" -> new ActuatorMetricFetcher.MetricValue(10, 0, 0, 0);
                 default -> new ActuatorMetricFetcher.MetricValue(0, 0, 0, 0);
             };
         });
@@ -100,8 +103,11 @@ class MetricSamplerTest {
         assertThat(snapshot.getHikariActive()).isEqualTo(3);
         assertThat(snapshot.getHikariPending()).isEqualTo(1);
 
-        // 落库 5 个指标
-        verify(metricSampleStore).saveBatch(eq("t-default"), eq("svc-a"), anyLong(), anyMap());
+        ArgumentCaptor<Map<String, Double>> points = ArgumentCaptor.forClass(Map.class);
+        verify(metricSampleStore).saveBatch(eq("t-default"), eq("svc-a"), anyLong(), points.capture());
+        assertThat(points.getValue()).containsEntry("cpu", 0.5)
+                .containsEntry("hikariActive", 3.0).containsEntry("hikariPending", 1.0)
+                .containsEntry("hikariMax", 10.0);
     }
 
     @Test
@@ -118,6 +124,9 @@ class MetricSamplerTest {
         assertThat(snapshot.getMemoryUsed()).isZero();
         // memMax 默认 1GB
         assertThat(snapshot.getMemoryMax()).isEqualTo(1024L * 1024 * 1024);
+        ArgumentCaptor<Map<String, Double>> points = ArgumentCaptor.forClass(Map.class);
+        verify(metricSampleStore).saveBatch(eq("t-default"), eq("svc-a"), anyLong(), points.capture());
+        assertThat(points.getValue()).doesNotContainKeys("cpu", "hikariActive", "hikariPending", "hikariMax");
     }
 
     @Test

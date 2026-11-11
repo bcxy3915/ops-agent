@@ -34,6 +34,23 @@ public class InspectionService {
      * @return 规则报告与实时证据；缺失指标不会被补成零
      */
     public InspectionReport inspect(String serviceId) {
+        OpsServiceEntity service = requireVisibleService(serviceId);
+        long startedAt = System.currentTimeMillis();
+        List<Observation> evidence = new ArrayList<>();
+        evidence.add(collector.health(service));
+        for (String metric : List.of("process.cpu.usage", "hikaricp.connections.active",
+                "hikaricp.connections.max", "hikaricp.connections.pending")) {
+            evidence.add(collector.metric(service, metric));
+        }
+        return report(service, startedAt, evidence);
+    }
+
+    /**
+     * 在读取实时或历史证据前统一校验服务可见范围。
+     * @param serviceId 已登记服务 ID
+     * @return 当前用户可见的服务；缺少上下文或不可见时抛出业务异常
+     */
+    public OpsServiceEntity requireVisibleService(String serviceId) {
         String tenant = scope.tenantId();
         if (tenant == null || tenant.isBlank()) {
             throw new BusinessException(ErrorCode.TENANT_REQUIRED);
@@ -44,13 +61,17 @@ public class InspectionService {
                 && !scope.visibleDeptIds().contains(service.getDeptId()))))) {
             throw new BusinessException(ErrorCode.SERVICE_NOT_FOUND);
         }
-        long startedAt = System.currentTimeMillis();
-        List<Observation> evidence = new ArrayList<>();
-        evidence.add(collector.health(service));
-        for (String metric : List.of("process.cpu.usage", "hikaricp.connections.active",
-                "hikaricp.connections.max", "hikaricp.connections.pending")) {
-            evidence.add(collector.metric(service, metric));
-        }
+        return service;
+    }
+
+    /**
+     * 基于本次证据生成确定性的规则报告。
+     * @param service 已授权服务
+     * @param startedAt 巡检开始时间
+     * @param evidence 本轮采集证据
+     * @return 巡检报告
+     */
+    private InspectionReport report(OpsServiceEntity service, long startedAt, List<Observation> evidence) {
         List<String> findings = new ArrayList<>();
         Object health = evidence.getFirst().value();
         if ("DOWN".equals(health) || "OUT_OF_SERVICE".equals(health)) {
@@ -75,7 +96,7 @@ public class InspectionService {
         }
         String status = !findings.isEmpty() ? "ABNORMAL"
                 : incomplete ? "INSUFFICIENT_EVIDENCE" : "HEALTHY";
-        return new InspectionReport(serviceId, service.getName(), startedAt,
+        return new InspectionReport(service.getId(), service.getName(), startedAt,
                 System.currentTimeMillis(), status, List.copyOf(findings), List.copyOf(evidence));
     }
 

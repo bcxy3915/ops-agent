@@ -21,6 +21,20 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @DisplayName("Actuator 指标拉取")
 class ActuatorMetricFetcherTest {
 
+    /**
+     * CPU 指标没有有效 VALUE 时不得被解析成零。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void missingGaugeValueIsUnavailable() {
+        server.expect(requestTo("http://svc:8080/actuator/metrics/process.cpu.usage"))
+                .andRespond(withSuccess("{\"measurements\":[{\"statistic\":\"COUNT\",\"value\":1}]}",
+                        MediaType.APPLICATION_JSON));
+        assertThat(fetcher.fetch("http://svc:8080", "process.cpu.usage")).isNull();
+        server.verify();
+    }
+
     private MockRestServiceServer server;
     private ActuatorMetricFetcher fetcher;
 

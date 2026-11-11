@@ -1,6 +1,10 @@
 package com.example.opsaiagent.metrics.store;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import com.example.opsaiagent.metrics.dto.MetricPoint;
 import com.example.opsaiagent.metrics.entity.MetricSampleEntity;
 import com.example.opsaiagent.metrics.mapper.MetricSampleMapper;
@@ -19,6 +23,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -33,6 +38,41 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 @DisplayName("指标采样存储")
 class MetricSampleStoreTest {
+
+    /**
+     * 验证有界查询的租户条件、半开区间及 SQL 行数预算。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void boundedQueryUsesTenantHalfOpenWindowAndLimit() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""),
+                MetricSampleEntity.class);
+        LocalDateTime time = LocalDateTime.now().withNano(0);
+        MetricSampleEntity row = entity(1L, "svc-a", "cpu", 0.3, time);
+        row.setValue(null);
+        when(mapper.selectList(any(Wrapper.class))).thenReturn(List.of(row));
+        var result = store.queryBounded("tenant-target", "svc-a", "cpu", toMs(time), toMs(time) + 60_000, 721);
+        ArgumentCaptor<LambdaQueryWrapper<MetricSampleEntity>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(mapper).selectList(query.capture());
+        assertThat(query.getValue().getSqlSegment()).contains("tenant_id =", "sampled_at >=", "sampled_at <", "LIMIT 721");
+        assertThat(query.getValue().getParamNameValuePairs()).containsValue("tenant-target");
+        assertThat(result.getFirst().getValue()).isNaN();
+    }
+
+    /**
+     * 验证有界查询拒绝无租户和越界预算，不触发数据库访问。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void boundedQueryRejectsMissingTenantAndInvalidLimits() {
+        assertThatThrownBy(() -> store.queryBounded(null, "svc", "cpu", 0, 1, 721))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> store.queryBounded("tenant", "svc", "cpu", 0, 1, 722))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(mapper, never()).selectList(any(Wrapper.class));
+    }
 
     @Mock
     private MetricSampleMapper mapper;

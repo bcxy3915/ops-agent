@@ -87,6 +87,7 @@ public class MetricSampler {
         ActuatorMetricFetcher.MetricValue httpMetric = fetcher.fetch(baseUrl, "http.server.requests");
         ActuatorMetricFetcher.MetricValue hikariActive = fetcher.fetch(baseUrl, "hikaricp.connections.active");
         ActuatorMetricFetcher.MetricValue hikariPending = fetcher.fetch(baseUrl, "hikaricp.connections.pending");
+        ActuatorMetricFetcher.MetricValue hikariMax = fetcher.fetch(baseUrl, "hikaricp.connections.max");
 
         // 2. 计算派生值
         double cpu = cpuMetric != null ? cpuMetric.value() : 0;
@@ -143,11 +144,13 @@ public class MetricSampler {
 
         // 3.5 持久化采样到数据库（供告警引擎/故障快照/历史大盘使用）
         Map<String, Double> points = new HashMap<>();
-        points.put("cpu", cpu);
+        putAvailable(points, "cpu", cpuMetric);
         points.put("memory", memoryUsed / 1024 / 1024);
         points.put("threadCount", (double) threadCount);
         points.put("gcPause", gcPause);
-        points.put("hikariActive", (double) hikariActiveVal);
+        putAvailable(points, "hikariActive", hikariActive);
+        putAvailable(points, "hikariPending", hikariPending);
+        putAvailable(points, "hikariMax", hikariMax);
         metricSampleStore.saveBatch(service.getTenantId(), name, now, points);
 
         // 4. 存储时序点
@@ -157,6 +160,22 @@ public class MetricSampler {
         appendPoint(name, "gcPause", now, gcPause);
         appendPoint(name, "hikariActive", now, hikariActiveVal);
         appendPoint(name, "httpCount", now, httpCount);
+    }
+
+    /**
+     * 仅持久化成功取得的有限非负观测，防止巡检历史将采集失败解释为零。
+     * @param points 待落库指标
+     * @param name 存储指标名
+     * @param metric 采集值，失败时为 null
+     * @return 无返回值
+     */
+    private void putAvailable(Map<String, Double> points, String name,
+                              ActuatorMetricFetcher.MetricValue metric) {
+        if (metric != null && Double.isFinite(metric.value()) && metric.value() >= 0
+                && (!"cpu".equals(name) || metric.value() <= 1)
+                && (!"hikariMax".equals(name) || metric.value() > 0)) {
+            points.put(name, metric.value());
+        }
     }
 
     /**
