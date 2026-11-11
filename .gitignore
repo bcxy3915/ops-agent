@@ -48,4 +48,5 @@ application-local.yml
 /docs/design
 /docs/seed
 /docs/version
+/docs/migration
 .runtime/

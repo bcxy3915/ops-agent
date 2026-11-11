@@ -121,7 +121,7 @@ public class KnowledgeCaseService {
      * @param id 案例 ID
      * @return 确认后的案例详情
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeCaseDetailResponse confirm(Long id) {
         KnowledgeCaseEntity entity = requireCase(id);
         requirePending(entity);
@@ -163,7 +163,7 @@ public class KnowledgeCaseService {
      * @param request 修正请求（真实根因/有效处置/脱敏状态，均可选）
      * @return 修正并确认后的案例详情
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeCaseDetailResponse revise(Long id, CaseReviseRequest request) {
         KnowledgeCaseEntity entity = requireCase(id);
         requirePending(entity);
@@ -188,7 +188,7 @@ public class KnowledgeCaseService {
      * 丢弃候选：PENDING → DISCARDED
      * @param id 案例 ID
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void discard(Long id) {
         KnowledgeCaseEntity entity = requireCase(id);
         requirePending(entity);
@@ -203,7 +203,7 @@ public class KnowledgeCaseService {
      * @param limit 本次最多生成条数（1~100）
      * @return 本次新生成的候选数量
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int generateCandidates(int limit) {
         int safeLimit = Math.min(Math.max(limit, 1), 100);
         List<DiagnosisRecordEntity> records = diagnosisRecordMapper.selectList(

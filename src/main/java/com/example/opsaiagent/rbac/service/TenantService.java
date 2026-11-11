@@ -49,7 +49,7 @@ public class TenantService {
      * @param request 创建请求
      * @return 创建后的租户
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public TenantEntity create(TenantCreateRequest request) {
         String code = request.getCode() == null ? "" : request.getCode().trim();
         if (findByCode(code).isPresent()) {
@@ -79,7 +79,7 @@ public class TenantService {
      * @param request 更新请求
      * @return 更新后的租户
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public TenantEntity update(String id, TenantUpdateRequest request) {
         TenantEntity entity = requireTenant(id);
         if (request.getName() != null) {
@@ -106,7 +106,7 @@ public class TenantService {
      * @param status ACTIVE / SUSPENDED
      * @return 更新后的租户
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public TenantEntity updateStatus(String id, String status) {
         if (!STATUS_ACTIVE.equals(status) && !STATUS_SUSPENDED.equals(status)) {
             throw new BusinessException(ErrorCode.INVALID_PARAMETER, "租户状态不合法: " + status);

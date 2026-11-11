@@ -59,7 +59,7 @@ public class AlertRuleService {
     /**
      * 创建规则（含升级路径）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AlertRuleEntity create(AlertRuleRequest request) {
         validate(request);
         String tenantId = resolveTenant(request.getTenantId());
@@ -82,7 +82,7 @@ public class AlertRuleService {
     /**
      * 更新规则（含升级路径）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AlertRuleEntity update(Long id, AlertRuleRequest request) {
         AlertRuleEntity existing = getById(id);
         validate(request);
@@ -121,7 +121,7 @@ public class AlertRuleService {
     /**
      * 删除规则（连带升级路径）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
         AlertRuleEntity existing = getById(id);
         if (mapper.deleteById(existing.getId()) == 0) {

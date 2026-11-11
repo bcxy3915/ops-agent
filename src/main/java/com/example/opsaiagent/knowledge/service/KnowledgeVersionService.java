@@ -48,7 +48,7 @@ public class KnowledgeVersionService {
      * @param changeReason 变更原因
      * @return 本次写入的版本号
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int recordSnapshot(Long docId, String content, String changedBy, String changeReason) {
         if (docId == null) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "文档 ID 不能为空");

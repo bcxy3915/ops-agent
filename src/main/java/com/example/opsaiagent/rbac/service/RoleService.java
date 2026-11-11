@@ -73,7 +73,7 @@ public class RoleService {
      * @param roleId        角色 ID
      * @param permissionIds 权限 ID 列表；空列表表示清空
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updatePermissions(Long roleId, List<Long> permissionIds) {
         requireRole(roleId);
         LinkedHashSet<Long> distinct = new LinkedHashSet<>();

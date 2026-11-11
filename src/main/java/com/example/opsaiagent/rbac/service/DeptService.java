@@ -57,7 +57,7 @@ public class DeptService {
      * @param request  创建请求
      * @return 创建后的部门（含物化路径）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public DeptEntity create(String tenantId, DeptCreateRequest request) {
         requireTenantId(tenantId);
         String code = request.getCode() == null ? "" : request.getCode().trim();
@@ -102,7 +102,7 @@ public class DeptService {
      * @param request  更新请求
      * @return 更新后的部门
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public DeptEntity update(String tenantId, Long deptId, DeptUpdateRequest request) {
         DeptEntity entity = requireDept(tenantId, deptId);
         if (request.getName() != null) {
@@ -127,7 +127,7 @@ public class DeptService {
      * @param tenantId 租户 ID
      * @param deptId   部门 ID
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(String tenantId, Long deptId) {
         requireDept(tenantId, deptId);
         Long children = deptMapper.selectCount(new LambdaQueryWrapper<DeptEntity>()

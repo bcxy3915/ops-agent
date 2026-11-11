@@ -85,7 +85,7 @@ public class ConversationService {
      * @param content 消息内容
      * @return 无返回值
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveUserMessage(String sessionId, String content) {
         MessageEntity msg = new MessageEntity();
         msg.setSessionId(sessionId);
@@ -106,7 +106,7 @@ public class ConversationService {
      * @return 无返回值
      */
     @Async("conversationExecutor")
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveAssistantMessage(String sessionId, String content) {
         saveAssistantMessage(sessionId, content, null, null);
     }
@@ -296,7 +296,7 @@ public class ConversationService {
      * @param username 用户名
      * @return 是否删除成功
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean deleteConversation(String sessionId, String username) {
         jdbcTemplate.queryForList("SELECT request_id FROM ops_chat_turn WHERE tenant_id=? AND session_id=? FOR UPDATE",
                 currentTenant(), sessionId);

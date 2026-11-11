@@ -3,6 +3,7 @@ package com.example.opsaiagent.chat.controller;
 import jakarta.validation.Valid;
 import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.chat.dto.AskResponse;
+import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.knowledge.loader.DocumentLoader;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
 import com.example.opsaiagent.retrieval.KeywordRetriever;
@@ -39,7 +40,8 @@ public class ChatController {
 
     /**
      * 手动触发内置知识库文档重载（增量：缺失/变更才加载，清理残留）
-     * @return 加载统计
+     * 无入参。
+     * @return 统一响应，包含加载统计
      */
     @Operation(summary = "重建知识库索引",
             description = "手动触发内置知识库增量重载：按内容指纹检测缺失/变更文档并加载，清理已移除文档的残留向量。需要 ADMIN 角色")
@@ -47,36 +49,43 @@ public class ChatController {
     @PreAuthorize("hasRole('ADMIN')")
     @AuditLog(operation = "RELOAD_KNOWLEDGE", description = "重建知识库索引")
     @PostMapping("/knowledge/reload")
-    public Map<String, Object> reloadDocument() {
+    public ApiResponse<Map<String, Object>> reloadDocument() {
         Map<String, Object> result = documentLoader.reload();
         // 重建 BM25 内存索引（从检索投影全量构建，纳入 upload:/case: 文档与最新向量），
         // 使"重建索引"真正覆盖关键词检索，避免上传文档 publish 后长期检索不到
         keywordRetriever.rebuild();
         result.put("indexRebuilt", true);
-        return result;
+        return ApiResponse.success(result);
     }
 
     /**
      * 根据问题返回答案（含结构化引用）
      * @param question 问题
-     * @return 答案 + citations
+     * @param sessionId 会话标识
+     * @return 统一响应，包含答案与 citations
      */
     @Operation(
             summary = "同步问答",
-            description = "一次性返回完整答案与引用 citations。适合后端调用、Postman 测试。"
+            description = "通过 ApiResponse 返回完整答案与引用 citations，业务数据位于 data。适合后端调用、Postman 测试。"
     )
     @RateLimit(key = "ask", limit = 30, period = 60, dimension = RateLimit.Dimension.USER)
     @GetMapping("/ask")
-    public AskResponse ask(
+    public ApiResponse<AskResponse> ask(
             @RequestParam String question,
             @RequestParam(required = false, defaultValue = "default") String sessionId) {
-        return opsAgentService.askWithCitations(sessionId, question);
+        return ApiResponse.success(opsAgentService.askWithCitations(sessionId, question));
     }
 
+    /**
+     * 独立验证关键词检索结果。
+     * @param query 查询文本
+     * @param topK 返回数量上限
+     * @return 统一响应，包含查询、命中数量和结果预览
+     */
     @Operation(summary = "[测试] BM25 独立检索")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @GetMapping("/bm25-search")
-    public Map<String, Object> bm25Search(
+    public ApiResponse<Map<String, Object>> bm25Search(
             @RequestParam String query,
             @RequestParam(defaultValue = "5") int topK) {
         List<Document> docs = keywordRetriever.search(query, topK);
@@ -86,7 +95,7 @@ public class ChatController {
                         "preview", d.getText().substring(0, Math.min(80, d.getText().length()))
                 ))
                 .toList();
-        return Map.of("query", query, "count", docs.size(), "results", results);
+        return ApiResponse.success(Map.of("query", query, "count", docs.size(), "results", results));
     }
 
     /**

@@ -51,7 +51,7 @@ public class LangChain4jElasticsearchStore implements KnowledgeVectorStore {
      * @return 无返回值
      */
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void write(List<Document> documents) {
         for (int start = 0; start < documents.size(); start += 10) {
             var batch = documents.subList(start, Math.min(start + 10, documents.size()));

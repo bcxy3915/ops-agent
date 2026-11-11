@@ -42,6 +42,41 @@ import static org.mockito.Mockito.when;
 class ChatControllerTest {
 
     /**
+     * 通过真实 MVC JSON 编码验证三个普通接口的数据位于 data，避免出现裸响应或双重包装。
+     * 无入参。
+     * @return 无返回值
+     * @throws Exception 模拟请求或序列化失败
+     */
+    @Test
+    void ordinaryEndpointsUseUnifiedJsonEnvelope() throws Exception {
+        var mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setMessageConverters(new MappingJackson2HttpMessageConverter()).build();
+        when(documentLoader.reload()).thenReturn(new HashMap<>(Map.of("loaded", 3)));
+        when(keywordRetriever.search("查询", 5)).thenReturn(List.of());
+        when(opsAgentService.askWithCitations("default", "问题")).thenReturn(
+                AskResponse.builder().sessionId("default").question("问题")
+                        .answer("答案").citations(List.of()).build());
+
+        mvc.perform(MockMvcRequestBuilders.post("/api/ops/knowledge/reload"))
+                .andExpect(MockMvcResultMatchers.status().isOk())
+                .andExpect(MockMvcResultMatchers.jsonPath("$.code").value(0))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.message").value("success"))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data.loaded").value(3))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data.indexRebuilt").value(true));
+        mvc.perform(MockMvcRequestBuilders.get("/api/ops/ask").param("question", "问题"))
+                .andExpect(MockMvcResultMatchers.status().isOk())
+                .andExpect(MockMvcResultMatchers.jsonPath("$.code").value(0))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data.answer").value("答案"))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data.citations").isArray())
+                .andExpect(MockMvcResultMatchers.jsonPath("$.answer").doesNotExist());
+        mvc.perform(MockMvcRequestBuilders.get("/api/ops/bm25-search").param("query", "查询"))
+                .andExpect(MockMvcResultMatchers.status().isOk())
+                .andExpect(MockMvcResultMatchers.jsonPath("$.code").value(0))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data.count").value(0))
+                .andExpect(MockMvcResultMatchers.jsonPath("$.data.results").isArray());
+    }
+
+    /**
      * 验证实际 MVC SSE 编码与标准解析后仍逐字保留 Markdown 的空格、缩进和换行。
      * @return 无返回值
      * @throws Exception 模拟请求或异步响应读取异常
@@ -121,7 +156,9 @@ class ChatControllerTest {
         reloadResult.put("message", "文档加载完成");
         when(documentLoader.reload()).thenReturn(reloadResult);
 
-        Map<String, Object> result = controller.reloadDocument();
+        var response = controller.reloadDocument();
+        assertThat(response.getCode()).isZero();
+        Map<String, Object> result = response.getData();
 
         assertThat(result).containsEntry("status", "success");
         assertThat(result).containsEntry("loaded", 3);
@@ -144,7 +181,9 @@ class ChatControllerTest {
                 .build();
         when(opsAgentService.askWithCitations("sess-1", "问题")).thenReturn(resp);
 
-        AskResponse result = controller.ask("问题", "sess-1");
+        var response = controller.ask("问题", "sess-1");
+        assertThat(response.getCode()).isZero();
+        AskResponse result = response.getData();
 
         assertThat(result.getSessionId()).isEqualTo("sess-1");
         assertThat(result.getQuestion()).isEqualTo("问题");
@@ -162,7 +201,9 @@ class ChatControllerTest {
         Document doc2 = new Document("文档2内容", Map.of("source", "test2.md"));
         when(keywordRetriever.search("查询", 5)).thenReturn(List.of(doc1, doc2));
 
-        Map<String, Object> result = controller.bm25Search("查询", 5);
+        var response = controller.bm25Search("查询", 5);
+        assertThat(response.getCode()).isZero();
+        Map<String, Object> result = response.getData();
 
         assertThat(result).containsEntry("query", "查询");
         assertThat(result).containsEntry("count", 2);
@@ -177,7 +218,9 @@ class ChatControllerTest {
     void bm25Search_empty() {
         when(keywordRetriever.search("无匹配", 5)).thenReturn(List.of());
 
-        Map<String, Object> result = controller.bm25Search("无匹配", 5);
+        var response = controller.bm25Search("无匹配", 5);
+        assertThat(response.getCode()).isZero();
+        Map<String, Object> result = response.getData();
 
         assertThat(result).containsEntry("count", 0);
     }

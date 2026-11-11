@@ -39,7 +39,7 @@ public class SearchProjectionService {
      * @param vector 向量
      * @return 无返回值
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void stage(Document document, float[] vector) {
         Map<String, Object> metadata = new HashMap<>(document.getMetadata());
         metadata.put("active", true);
@@ -59,7 +59,7 @@ public class SearchProjectionService {
      * @param sources 来源集合
      * @return 影响分块数
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int deleteSources(Collection<String> sources) {
         if (sources == null || sources.isEmpty()) return 0;
         return jdbc.update("UPDATE knowledge_search_projection SET deleted=TRUE, sync_status='PENDING', "

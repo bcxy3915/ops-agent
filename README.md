@@ -158,6 +158,8 @@ mvn spring-boot:run
 | 流式测试页 | http://localhost:18080/stream-test.html |
 | 流式问答 | `POST /api/ops/ask/stream`（JSON：question / sessionId） |
 
+普通业务接口统一返回 `{ code, message, data }`。同步问答 `GET /api/ops/ask` 的答案与引用位于 `data`；知识重载和 BM25 测试同样使用该结构。SSE 流式问答直接输出事件流，不使用 JSON 响应包装。
+
 ## 🔌 API 概览
 
 | 模块 | 前缀 | 说明 |

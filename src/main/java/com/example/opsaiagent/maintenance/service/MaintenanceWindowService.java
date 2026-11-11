@@ -46,7 +46,7 @@ public class MaintenanceWindowService {
      * 创建维护窗口：多选服务 + 原因 + 到期时间。
      * 每个服务一行记录；同时对服务下存量非 RESOLVED 告警批量静默（复用单条静默语义）。
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public List<MaintenanceWindowResponse> create(MaintenanceWindowCreateRequest request) {
         LocalDateTime now = LocalDateTime.now();
         if (request.getUntil() == null || !request.getUntil().isAfter(now)) {

@@ -158,7 +158,7 @@ public class KnowledgeQualityService {
      * @param request 裁定请求（decision 必填，KEEP_NEW / KEEP_OLD / MANUAL）
      * @return 裁定结果
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ConflictResolveResponse resolve(Long conflictId, ConflictResolveRequest request) {
         if (request == null || !isValidDecision(request.getDecision())) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_CONFLICT_INVALID,

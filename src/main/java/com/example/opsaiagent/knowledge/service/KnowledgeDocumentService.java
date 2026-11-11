@@ -199,7 +199,7 @@ public class KnowledgeDocumentService {
      * @param tags 标签
      * @return 文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse upload(MultipartFile file, String title, String layer,
                                             String owner, List<String> serviceIds, List<String> tags) {
         if (file == null || file.isEmpty()) {
@@ -247,7 +247,7 @@ public class KnowledgeDocumentService {
      * @param request 在线编写请求（title/content 必填）
      * @return 文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse onlineCreate(KnowledgeOnlineCreateRequest request) {
         if (request == null || !StringUtils.hasText(request.getTitle()) || !StringUtils.hasText(request.getContent())) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_DOCUMENT_INVALID, "标题和内容不能为空");
@@ -296,7 +296,7 @@ public class KnowledgeDocumentService {
      * 扫描所有已复核到期（review_at < now）的 VERIFIED 文档，标记为 EXPIRED。
      * @return 被标记为过期的文档数量
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int expireOverdueDocuments() {
         LocalDateTime now = LocalDateTime.now();
         LambdaQueryWrapper<KnowledgeDocumentEntity> wrapper = new LambdaQueryWrapper<KnowledgeDocumentEntity>()
@@ -327,7 +327,7 @@ public class KnowledgeDocumentService {
      * @param approved true=通过（向量化入库）；false=驳回（保持待处理）
      * @return 文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse publish(Long id, boolean approved) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         KnowledgeReviewRequest request = new KnowledgeReviewRequest();
@@ -354,7 +354,7 @@ public class KnowledgeDocumentService {
      * @param id 文档 ID
      * @return 文档响应（reviewStatus=APPROVED、publishStatus=BUILDING）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse publishDirect(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
@@ -377,7 +377,7 @@ public class KnowledgeDocumentService {
      * @param id 文档 ID
      * @return 文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse submitForReview(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
@@ -416,7 +416,7 @@ public class KnowledgeDocumentService {
      * @param request 审核请求
      * @return 文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse review(Long id, KnowledgeReviewRequest request) {
         if (request == null || !StringUtils.hasText(request.getLevel())
                 || request.getApproved() == null) {
@@ -726,7 +726,7 @@ public class KnowledgeDocumentService {
      * @param request 编辑请求
      * @return 文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse update(Long id, KnowledgeDocumentUpdateRequest request) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
@@ -781,7 +781,7 @@ public class KnowledgeDocumentService {
      * @param versionId 目标版本记录 ID
      * @return 回滚后的文档响应
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse rollback(Long docId, Long versionId) {
         KnowledgeDocumentVersionEntity target = versionService.requireVersion(docId, versionId);
         KnowledgeDocumentEntity entity = requireDocument(docId);
@@ -822,7 +822,7 @@ public class KnowledgeDocumentService {
      * 删除文档（含分块与向量）
      * @param id 文档 ID
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkOwnerOrAdmin(entity);
@@ -842,7 +842,7 @@ public class KnowledgeDocumentService {
      * @param id 文档 ID
      * @return 文档响应（publishStatus=BUILDING）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocumentResponse reindex(Long id) {
         KnowledgeDocumentEntity entity = requireDocument(id);
         checkReindexPermission(entity);

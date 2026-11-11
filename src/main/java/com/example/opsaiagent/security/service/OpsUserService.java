@@ -193,7 +193,7 @@ public class OpsUserService {
      * @param request 创建请求
      * @return 创建后的用户
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OpsUserEntity create(UserCreateRequest request) {
         String tenantId = resolveCreateTenant(request.getTenantId());
         Long deptId = resolveCreateDept(tenantId, request.getDeptId());
@@ -283,7 +283,7 @@ public class OpsUserService {
      * 更新用户（只更新非空字段；phone/email 传空串表示清除）
      * 防护：不能禁用当前登录账号
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OpsUserEntity update(String id, UserUpdateRequest request) {
         OpsUserEntity user = findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND, "用户不存在: " + id));
@@ -368,7 +368,7 @@ public class OpsUserService {
      * 删除用户
      * 防护：不能删除自己、内置 admin；系统至少保留一个 ADMIN
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(String id) {
         OpsUserEntity user = findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND, "用户不存在: " + id));
