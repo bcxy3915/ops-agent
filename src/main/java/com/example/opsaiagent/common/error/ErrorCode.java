@@ -47,7 +47,9 @@ public enum ErrorCode {
     KNOWLEDGE_OPERATION_FORBIDDEN(1038, "无权操作该知识文档"),
     NOT_SUPPORTED_FILE_TYPE(1039, "不支持的文件类型"),
     CHAT_TURN_BUSY(1040, "会话正在回答"),
-    CHAT_TURN_EXPIRED(1041, "问答轮次已失效");
+    CHAT_TURN_EXPIRED(1041, "问答轮次已失效"),
+    AGENT_TASK_NOT_FOUND(1042, "任务不存在或不可见"),
+    AGENT_TASK_STATE_INVALID(1043, "任务执行状态已变化");
 
     private final int code;
     private final String message;
