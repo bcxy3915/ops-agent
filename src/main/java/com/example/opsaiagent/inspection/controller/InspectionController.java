@@ -4,6 +4,8 @@ import com.example.opsaiagent.audit.annotation.AuditLog;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.inspection.dto.InspectionReport;
 import com.example.opsaiagent.inspection.dto.MetricWindowReport;
+import com.example.opsaiagent.inspection.dto.BusinessProbeReport;
+import com.example.opsaiagent.inspection.service.BusinessProbeService;
 import com.example.opsaiagent.inspection.service.InspectionService;
 import com.example.opsaiagent.inspection.service.InspectionMetricWindowService;
 import com.example.opsaiagent.ratelimit.annotation.RateLimit;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class InspectionController {
     private final InspectionService inspectionService;
     private final InspectionMetricWindowService metricWindows;
+    private final BusinessProbeService businessProbes;
 
     /**
      * 对已绑定服务发起一次实时巡检。
@@ -56,5 +59,21 @@ public class InspectionController {
             @RequestParam(required = false) Long endMs) {
         return ApiResponse.success(metricWindows.compare(serviceId, metric, windowMinutes,
                 endMs == null ? System.currentTimeMillis() : endMs));
+    }
+
+    /**
+     * 执行预登记业务接口的只读探针。
+     * @param serviceId 服务登记 ID
+     * @param probeId 服务端探针标识
+     * @return 统一封装的业务证据
+     */
+    @Operation(summary = "只读业务接口探针")
+    @PreAuthorize("hasAuthority('service:read') and hasAuthority('diagnosis:trigger')")
+    @RateLimit(key = "inspectionBusiness", limit = 10, period = 60, dimension = RateLimit.Dimension.USER)
+    @AuditLog(operation = "PROBE_BUSINESS", description = "执行只读业务探针")
+    @PostMapping("/services/{serviceId}/business-probes/{probeId}")
+    public ApiResponse<BusinessProbeReport> businessProbe(@PathVariable String serviceId,
+                                                          @PathVariable String probeId) {
+        return ApiResponse.success(businessProbes.check(serviceId, probeId));
     }
 }

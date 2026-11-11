@@ -56,6 +56,9 @@ ops-agent:
   inspection:
     cpu-threshold: 0.9
     pool-threshold: 0.9
+    # 业务探针需人工确认目标 GET 接口只读后登记；默认不探测任何业务接口
+    business:
+      probes: {}
   chat:
     turn:
       # 租约必须大于整轮超时；实例崩溃后到期可由新请求接管
