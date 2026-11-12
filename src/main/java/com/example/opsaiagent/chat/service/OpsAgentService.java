@@ -5,6 +5,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import com.example.opsaiagent.ai.adapter.langchain4j.ConversationChatMemoryStore;
+import com.example.opsaiagent.ai.adapter.langchain4j.ConversationQueryRewriter;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsAssistant;
 import com.example.opsaiagent.ai.adapter.langchain4j.OpsStreamingAssistant;
 import com.example.opsaiagent.chat.dto.AskResponse;
@@ -43,6 +44,7 @@ public class OpsAgentService {
     private final OpsStreamingAssistant langChain4jOpsStreamingAssistant;
     private final ConversationChatMemoryStore memoryStore;
     private final ChatTurnService turns;
+    private final ConversationQueryRewriter queryRewriter;
     private static final String SYSTEM_PROMPT = """
         你是一个运维智能体。你的职责是帮助用户排查和诊断服务问题。
 
@@ -202,15 +204,16 @@ public class OpsAgentService {
     }
 
     /**
-     * 检索一次并绑定模型快照，引用和命中记录从同一份文档生成。
+     * 按需补全追问后检索一次并绑定快照，引用评分使用相同检索问题。
      * @param round 当前轮次
      * @param question 用户问题
      * @return 本轮引用
      */
     private List<RetrievalHitResponse> retrieve(Round round, String question) {
-        memoryStore.bindDocuments(round.turn.memoryId(), hybridRetriever.retrieve(question, 5));
+        String retrievalQuery = queryRewriter.rewrite(question, memoryStore.getMessages(round.turn.memoryId()));
+        memoryStore.bindDocuments(round.turn.memoryId(), hybridRetriever.retrieve(retrievalQuery, 5));
         List<RetrievalHitResponse> citations = knowledgeRetrievalService.toHits(
-                memoryStore.documents(round.turn.memoryId()), question, 5);
+                memoryStore.documents(round.turn.memoryId()), retrievalQuery, 5);
         try {
             knowledgeHitLogService.recordHits(citations, question, KnowledgeHitLogService.SOURCE_ASK, round.turn.username());
         } catch (Exception failure) { log.warn("记录问答命中流水失败", failure); }

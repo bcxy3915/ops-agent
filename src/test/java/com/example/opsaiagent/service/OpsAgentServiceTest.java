@@ -62,7 +62,7 @@ class OpsAgentServiceTest {
                 .contentRetriever(new LangChain4jKnowledgeContentRetriever(retriever, 5, store))
                 .storeRetrievedContentInChatMemory(false).build();
         var actual = new OpsAgentService(retriever, references, hits, new ObjectMapper(),
-                realAssistant, streaming, store, turns);
+                realAssistant, streaming, store, turns, queryRewriter);
         assertThat(actual.ask("session", "问题")).isEqualTo("真实编排的模拟答案");
         verify(retriever, times(1)).retrieve(anyString(), anyInt());
         verify(references).toHits(eq(List.of(document)), eq("问题"), eq(5));
@@ -75,6 +75,7 @@ class OpsAgentServiceTest {
     private final OpsStreamingAssistant streaming = mock(OpsStreamingAssistant.class);
     private final ConversationChatMemoryStore memory = mock(ConversationChatMemoryStore.class);
     private final ChatTurnService turns = mock(ChatTurnService.class);
+    private final ConversationQueryRewriter queryRewriter = mock(ConversationQueryRewriter.class);
     private final ChatTurn turn = new ChatTurn("tenant", "session", "alice", "request", "conversation", "..session.request");
     private final StreamingHandle handle = mock(StreamingHandle.class);
     private OpsAgentService service;
@@ -85,7 +86,8 @@ class OpsAgentServiceTest {
      */
     @BeforeEach
     void setup() {
-        service = new OpsAgentService(retriever, references, hits, new ObjectMapper(), assistant, streaming, memory, turns);
+        service = new OpsAgentService(retriever, references, hits, new ObjectMapper(), assistant, streaming, memory, turns, queryRewriter);
+        lenient().when(queryRewriter.rewrite(anyString(), any())).thenAnswer(call -> call.getArgument(0));
         lenient().when(turns.begin("session", "问题")).thenReturn(turn);
         lenient().when(turns.timeout()).thenReturn(Duration.ofSeconds(10));
         lenient().when(memory.documents(turn.memoryId())).thenReturn(List.of(new Document("本轮快照")));
@@ -110,6 +112,42 @@ class OpsAgentServiceTest {
         order.verify(assistant).evictChatMemory(turn.memoryId());
         order.verify(streaming).evictChatMemory(turn.memoryId());
         order.verify(memory).closeTurn(turn.memoryId());
+        verify(retriever, times(1)).retrieve(anyString(), anyInt());
+    }
+
+    /**
+     * 改写仅用于检索与引用评分，原问题仍用于持久化、模型回答和命中记录。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void rewrittenQueryFeedsRetrievalAndCitationsOnly() {
+        when(queryRewriter.rewrite(eq("问题"), any())).thenReturn("连接池如何调整");
+        service.askWithCitations("session", "问题");
+        verify(retriever).retrieve("连接池如何调整", 5);
+        verify(references).toHits(anyList(), eq("连接池如何调整"), eq(5));
+        verify(turns).saveQuestion(turn, "问题");
+        verify(assistant).ask(eq(turn.memoryId()), eq("问题"), anyString());
+        verify(retriever, times(1)).retrieve(anyString(), anyInt());
+    }
+
+    /**
+     * 流式问答复用同一改写入口，保留原问题与既有事件顺序。
+     * 无入参。
+     * @return 无返回值
+     */
+    @Test
+    void streamingUsesRewrittenQueryAndKeepsOriginalQuestion() {
+        stream(true, false);
+        when(queryRewriter.rewrite(eq("问题"), any())).thenReturn("连接池如何调整");
+        StepVerifier.create(service.askStreamWithCitations("session", "问题"))
+                .expectNextMatches(event -> "部分答案".equals(event.data()))
+                .expectNextMatches(event -> "citations".equals(event.event()))
+                .expectNextMatches(event -> "[DONE]".equals(event.data()))
+                .verifyComplete();
+        verify(retriever).retrieve("连接池如何调整", 5);
+        verify(references).toHits(anyList(), eq("连接池如何调整"), eq(5));
+        verify(streaming).askStream(eq(turn.memoryId()), eq("问题"), anyString());
         verify(retriever, times(1)).retrieve(anyString(), anyInt());
     }
 

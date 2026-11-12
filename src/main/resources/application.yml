@@ -79,7 +79,7 @@ ops-agent:
   ai:
     base-url: ${OPS_AI_BASE_URL:https://api.deepseek.com/v1}
     api-key: ${OPS_AI_API_KEY:${AI_API_KEY:}}
-    model: ${OPS_AI_MODEL:deepseek-chat}
+    model: ${OPS_AI_MODEL:deepseek-flash}
     timeout: ${OPS_AI_TIMEOUT:60s}
     temperature: ${OPS_AI_TEMPERATURE:0.7}
     # 知识向量模型使用 LangChain4j，与聊天模型配置独立；保持存量模型与维度一致
@@ -102,6 +102,14 @@ ops-agent:
       timeout: ${ES_TIMEOUT:15s}
       sync-batch-size: 30
       sync-interval-ms: 2000
+    # 追问指代消解专用轻量模型；不调用主对话模型，失败时退回原问题。
+    query-rewrite:
+      enabled: ${QUERY_REWRITE_ENABLED:true}
+      base-url: ${QUERY_REWRITE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # 默认复用已配置的百炼向量模型密钥，可单独覆盖；两者仍可能共享账号配额。
+      api-key: ${QUERY_REWRITE_API_KEY:xxxxxxxxx}
+      model: ${QUERY_REWRITE_MODEL:qwen-turbo}
+      timeout: ${QUERY_REWRITE_TIMEOUT:5s}
   retrieval:
     keyword:
       type: elasticsearch
