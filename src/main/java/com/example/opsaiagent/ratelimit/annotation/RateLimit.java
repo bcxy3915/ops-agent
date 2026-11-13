@@ -18,12 +18,12 @@ public @interface RateLimit {
     String key();
 
     /**
-     * 周期内允许的最大请求数
+     * 令牌桶容量（可突发的请求数），并非严格滑动窗口上限
      */
     int limit() default 60;
 
     /**
-     * 周期（秒）
+     * 从空桶连续补充到满桶的周期（秒）
      */
     long period() default 60;
 
@@ -35,7 +35,7 @@ public @interface RateLimit {
     enum Dimension {
         /** 按 IP 限流（适用于未登录接口） */
         IP,
-        /** 按用户限流（从 JWT 取 username） */
+        /** 按可信上下文中的租户 ID 与用户 ID 限流 */
         USER,
         /** 全局限流（所有请求共享一个桶） */
         GLOBAL

@@ -28,6 +28,16 @@ class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
     @Test
+    void unavailableLimiterReturns503WithoutInternalDetails() {
+        var response = handler.handleRateLimitUnavailable(
+                new com.example.opsaiagent.ratelimit.exception.RateLimitUnavailableException(
+                        new RuntimeException("private-redis-address")));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody().getCode()).isEqualTo(503);
+        assertThat(response.getBody().getMessage()).doesNotContain("private-redis-address");
+    }
+
+    @Test
     @DisplayName("限流异常：返回 429 与错误码")
     void rateLimit_returns429() {
         ResponseEntity<ApiResponse<Void>> result =

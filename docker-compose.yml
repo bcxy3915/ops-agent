@@ -1,4 +1,18 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: ops-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    # 仅限本机开发；状态类 Key 不允许因内存压力被淘汰。
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - ops_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
   mysql:
     image: mysql:8.4
     container_name: ops-mysql
@@ -48,6 +62,7 @@ services:
       - ./init-scripts:/docker-entrypoint-initdb.d
 
 volumes:
+  ops_redisdata:
   ops_pgdata:
   ops_mysqldata:
   ops_esdata:

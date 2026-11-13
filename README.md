@@ -107,11 +107,13 @@
 ```bash
 cd ops-ai-agent
 cp .env.example .env # 先填入 DB_PASSWORD
-docker compose up -d mysql elasticsearch
-python scripts/initialize-elasticsearch.py
+docker compose up -d mysql elasticsearch redis
+powershell -NoProfile -File scripts/initialize-elasticsearch.ps1
 ```
 
 首次启动 MySQL 空数据卷时自动执行 `init-scripts/mysql/schema.sql` 和 `seed.sql`。MySQL 映射到 `127.0.0.1:23306`，ES 映射到 `127.0.0.1:9200`。ES 初始化单独执行，不随业务库建表脚本混跑。已有数据卷不会重复初始化；结构升级使用 `init-scripts/mysql/migrations/`。
+
+接口限流默认使用 Redis（`localhost:6379`），所有后端实例连接同一 Redis 并使用相同 Key 前缀。同步与 SSE 问答共享每用户容量 30、60 秒补满的令牌桶；自主诊断使用独立的容量 5、60 秒补满桶。用户额度按租户 ID 与用户 ID 隔离。额度不足返回 HTTP 429；Redis 异常返回 HTTP 503，业务和模型调用不会继续。仅单实例开发时可设置 `OPS_RATE_LIMIT_TYPE=bucket4j`。配置、部署及验证方式见 [Redis 分布式限流](docs/redis-rate-limit.md)。
 
 MySQL 保存原文、分块、权限及持久化投递记录；ES 保存向量与 BM25 检索投影。投递失败自动退避重试，删除保留墓碑；投递向量只在 MySQL 暂存，ES 确认后清空。文档在全部分块同步成功后才标记为已发布。
 

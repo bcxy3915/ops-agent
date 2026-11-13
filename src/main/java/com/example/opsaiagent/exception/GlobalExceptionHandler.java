@@ -3,8 +3,10 @@ package com.example.opsaiagent.exception;
 import com.example.opsaiagent.common.api.ApiResponse;
 import com.example.opsaiagent.common.error.ErrorCode;
 import com.example.opsaiagent.ratelimit.exception.RateLimitExceededException;
+import com.example.opsaiagent.ratelimit.exception.RateLimitUnavailableException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -17,11 +19,20 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(RateLimitUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRateLimitUnavailable(RateLimitUnavailableException e) {
+        log.warn("分布式限流服务不可用: {}", e.getCause() == null ? "unknown" : e.getCause().getClass().getSimpleName());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.error(503, e.getMessage()));
+    }
+
     @ExceptionHandler(RateLimitExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleRateLimit(RateLimitExceededException e) {
         log.warn("限流触发: {}", e.getMessage());
         return ResponseEntity
                 .status(HttpStatus.TOO_MANY_REQUESTS)   // 429
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.error(429, e.getMessage()));
     }
 

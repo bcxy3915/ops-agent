@@ -10,6 +10,13 @@ spring:
       preferred-json-mapper: jackson2
   application:
     name: ops-agent-core
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 1s
+      timeout: 1s
   mvc:
     async:
       request-timeout: 5m # SSE 长连接超时（默认 30s 太短，5 分钟足够）
@@ -190,10 +197,21 @@ ops-agent:
     key-version: "v1"
     # 存量数据迁移开关
     migrate-on-startup: false
-  # 限流方案 bucket4j / redis / sentinel
+  # redis 为多实例共享额度；仅单实例开发时可切换为 bucket4j
   rate-limit:
     enabled: true
-    type: bucket4j
+    type: ${OPS_RATE_LIMIT_TYPE:redis}
+    # 多实例必须相同，不同环境必须隔离；策略变化会创建新桶
+    redis-key-prefix: ${OPS_RATE_LIMIT_REDIS_PREFIX:ops:local:ratelimit:v1:}
+    trust-forwarded-headers: false
+    policies:
+      # 同步与 SSE 共享问答额度；用户可在桶容量内突发，之后连续补充
+      ask:
+        limit: ${OPS_RATE_LIMIT_ASK_LIMIT:30}
+        period: ${OPS_RATE_LIMIT_ASK_PERIOD:60}
+      autonomousDiagnosis:
+        limit: ${OPS_RATE_LIMIT_DIAGNOSIS_LIMIT:5}
+        period: ${OPS_RATE_LIMIT_DIAGNOSIS_PERIOD:60}
     # 限流桶缓存：多久不访问后自动淘汰
     bucket-expire-minutes: 10
     # 限流桶缓存：最多缓存多少个用户/IP（超出按 LRU 淘汰）
