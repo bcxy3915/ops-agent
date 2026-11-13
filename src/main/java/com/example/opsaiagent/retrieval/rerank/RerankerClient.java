@@ -14,7 +14,7 @@ public interface RerankerClient {
      * @param query    查询文本
      * @param documents 候选文档
      * @param topN     返回数量
-     * @return 按相关性排序的文档
+     * @return 启用精排时为通过相关性阈值的文档，数量不超过 topN，允许为空；禁用时仅截断
      */
     List<Document> rerank(String query, List<Document> documents, int topN);
 }

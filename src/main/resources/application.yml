@@ -114,11 +114,19 @@ ops-agent:
     keyword:
       type: elasticsearch
     citations:
-      # 控制问答文档来源和检索测试的有效命中，不影响模型上下文；余弦阈值需结合本库样本校准。
+      # 仅用于未启用精排的兼容引用校验；启用精排后直接复用最终结果和精排分数，不二次 embedding。
       min-similarity: 0.7
     rerank:
-      enabled: false
-      model: gte-rerank-v2 # 重排模型 采用阿里百炼rerank
+      enabled: true
+      # 归一化精排分数阈值；先过滤再取 topK，允许零命中。按当前模型的正负样本校准。
+      min-score: ${RERANK_MIN_SCORE:0.15}
+      provider: xinference
+      model: ops-bge-reranker
+      url: http://127.0.0.1:9997/v1/rerank
+      api-key: ${XINFERENCE_API_KEY:}
+      # 本地 CPU 精排不重试；读取超时需结合实际 20 条候选耗时调整。
+      connect-timeout-ms: ${RERANK_CONNECT_TIMEOUT_MS:1000}
+      read-timeout-ms: ${RERANK_READ_TIMEOUT_MS:45000}
     # 同文档竞争治理（设计文档 §10.3.10）：top-K 内单文档配额 + 邻近块合并，
     # 防止同主题文档霸占 top-K 挤出期望文档；回退 = enabled: false
     diversity:

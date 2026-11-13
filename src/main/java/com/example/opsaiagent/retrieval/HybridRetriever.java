@@ -62,7 +62,9 @@ public class HybridRetriever {
         List<Document> bm25Results = keywordRetriever.search(query, 20, effective);
         log.info("混合检索: 向量命中 {} 个, BM25 命中 {} 个", vectorResults.size(), bm25Results.size());
         if (vectorResults.isEmpty()) {
-            return diversifier.diversify(bm25Results, topK);
+            if (bm25Results.isEmpty()) return List.of();
+            // 向量不可用时也精排关键词候选，不能先截断到 topK 再精排。
+            return rerankerClient.rerank(query, diversifier.diversify(bm25Results, 20), topK);
         }
 
         // 2. RRF 融合

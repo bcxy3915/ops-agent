@@ -209,7 +209,7 @@ SSE 空格保护：Spring MVC 编码器直接输出 `data:`，标准客户端会
 | `OPS_CORS_ALLOWED_ORIGINS` | 逗号分隔的前端来源白名单 |
 | `LOG_LEVEL` | 根日志及业务包默认日志级别（默认 INFO） |
 
-模型、embedding、向量维度与 Elasticsearch dense_vector 索引维度需保持一致；切换 embedding 模型前评估已有向量的兼容与重建方案。默认重排序关闭（`ops-agent.retrieval.rerank.enabled: false`），不可仅凭 README 假设已启用。
+模型、embedding、向量维度与 Elasticsearch dense_vector 索引维度需保持一致；切换 embedding 模型前评估已有向量的兼容与重建方案。当前配置启用 Xinference 本地精排（`ops-agent.retrieval.rerank.provider: xinference`），密钥位于 `ops-agent.retrieval.rerank.api-key`；部署与验证见 `docs/xinference-rerank.md`。精排按 `rerank.min-score` 过滤后最多返回 topK，允许为空；Xinference 显式启用分数归一化，当前 0.1 门槛仅经小样本校准，切换模型需重新校准。模型上下文和引用复用最终精排结果，引用不再二次 embedding；精排失败或繁忙时返回空知识上下文，不重试。`enabled: false` 回退为不精排及旧引用兼容校验，`provider: dashscope` 保留百炼选项。
 
 ### 8.2 开发与验证命令
 

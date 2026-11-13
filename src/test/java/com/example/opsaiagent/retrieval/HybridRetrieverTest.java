@@ -60,6 +60,7 @@ class HybridRetrieverTest {
     @Test
     void usesMigratedStoreAndPreservesBm25Fallback() {
         KnowledgeVectorStore migrated = vectorStore;
+        when(rerankerClient.rerank(eq("查询"), any(), eq(5))).thenAnswer(call -> call.getArgument(1));
 
         when(migrated.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenThrow(new IllegalStateException("模型不可用"));
@@ -129,6 +130,7 @@ class HybridRetrieverTest {
     void retrieve_vectorFailureFallsBackToBm25() {
         Document b = doc("BM25文档");
         List<Document> bm25Results = List.of(b, doc("BM25文档2"));
+        when(rerankerClient.rerank("查询", bm25Results, 1)).thenReturn(List.of(b));
         when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class)))
                 .thenThrow(new RuntimeException("network error"));
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
@@ -139,14 +141,16 @@ class HybridRetrieverTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getText()).isEqualTo("BM25文档");
-        verify(diversifier).diversify(bm25Results, 1);
+        verify(diversifier).diversify(bm25Results, 20);
         verify(rrfFuser, never()).fuseAndLimit(anyInt(), any(), any());
-        verify(rerankerClient, never()).rerank(anyString(), any(), anyInt());
+        verify(rerankerClient).rerank("查询", bm25Results, 1);
     }
 
     @Test
     @DisplayName("retrieve：向量结果为空时直接返回 BM25 前 topK")
     void retrieve_vectorEmptyUsesBm25TopK() {
+        when(rerankerClient.rerank(eq("查询"), any(), eq(2)))
+                .thenAnswer(call -> ((List<Document>) call.getArgument(1)).stream().limit(2).toList());
         when(vectorStore.search(anyString(), anyInt(), any(RetrievalScope.class))).thenReturn(List.of());
         when(keywordRetriever.search(eq("查询"), eq(20), any(RetrievalScope.class)))
                 .thenReturn(List.of(doc("a"), doc("b"), doc("c"), doc("d")));
@@ -168,5 +172,20 @@ class HybridRetrieverTest {
         List<Document> result = hybridRetriever.retrieve("查询", 3);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("高向量相似候选也可被精排全部淘汰，不用原候选补足 topK")
+    void retrieve_rerankCanRejectAllCandidates() {
+        Document candidate = new Document("weak", "ES 部署与端口", Map.of(), 0.95);
+        when(vectorStore.search(eq("红烧肉怎么做"), eq(20), any(RetrievalScope.class)))
+                .thenReturn(List.of(candidate));
+        when(keywordRetriever.search(eq("红烧肉怎么做"), eq(20), any(RetrievalScope.class))).thenReturn(List.of());
+        when(rrfFuser.fuseAndLimit(20, List.of(candidate), List.of())).thenReturn(List.of(candidate));
+        diversifierPassThrough();
+        when(rerankerClient.rerank("红烧肉怎么做", List.of(candidate), 5)).thenReturn(List.of());
+
+        assertThat(hybridRetriever.retrieve("红烧肉怎么做", 5)).isEmpty();
+        verify(rerankerClient).rerank("红烧肉怎么做", List.of(candidate), 5);
     }
 }

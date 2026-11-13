@@ -20,7 +20,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import com.example.opsaiagent.knowledge.model.Document;
+import org.springframework.core.io.ClassPathResource;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -434,6 +436,107 @@ class KnowledgeRetrievalServiceTest {
         assertThat(hits.getFirst().getScore()).isCloseTo(0.8, Offset.offset(0.000001));
         assertThat(docs.get(1).getScore()).isNull();
         verifyNoInteractions(hybridRetriever);
+    }
+
+    @Test
+    @DisplayName("已通过精排的文档直接用于来源，不再次调用 embedding 或按余弦阈值删去")
+    void toHits_reusesRerankDecisionAndScoreWithoutEmbedding() {
+        Document document = new Document("es", "ES 部署地址和端口", Map.of(
+                "rerankScore", 0.65, "rerankModel", "ops-bge-reranker", "source", "deployment.md"), 0.4);
+
+        List<RetrievalHitResponse> hits = service.toHits(List.of(document), "Elasticsearch 怎么部署", 5);
+
+        assertThat(hits).singleElement().satisfies(hit -> {
+            assertThat(hit.getSource()).isEqualTo("deployment.md");
+            assertThat(hit.getScore()).isEqualTo(0.65);
+        });
+        verifyNoInteractions(embeddingModel, hybridRetriever);
+        assertThat(document.getScore()).isEqualTo(0.4);
+    }
+
+    @Test
+    @DisplayName("短技术词精确命中时，低于整段语义阈值也保留来源和真实分数")
+    void toHits_shortTopicKeepsExactMatchesBelowSemanticThreshold() {
+        List<Document> docs = List.of(
+                doc("deployment", "MySQL 地址为 localhost:23306，ES 为 localhost:9200。", Map.of()),
+                doc("substring", "resources and services deployment", Map.of()),
+                doc("title", "快照仓库备份和恢复步骤", Map.of("title", "ES 运维手册")),
+                doc("section", "检查索引状态", Map.of("section", "部署 > es配置")));
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(IntStream.range(0, 5)
+                .mapToObj(index -> Embedding.from(index == 0
+                        ? new float[]{1, 0} : new float[]{0.6f, 0.8f})).toList()));
+
+        List<RetrievalHitResponse> hits = service.toHits(docs, " es ", 5);
+
+        assertThat(hits).hasSize(3);
+        assertThat(hits.get(0).getSnippet()).contains("<mark>ES</mark>");
+        assertThat(hits.get(1).getTitle()).isEqualTo("ES 运维手册");
+        assertThat(hits.get(2).getSection()).isEqualTo("部署 > es配置");
+        assertThat(hits).allSatisfy(hit ->
+                assertThat(hit.getScore()).isCloseTo(0.6, Offset.offset(0.000001)));
+        assertThat(docs).allSatisfy(doc -> assertThat(doc.getScore()).isNull());
+    }
+
+    @Test
+    @DisplayName("技术词规则支持大小写和其他缩写，不因完整问题包含技术词而放行无关来源")
+    void toHits_exactTopicDoesNotBypassFullQuestionValidation() {
+        Document doc = doc("cpu", "CPU 使用率排查", Map.of());
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(
+                Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0, 1}))));
+
+        assertThat(service.toHits(List.of(doc), "cpu", 5)).hasSize(1);
+        assertThat(service.toHits(List.of(doc), "CPU 如何制作红烧肉", 5)).isEmpty();
+        assertThat(service.toHits(List.of(doc), "XYZ", 5)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("向量校验不可用时只保留技术词明确匹配的来源，不沿用 BM25 分数")
+    void toHits_shortTopicKeepsOnlyExactEvidenceWhenEmbeddingFails() {
+        List<Document> docs = List.of(
+                new Document("es", "ES 使用快照仓库备份", Map.of(), 15.0),
+                new Document("other", "resources and services", Map.of(), 20.0),
+                doc("filename", "MySQL 连接池排查", Map.of("source", "es.md")));
+        when(embeddingModel.embedAll(anyList())).thenThrow(new IllegalStateException("模拟模型不可用"));
+
+        List<RetrievalHitResponse> hits = service.toHits(docs, "ES", 5);
+
+        assertThat(hits).singleElement().satisfies(hit -> {
+            assertThat(hit.getSnippet()).contains("<mark>ES</mark>");
+            assertThat(hit.getScore()).isNull();
+        });
+        assertThat(docs.get(0).getScore()).isEqualTo(15.0);
+        verifyNoInteractions(hybridRetriever);
+    }
+
+    @Test
+    @DisplayName("检索测试中输入 es 能保留项目内置部署文档的来源，且遵守 topK")
+    void test_esKeepsBuiltinDeploymentSource() throws Exception {
+        String text = new ClassPathResource("knowledge/04-部署手册.md")
+                .getContentAsString(StandardCharsets.UTF_8);
+        when(hybridRetriever.retrieve("es", 1)).thenReturn(List.of(
+                doc("deployment", text, Map.of("source", "04-部署手册.md", "title", "部署手册")),
+                doc("faq", "ES 使用 9200 端口", Map.of("source", "08-常见问题FAQ.md"))));
+        when(embeddingModel.embedAll(anyList())).thenReturn(Response.from(List.of(
+                Embedding.from(new float[]{1, 0}), Embedding.from(new float[]{0.6f, 0.8f}),
+                Embedding.from(new float[]{0.6f, 0.8f}))));
+
+        RetrievalTestResponse result = service.test(req("es", 1, null));
+
+        assertThat(result.getCount()).isEqualTo(1);
+        assertThat(result.getHits()).singleElement().satisfies(hit -> {
+            assertThat(hit.getSource()).isEqualTo("04-部署手册.md");
+            assertThat(hit.getSnippet()).contains("<mark>ES</mark>");
+            assertThat(hit.getScore()).isCloseTo(0.6, Offset.offset(0.000001));
+        });
+    }
+
+    @Test
+    @DisplayName("短技术词摘要高亮使用完整词边界")
+    void highlight_shortTopicSkipsEnglishSubstrings() {
+        assertThat(service.highlight("Desktop resources，ES部署说明", "es"))
+                .isEqualTo("Desktop resources，<mark>ES</mark>部署说明");
+        assertThat(service.highlight("Desktop resources", "es"))
+                .isEqualTo("Desktop resources");
     }
 
     /**

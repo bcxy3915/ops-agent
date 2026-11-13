@@ -23,7 +23,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 /**
  * DashScopeReranker 单元测试
- * 覆盖：重排成功按 index 排序 / 空文档 / 接口失败降级（重试后）/ 响应解析失败返回原文 / 重试生效
+ * 覆盖：精排评分和过滤 / 空文档 / 接口失败返回空知识 / 非法响应 / 数量上限
  */
 @DisplayName("DashScope Reranker")
 class DashScopeRerankerTest {
@@ -58,7 +58,7 @@ class DashScopeRerankerTest {
         server.expect(requestTo(API_URL))
                 .andExpect(header("Authorization", "Bearer sk-test"))
                 .andRespond(withSuccess(
-                        "{\"output\":{\"results\":[{\"index\":1},{\"index\":0}]}}",
+                        "{\"output\":{\"results\":[{\"index\":1,\"relevance_score\":0.95},{\"index\":0,\"relevance_score\":0.6}]}}",
                         MediaType.APPLICATION_JSON));
 
         List<Document> result = reranker.rerank("q", List.of(doc("a"), doc("b")), 2);
@@ -75,7 +75,7 @@ class DashScopeRerankerTest {
     }
 
     @Test
-    @DisplayName("rerank：接口 500 时自动重试后降级为不重排截断")
+    @DisplayName("rerank：接口 500 时自动重试后返回空知识")
     void rerank_apiFailureFallsBack() {
         // 默认重试 2 次：两次都失败后降级
         server.expect(requestTo(API_URL)).andRespond(withServerError());
@@ -83,32 +83,39 @@ class DashScopeRerankerTest {
 
         List<Document> result = reranker.rerank("q", List.of(doc("a"), doc("b"), doc("c")), 2);
 
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).getText()).isEqualTo("a");
+        assertThat(result).isEmpty();
     }
 
     @Test
-    @DisplayName("rerank：响应非 JSON 时返回原文")
+    @DisplayName("rerank：响应非 JSON 时返回空知识")
     void rerank_invalidResponseReturnsOriginals() {
         server.expect(requestTo(API_URL))
                 .andRespond(withSuccess("not json", MediaType.APPLICATION_JSON));
 
         List<Document> result = reranker.rerank("q", List.of(doc("a"), doc("b")), 2);
 
-        assertThat(result).hasSize(2);
+        assertThat(result).isEmpty();
     }
 
     @Test
-    @DisplayName("rerank：成功路径按服务端 results 原样返回（客户端不额外截断）")
+    @DisplayName("rerank：服务端超额返回时客户端仍遵守 topN")
     void rerank_topNLimit() {
         server.expect(requestTo(API_URL))
                 .andRespond(withSuccess(
-                        "{\"output\":{\"results\":[{\"index\":0},{\"index\":1},{\"index\":2}]}}",
+                        "{\"output\":{\"results\":[{\"index\":0,\"relevance_score\":0.8},{\"index\":1,\"relevance_score\":0.9},{\"index\":2,\"relevance_score\":0.7}]}}",
                         MediaType.APPLICATION_JSON));
 
         List<Document> result = reranker.rerank("q", List.of(doc("a"), doc("b"), doc("c")), 2);
 
-        // 客户端不截断，原样返回服务端 results
-        assertThat(result).hasSize(3);
+        assertThat(result).extracting(Document::getText).containsExactly("b", "a");
+    }
+
+    @Test
+    void rerank_unrelatedCandidatesReturnEmpty() {
+        server.expect(requestTo(API_URL)).andRespond(withSuccess("""
+                {"output":{"results":[{"index":0,"relevance_score":0.05},{"index":1,"relevance_score":0.03}]}}
+                """, MediaType.APPLICATION_JSON));
+        assertThat(reranker.rerank("红烧肉怎么做", List.of(doc("ES 部署"), doc("MySQL 连接池")), 5)).isEmpty();
+        server.verify();
     }
 }
